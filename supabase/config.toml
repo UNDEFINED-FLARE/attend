@@ -1,0 +1,15 @@
+# Minimal Supabase CLI config. `supabase link --project-ref <ref>` then
+# `supabase db push` applies supabase/migrations in order.
+project_id = "uniattend"
+
+[auth]
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000/auth/callback"]
+# Email confirmation must stay ON: student/lecturer linking trusts confirmed emails only.
+enable_signup = true
+
+[auth.email]
+enable_confirmations = true
+
+[functions.paystack-webhook]
+verify_jwt = false

@@ -1,0 +1,9 @@
+{
+  "name": "UniAttend",
+  "short_name": "UniAttend",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#f6f8fb",
+  "theme_color": "#0b2545",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

@@ -1,0 +1,173 @@
+"use server";
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { requireRole } from "@/lib/auth";
+import { csvObjects } from "@/lib/csv";
+
+type S = { error?: string; ok?: string } | undefined;
+const uuid = z.string().uuid();
+const optUuid = z.union([uuid, z.literal("")]).transform((v) => v || null);
+// "" must be tested first: z.coerce.number() would turn it into 0.
+const optNum = z.union([z.literal(""), z.coerce.number()]).transform((v) => (v === "" ? null : v));
+
+// Every write below runs as the signed-in admin through RLS. The institution id
+// comes from requireRole(), i.e. from the admin's own role row, not the form.
+async function ctx() {
+  return requireRole("institution_admin");
+}
+
+function fail(e: { message: string; code?: string } | null): S | null {
+  if (!e) return null;
+  if (e.code === "23505") return { error: "That already exists." };
+  if (e.code === "23503") return { error: "That refers to something that does not exist in your institution." };
+  return { error: e.message };
+}
+
+export async function addFaculty(_: S, f: FormData): Promise<S> {
+  const p = z.object({ name: z.string().trim().min(2), code: z.string().trim().toUpperCase().min(1).max(20) }).safeParse(Object.fromEntries(f));
+  if (!p.success) return { error: p.error.issues[0].message };
+  const { supabase, institutionId } = await ctx();
+  const { error } = await supabase.from("faculties").insert({ institution_id: institutionId, ...p.data });
+  revalidatePath("/admin/structure");
+  return fail(error) ?? { ok: "Faculty added." };
+}
+
+export async function addDepartment(_: S, f: FormData): Promise<S> {
+  const p = z.object({ faculty_id: uuid, name: z.string().trim().min(2), code: z.string().trim().toUpperCase().min(1).max(20) }).safeParse(Object.fromEntries(f));
+  if (!p.success) return { error: p.error.issues[0].message };
+  const { supabase, institutionId } = await ctx();
+  const { error } = await supabase.from("departments").insert({ institution_id: institutionId, ...p.data });
+  revalidatePath("/admin/structure");
+  return fail(error) ?? { ok: "Department added." };
+}
+
+export async function addVenue(_: S, f: FormData): Promise<S> {
+  const p = z.object({
+    name: z.string().trim().min(2).max(120),
+    code: z.string().trim().max(30),
+    capacity: optNum,
+    lat: z.coerce.number().min(-90).max(90),
+    lng: z.coerce.number().min(-180).max(180),
+    radius_m: z.coerce.number().int().min(5).max(2000),
+    polygon: z.string().trim().max(20000),
+  }).safeParse(Object.fromEntries(f));
+  if (!p.success) return { error: `Check the venue details: ${p.error.issues[0].path.join(".")} ${p.error.issues[0].message}` };
+  let polygon: [number, number][] | null = null;
+  if (p.data.polygon) {
+    const parsed = z.array(z.tuple([z.number().min(-90).max(90), z.number().min(-180).max(180)])).min(3).max(200)
+      .safeParse((() => { try { return JSON.parse(p.data.polygon); } catch { return null; } })());
+    if (!parsed.success) return { error: "Boundary must be a JSON list of at least 3 [lat, lng] points." };
+    polygon = parsed.data;
+  }
+  const { supabase, institutionId } = await ctx();
+  const { error } = await supabase.from("venues").insert({
+    institution_id: institutionId, name: p.data.name, code: p.data.code || null, capacity: p.data.capacity,
+    lat: p.data.lat, lng: p.data.lng, radius_m: p.data.radius_m, polygon,
+  });
+  revalidatePath("/admin/structure");
+  return fail(error) ?? { ok: "Venue added." };
+}
+
+export async function addModule(_: S, f: FormData): Promise<S> {
+  const p = z.object({
+    code: z.string().trim().toUpperCase().min(2).max(20), title: z.string().trim().min(2).max(200),
+    department_id: optUuid, min_attendance_pct: optNum,
+  }).safeParse(Object.fromEntries(f));
+  if (!p.success) return { error: p.error.issues[0].message };
+  const { supabase, institutionId } = await ctx();
+  const { error } = await supabase.from("modules").insert({ institution_id: institutionId, ...p.data });
+  revalidatePath("/admin/modules");
+  return fail(error) ?? { ok: "Module created." };
+}
+
+export async function assignLecturer(_: S, f: FormData): Promise<S> {
+  const p = z.object({ module_id: uuid, lecturer_id: uuid, role: z.enum(["primary", "assistant"]) }).safeParse(Object.fromEntries(f));
+  if (!p.success) return { error: "Choose a module and a lecturer." };
+  const { supabase, institutionId } = await ctx();
+  const { error } = await supabase.from("lecturer_assignments").insert({ institution_id: institutionId, ...p.data });
+  revalidatePath("/admin/modules");
+  return fail(error) ?? { ok: "Lecturer assigned." };
+}
+
+export async function addLecturer(_: S, f: FormData): Promise<S> {
+  const p = z.object({
+    staff_number: z.string().trim().min(1).max(32), full_name: z.string().trim().min(2).max(200),
+    email: z.string().trim().toLowerCase().email(), department_id: optUuid,
+  }).safeParse(Object.fromEntries(f));
+  if (!p.success) return { error: p.error.issues[0].message };
+  const { supabase, institutionId } = await ctx();
+  const { error } = await supabase.from("lecturers").insert({ institution_id: institutionId, ...p.data });
+  revalidatePath("/admin/people");
+  return fail(error) ?? { ok: "Lecturer added. They get access when they sign up with that email." };
+}
+
+export async function importStudents(_: S, f: FormData): Promise<S> {
+  const file = f.get("file");
+  if (!(file instanceof File) || file.size === 0) return { error: "Choose a CSV file." };
+  if (file.size > 5 * 1024 * 1024) return { error: "The file is larger than 5 MB. Split it and import in parts." };
+  if (!/\.csv$/i.test(file.name)) return { error: "Upload a .csv file (in Excel: File → Save As → CSV UTF-8)." };
+  const rows = csvObjects(await file.text());
+  if (!rows.length) return { error: "The file has no rows." };
+  if (!("student_number" in rows[0]) || !("full_name" in rows[0])) {
+    return { error: "The first row must have columns student_number and full_name (optional: email, module_code)." };
+  }
+  const { supabase, institutionId } = await ctx();
+  const { data, error } = await supabase.rpc("import_students", { p_inst: institutionId, p_rows: rows });
+  if (error) return { error: error.message };
+  const r = data as { inserted: number; updated: number; enrolled: number; errors: { row: number; error: string }[] };
+  revalidatePath("/admin/people");
+  const errs = r.errors.slice(0, 8).map((e) => `row ${e.row + 1}: ${e.error}`).join("; ");
+  const msg = `${r.inserted} added, ${r.updated} updated, ${r.enrolled} enrolments.`;
+  return r.errors.length ? { error: `${msg} ${r.errors.length} rows skipped — ${errs}${r.errors.length > 8 ? "…" : ""}` } : { ok: msg };
+}
+
+export async function grantAdmin(_: S, f: FormData): Promise<S> {
+  const email = z.string().trim().email().safeParse(f.get("email"));
+  if (!email.success) return { error: "Enter an email." };
+  const { supabase, institutionId } = await ctx();
+  const { error } = await supabase.rpc("grant_role", { p_inst: institutionId, p_email: email.data, p_role: "institution_admin" });
+  revalidatePath("/admin/people");
+  return fail(error) ?? { ok: "Administrator added." };
+}
+
+export async function saveSettings(_: S, f: FormData): Promise<S> {
+  const bool = z.preprocess((v) => v === "on", z.boolean());
+  const p = z.object({
+    min_attendance_pct: z.coerce.number().int().min(0).max(100),
+    late_after_minutes: z.coerce.number().int().min(0).max(240),
+    require_qr: bool, allow_manual_code: bool, require_gps: bool,
+    gps_default_radius_m: z.coerce.number().int().min(10).max(2000),
+    gps_max_accuracy_m: z.coerce.number().int().min(10).max(5000),
+    accept_score: z.coerce.number().int().min(0).max(100),
+    review_score: z.coerce.number().int().min(0).max(100),
+    retention_days: z.coerce.number().int().min(30).max(3650),
+  }).safeParse({
+    ...Object.fromEntries(f),
+    // unchecked boxes are absent from FormData
+    require_qr: f.get("require_qr"), allow_manual_code: f.get("allow_manual_code"), require_gps: f.get("require_gps"),
+  });
+  if (!p.success) return { error: `${p.error.issues[0].path.join(".")}: ${p.error.issues[0].message}` };
+  if (p.data.review_score > p.data.accept_score) return { error: "The review threshold cannot be above the accept threshold." };
+  const { supabase, institutionId } = await ctx();
+  const { error } = await supabase.from("institution_settings").update(p.data).eq("institution_id", institutionId);
+  revalidatePath("/admin/settings");
+  return fail(error) ?? { ok: "Policy saved." };
+}
+
+export async function saveBranding(_: S, f: FormData): Promise<S> {
+  const p = z.object({
+    name: z.string().trim().min(3).max(200),
+    brand_primary: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    student_number_pattern: z.string().trim().max(100),
+  }).safeParse(Object.fromEntries(f));
+  if (!p.success) return { error: p.error.issues[0].message };
+  if (p.data.student_number_pattern) {
+    try { new RegExp(p.data.student_number_pattern); } catch { return { error: "Student number format is not a valid pattern." }; }
+  }
+  const { supabase, institutionId } = await ctx();
+  const { error } = await supabase.from("institutions").update({
+    name: p.data.name, brand_primary: p.data.brand_primary, student_number_pattern: p.data.student_number_pattern || null,
+  }).eq("id", institutionId);
+  revalidatePath("/admin", "layout");
+  return fail(error) ?? { ok: "Saved." };
+}
