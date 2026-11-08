@@ -10,6 +10,7 @@ export type Verdict = {
   reasons: string[];
   module_code?: string;
   session_title?: string;
+  venue?: VenueShape | null;
 };
 
 const Sample = z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180), accuracy: z.number().positive().max(100_000) });
@@ -33,7 +34,17 @@ export async function checkIn(raw: z.input<typeof Input>): Promise<Verdict | { e
   });
   if (error) return { error: error.message };
   revalidatePath("/student");
-  return data as Verdict;
+  return { ...(data as Verdict), venue: await venueFor(supabase, p.data.session, p.data.code) };
+}
+
+export type VenueShape = { name: string; lat: number | null; lng: number | null; radius_m: number | null; polygon: [number, number][] | null };
+
+// For the result map only. RLS lets an enrolled student read their session and venue.
+async function venueFor(supabase: Awaited<ReturnType<typeof supabaseServer>>, session: string | null, code: string | null) {
+  let q = supabase.from("class_sessions").select("venues(name, lat, lng, radius_m, polygon)").order("opens_at", { ascending: false }).limit(1);
+  q = session ? q.eq("id", session) : q.eq("join_code", code ?? "").eq("status", "open");
+  const { data } = await q.maybeSingle();
+  return (data?.venues as unknown as VenueShape | null) ?? null;
 }
 
 export async function dispute(_: unknown, form: FormData) {

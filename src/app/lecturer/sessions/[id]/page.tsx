@@ -4,6 +4,8 @@ import { ActionForm, Submit } from "@/components/form";
 import { Badge, Card, CardTitle, Field, Input, PageHeader, Select, Stat, Table, Td, when } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { closeSession, override } from "../../actions";
+import { VenueMap } from "@/components/map/venue-map";
+import type { LatLng } from "@/lib/campuses";
 import { LiveQr, RealtimeRefresh } from "./live";
 
 type Rec = { student_id: string; status: string; score: number | null; checked_in_at: string | null;
@@ -13,7 +15,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
   const { id } = await params;
   const { supabase } = await requireRole("lecturer");
   const { data: s } = await supabase.from("class_sessions")
-    .select("id, title, status, join_code, opens_at, closes_at, late_after, require_gps, module_id, modules(code, title), venues(name)")
+    .select("id, title, status, join_code, opens_at, closes_at, late_after, require_gps, module_id, modules(code, title), venues(name, lat, lng, radius_m, polygon)")
     .eq("id", id).maybeSingle();
   if (!s) notFound();
   const [{ data: enrolled }, { data: recs }] = await Promise.all([
@@ -26,13 +28,14 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
   const count = (st: string) => (recs ?? []).filter((r) => r.status === st).length;
   const mod = s.modules as unknown as { code: string; title: string };
   const open = s.status === "open";
+  const venue = s.venues as unknown as { name: string; lat: number | null; lng: number | null; radius_m: number | null; polygon: LatLng[] | null } | null;
 
   return (
     <>
       <RealtimeRefresh session={id} />
       <Link href={`/lecturer/modules/${s.module_id}`} className="text-sm text-info hover:underline">← {mod.code}</Link>
       <PageHeader title={`${mod.code} · ${s.title}`}
-        subtitle={<>{(s.venues as unknown as { name: string } | null)?.name ?? "No venue"} · opened {when(s.opens_at)} · late after {when(s.late_after)}
+        subtitle={<>{venue?.name ?? "No venue"} · opened {when(s.opens_at)} · late after {when(s.late_after)}
           {!s.require_gps && " · location check off"}</>}
         action={open && (
           <form action={closeSession}>
@@ -44,6 +47,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
       <div className="grid gap-6 lg:grid-cols-[minmax(0,360px)_1fr]">
         <div className="space-y-4">
           {open ? <LiveQr session={id} /> : <Card><Badge status={s.status} /> <span className="ml-2 text-sm text-muted">This session is {s.status}.</span></Card>}
+          {venue && (venue.polygon || venue.lat != null) && <VenueMap venue={venue} height={220} />}
           <div className="grid grid-cols-2 gap-3">
             <Stat label="Present" value={count("present")} />
             <Stat label="Late" value={count("late")} />

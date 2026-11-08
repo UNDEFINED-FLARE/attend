@@ -2,6 +2,7 @@ import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
+import { getUserWithRetry, SupabaseUnreachable } from "@/lib/supabase/resilient";
 import { supabaseServer } from "@/lib/supabase/server";
 
 export type Role = "super_admin" | "institution_admin" | "lecturer" | "student";
@@ -26,10 +27,15 @@ export const INST_COOKIE = "ua_inst";
 /** The signed-in user and their active roles, read from the database (never from the client). */
 export const getSession = cache(async () => {
   const supabase = await supabaseServer();
-  const { data } = await supabase.auth.getUser();
-  if (!data.user) return null;
-  const { data: roles } = await supabase.rpc("my_roles");
-  return { user: data.user, roles: (roles ?? []) as RoleRow[], supabase };
+  const { user, unreachable } = await getUserWithRetry(supabase);
+  if (unreachable) throw new SupabaseUnreachable();
+  if (!user) return null;
+  // A failed roles lookup must not look like "no roles" (that would send an
+  // admin to onboarding), so retry once and otherwise report the failure.
+  let res = await supabase.rpc("my_roles");
+  if (res.error) res = await supabase.rpc("my_roles");
+  if (res.error) throw new SupabaseUnreachable();
+  return { user, roles: (res.data ?? []) as RoleRow[], supabase };
 });
 
 /**

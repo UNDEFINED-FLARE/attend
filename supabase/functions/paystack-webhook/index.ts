@@ -17,6 +17,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const SECRET = Deno.env.get("PAYSTACK_SECRET_KEY") ?? "";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
   auth: { persistSession: false },
+  db: { schema: "uniattend" },
 });
 
 async function hmacSha512Hex(key: string, body: string) {

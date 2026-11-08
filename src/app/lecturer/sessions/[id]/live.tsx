@@ -66,7 +66,7 @@ export function RealtimeRefresh({ session }: { session: string }) {
     const sb = supabaseBrowser();
     let pending: ReturnType<typeof setTimeout> | null = null;
     const ch = sb.channel(`session-${session}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "attendance_records", filter: `session_id=eq.${session}` }, () => {
+      .on("postgres_changes", { event: "*", schema: "uniattend", table: "attendance_records", filter: `session_id=eq.${session}` }, () => {
         pending ??= setTimeout(() => { pending = null; router.refresh(); }, 800);
       })
       .subscribe();

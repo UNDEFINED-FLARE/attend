@@ -6,7 +6,7 @@ the signed token, the student's location relative to the mapped venue, and a pri
 Weak evidence sends a check-in to the lecturer for review. It is never turned into an absence automatically.
 
 - **Stack:** Next.js 15 (App Router, TypeScript, Tailwind v4) · Supabase (Postgres, Auth, Realtime, Edge Functions) · Vercel
-- **Tenancy:** every institution-owned row has `institution_id`; Row Level Security on every table; composite foreign keys stop a row pointing at another tenant's parent.
+- **Tenancy:** everything lives in the `uniattend` Postgres schema; every institution-owned row has `institution_id`; Row Level Security on every table; composite foreign keys stop a row pointing at another tenant's parent.
 - **Status:** see [`docs/02-ROADMAP.md`](docs/02-ROADMAP.md). The audit of the earlier versions is in [`docs/01-AUDIT.md`](docs/01-AUDIT.md).
 
 ## Run it locally
@@ -22,19 +22,24 @@ QR scanning and geolocation need HTTPS on phones. To test on a real phone, deplo
 
 ## Set up Supabase (once per environment)
 
-1. Create a project at supabase.com (region: `eu-west-1` or the closest available to South Africa).
-2. Apply the migrations, in order:
-   ```bash
-   npx supabase link --project-ref <your-ref>
-   npx supabase db push
-   ```
-   (Or paste each file in `supabase/migrations/` into the SQL editor, oldest first.)
+UniAttend installs into its own Postgres schema, **`uniattend`**. The pilot runs on the Supabase project
+named `acvosa` (`rbnnbmduwrvokhbkezyh`). The ACVOSA app that used to live in that project's `public` schema is
+removed with `supabase/remove-acvosa.sql`. The legacy UniAttend tables (`public.aa_*`) are kept there for a later
+import into the new schema.
+
+1. **Install the schema.** Open Supabase → SQL Editor, paste the whole of `supabase/install-uniattend.sql`, and run it.
+   It is a single transaction (all or nothing) and refuses to run twice. Regenerate it after changing migrations
+   with `npm run bundle:sql`. With CLI access, `npx supabase db push` applies the same migrations.
+2. **Expose the schema to the API.** Project Settings → API (Data API) → *Exposed schemas* → add `uniattend` → Save.
+   Without this, every app request fails with "schema must be one of the following".
 3. **Auth → Providers → Email:** keep *Confirm email* **on**. Student and lecturer access is linked to confirmed
    emails only. Turning confirmation off would let someone register with another person's address.
 4. **Auth → URL configuration:** Site URL = your deployment URL; add `<site>/auth/callback` to redirect URLs.
 5. **Make yourself super admin.** Sign up through the app first, then run this in the SQL editor:
    ```sql
-   insert into public.user_roles (user_id, role)
+   insert into uniattend.profiles (id, email) select id, email from auth.users where email = 'you@example.com'
+     on conflict do nothing;
+   insert into uniattend.user_roles (user_id, role)
    select id, 'super_admin' from auth.users where email = 'you@example.com';
    ```
 6. Optional, for payments: `npx supabase functions deploy paystack-webhook --no-verify-jwt` and

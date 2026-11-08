@@ -41,31 +41,47 @@ export async function addDepartment(_: S, f: FormData): Promise<S> {
   return fail(error) ?? { ok: "Department added." };
 }
 
-export async function addVenue(_: S, f: FormData): Promise<S> {
+export async function removeVenue(_: S, f: FormData): Promise<S> {
+  const id = uuid.safeParse(f.get("id"));
+  if (!id.success) return { error: "Choose a venue." };
+  const { supabase, institutionId } = await ctx();
+  // Soft delete: past sessions keep pointing at it, new sessions cannot pick it.
+  const { error } = await supabase.from("venues").update({ deleted_at: new Date().toISOString() })
+    .eq("id", id.data).eq("institution_id", institutionId);
+  revalidatePath("/admin/structure");
+  return fail(error) ?? { ok: "Venue removed." };
+}
+
+export async function saveVenue(_: S, f: FormData): Promise<S> {
   const p = z.object({
+    id: optUuid,
     name: z.string().trim().min(2).max(120),
     code: z.string().trim().max(30),
     capacity: optNum,
-    lat: z.coerce.number().min(-90).max(90),
-    lng: z.coerce.number().min(-180).max(180),
+    // "" would coerce to 0 (a point in the Atlantic), so require a value first.
+    lat: z.string().min(1, "place the venue on the map").pipe(z.coerce.number().min(-90).max(90)),
+    lng: z.string().min(1, "place the venue on the map").pipe(z.coerce.number().min(-180).max(180)),
     radius_m: z.coerce.number().int().min(5).max(2000),
-    polygon: z.string().trim().max(20000),
+    polygon: z.string().trim().max(40000),
   }).safeParse(Object.fromEntries(f));
   if (!p.success) return { error: `Check the venue details: ${p.error.issues[0].path.join(".")} ${p.error.issues[0].message}` };
   let polygon: [number, number][] | null = null;
   if (p.data.polygon) {
-    const parsed = z.array(z.tuple([z.number().min(-90).max(90), z.number().min(-180).max(180)])).min(3).max(200)
+    const parsed = z.array(z.tuple([z.number().min(-90).max(90), z.number().min(-180).max(180)])).min(3).max(500)
       .safeParse((() => { try { return JSON.parse(p.data.polygon); } catch { return null; } })());
-    if (!parsed.success) return { error: "Boundary must be a JSON list of at least 3 [lat, lng] points." };
+    if (!parsed.success) return { error: "The outline needs at least 3 corners." };
     polygon = parsed.data;
   }
   const { supabase, institutionId } = await ctx();
-  const { error } = await supabase.from("venues").insert({
-    institution_id: institutionId, name: p.data.name, code: p.data.code || null, capacity: p.data.capacity,
+  const row = {
+    name: p.data.name, code: p.data.code || null, capacity: p.data.capacity,
     lat: p.data.lat, lng: p.data.lng, radius_m: p.data.radius_m, polygon,
-  });
+  };
+  const { error } = p.data.id
+    ? await supabase.from("venues").update(row).eq("id", p.data.id).eq("institution_id", institutionId)
+    : await supabase.from("venues").insert({ institution_id: institutionId, ...row });
   revalidatePath("/admin/structure");
-  return fail(error) ?? { ok: "Venue added." };
+  return fail(error) ?? { ok: p.data.id ? "Venue updated." : "Venue added." };
 }
 
 export async function addModule(_: S, f: FormData): Promise<S> {

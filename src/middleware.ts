@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { getUserWithRetry } from "@/lib/supabase/resilient";
 
 const PUBLIC = ["/", "/login", "/signup", "/forgot-password", "/auth/callback", "/privacy"];
 
@@ -22,9 +23,11 @@ export async function middleware(request: NextRequest) {
       },
     },
   );
-  const { data } = await supabase.auth.getUser();
+  const { user, unreachable } = await getUserWithRetry(supabase);
   const path = request.nextUrl.pathname;
-  if (!data.user && !PUBLIC.includes(path)) {
+  // If Supabase is unreachable, let the request through: the page's own
+  // server-side check will show a connection error instead of a false logout.
+  if (!user && !unreachable && !PUBLIC.includes(path)) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", path);

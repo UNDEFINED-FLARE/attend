@@ -1,8 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
+// System font stack (see globals.css): no font download at build time or on a
+// student's phone, which matters on slow campus networks.
 
 export const metadata: Metadata = {
   title: { default: "UniAttend", template: "%s · UniAttend" },
@@ -15,7 +15,7 @@ export const viewport: Viewport = { themeColor: "#0b2545", width: "device-width"
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className={`${inter.variable} font-sans antialiased min-h-dvh`}>{children}</body>
+      <body className="font-sans antialiased min-h-dvh">{children}</body>
     </html>
   );
 }

@@ -2,7 +2,9 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, Input, Notice } from "@/components/ui";
-import { collectGps, deviceHash, parseScan } from "@/lib/evidence";
+import { VenueMap } from "@/components/map/venue-map";
+import { distanceM, insidePolygon, type LatLng } from "@/lib/campuses";
+import { collectGps, deviceHash, parseScan, type GpsSample } from "@/lib/evidence";
 import { checkIn, type Verdict } from "../actions";
 
 type Phase = "idle" | "scanning" | "locating" | "sending" | "done";
@@ -19,6 +21,7 @@ export function CheckIn({ initialSession, initialToken }: { initialSession: stri
   const [code, setCode] = useState("");
   const [result, setResult] = useState<Verdict | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fix, setFix] = useState<{ center: LatLng; accuracy: number } | null>(null);
   const scanner = useRef<{ stop: () => Promise<void> } | null>(null);
   const started = useRef(false);
 
@@ -28,6 +31,7 @@ export function CheckIn({ initialSession, initialToken }: { initialSession: stri
     setPhase("locating");
     // Location and device hash in parallel; the token is only ~20–40 s fresh.
     const [samples, device] = await Promise.all([collectGps(), deviceHash()]);
+    setFix(samples ? meanFix(samples) : null);
     setPhase("sending");
     const r = await checkIn({ ...scan, gps: samples ? { samples } : null, device });
     if ("error" in r) { setError(r.error); setPhase("idle"); return; }
@@ -80,6 +84,9 @@ export function CheckIn({ initialSession, initialToken }: { initialSession: stri
           <div className="space-y-3 p-5 text-sm">
             {result.status && <p>Recorded as <b>{result.status.replace("_", " ")}</b>{result.score != null && <> · confidence {result.score}/100</>}</p>}
             {result.outcome === "review" && <p>Your lecturer will confirm this. It does not count against you while it is pending.</p>}
+            {result.venue && (result.venue.polygon || result.venue.lat != null) && (
+              <VenueMap venue={result.venue} height={220} me={fix ? { ...fix, inside: isInside(fix, result.venue) } : null} />
+            )}
             {result.reasons.length > 0 && (
               <ul className="list-disc space-y-1 pl-5 text-muted">{result.reasons.map((r) => <li key={r}>{r}</li>)}</ul>
             )}
@@ -113,4 +120,18 @@ export function CheckIn({ initialSession, initialToken }: { initialSession: stri
       {phase === "done" && <Button variant="secondary" className="w-full" onClick={() => { setPhase("idle"); setResult(null); }}>Check in to another session</Button>}
     </div>
   );
+}
+
+function meanFix(s: GpsSample[]): { center: LatLng; accuracy: number } {
+  const w = s.map((x) => 1 / Math.max(9, x.accuracy ** 2));
+  const W = w.reduce((a, b) => a + b, 0);
+  return {
+    center: [s.reduce((a, x, i) => a + x.lat * w[i], 0) / W, s.reduce((a, x, i) => a + x.lng * w[i], 0) / W],
+    accuracy: Math.min(...s.map((x) => x.accuracy)),
+  };
+}
+
+function isInside(fix: { center: LatLng }, v: NonNullable<Verdict["venue"]>): boolean {
+  if (v.polygon && v.polygon.length >= 3) return insidePolygon(fix.center, v.polygon);
+  return v.lat != null && v.lng != null && distanceM(fix.center, [v.lat, v.lng]) <= (v.radius_m ?? 60);
 }

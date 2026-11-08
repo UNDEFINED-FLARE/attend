@@ -38,7 +38,7 @@ export async function signUp(_: FormState, form: FormData): Promise<FormState> {
     email: parsed.data.email,
     password: parsed.data.password,
     // full_name only. Roles are never taken from signup data.
-    options: { data: { full_name: parsed.data.full_name }, emailRedirectTo: `${env.siteUrl}/auth/callback` },
+    options: { data: { full_name: parsed.data.full_name, app: "uniattend" }, emailRedirectTo: `${env.siteUrl}/auth/callback` },
   });
   if (error) return { error: error.message };
   return { ok: "Check your inbox to confirm your email, then sign in." };

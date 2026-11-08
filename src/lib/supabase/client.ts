@@ -8,6 +8,7 @@ export function supabaseBrowser() {
   client ??= createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { db: { schema: "uniattend" } },
   );
   return client;
 }

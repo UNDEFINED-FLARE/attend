@@ -5,6 +5,9 @@ function required(name: string, value: string | undefined) {
   return value;
 }
 
+/** UniAttend's own Postgres schema; it shares the Supabase project with other apps. */
+export const DB_SCHEMA = "uniattend";
+
 export const env = {
   get url() {
     return required("NEXT_PUBLIC_SUPABASE_URL", process.env.NEXT_PUBLIC_SUPABASE_URL);

@@ -1,8 +1,8 @@
 -- UniAttend 0002 — attendance sessions, records, verification and disputes.
 
-create table public.class_sessions (
+create table uniattend.class_sessions (
   id              uuid primary key default gen_random_uuid(),
-  institution_id  uuid not null references public.institutions(id) on delete cascade,
+  institution_id  uuid not null references uniattend.institutions(id) on delete cascade,
   module_id       uuid not null,
   venue_id        uuid,
   lecturer_id     uuid,
@@ -21,25 +21,25 @@ create table public.class_sessions (
   updated_at      timestamptz not null default now(),
   unique (institution_id, id),
   check (closes_at > opens_at),
-  foreign key (institution_id, module_id)   references public.modules(institution_id, id) on delete cascade,
-  foreign key (institution_id, venue_id)    references public.venues(institution_id, id),
-  foreign key (institution_id, lecturer_id) references public.lecturers(institution_id, id)
+  foreign key (institution_id, module_id)   references uniattend.modules(institution_id, id) on delete cascade,
+  foreign key (institution_id, venue_id)    references uniattend.venues(institution_id, id),
+  foreign key (institution_id, lecturer_id) references uniattend.lecturers(institution_id, id)
 );
-create unique index class_sessions_open_code on public.class_sessions(institution_id, join_code) where status = 'open';
-create index class_sessions_module on public.class_sessions(module_id, opens_at desc);
-create trigger class_sessions_touch before update on public.class_sessions
-  for each row execute function public.touch_updated_at();
+create unique index class_sessions_open_code on uniattend.class_sessions(institution_id, join_code) where status = 'open';
+create index class_sessions_module on uniattend.class_sessions(module_id, opens_at desc);
+create trigger class_sessions_touch before update on uniattend.class_sessions
+  for each row execute function uniattend.touch_updated_at();
 
 -- The QR signing key. RLS is enabled with no policies, so no client can read it,
 -- and nothing but SECURITY DEFINER functions in this schema ever touch it.
-create table public.session_secrets (
-  session_id uuid primary key references public.class_sessions(id) on delete cascade,
+create table uniattend.session_secrets (
+  session_id uuid primary key references uniattend.class_sessions(id) on delete cascade,
   secret     bytea not null
 );
 
-create table public.attendance_records (
+create table uniattend.attendance_records (
   id              uuid primary key default gen_random_uuid(),
-  institution_id  uuid not null references public.institutions(id) on delete cascade,
+  institution_id  uuid not null references uniattend.institutions(id) on delete cascade,
   session_id      uuid not null,
   module_id       uuid not null,
   student_id      uuid not null,
@@ -58,20 +58,20 @@ create table public.attendance_records (
   -- The database, not the client, is what stops a second check-in.
   unique (session_id, student_id),
   unique (institution_id, id),
-  foreign key (institution_id, session_id) references public.class_sessions(institution_id, id) on delete cascade,
-  foreign key (institution_id, module_id)  references public.modules(institution_id, id) on delete cascade,
-  foreign key (institution_id, student_id) references public.students(institution_id, id) on delete cascade
+  foreign key (institution_id, session_id) references uniattend.class_sessions(institution_id, id) on delete cascade,
+  foreign key (institution_id, module_id)  references uniattend.modules(institution_id, id) on delete cascade,
+  foreign key (institution_id, student_id) references uniattend.students(institution_id, id) on delete cascade
 );
-create index attendance_records_student on public.attendance_records(student_id, created_at desc);
-create index attendance_records_module  on public.attendance_records(module_id, status);
-create index attendance_records_device  on public.attendance_records(session_id, device_hash);
-create trigger attendance_records_touch before update on public.attendance_records
-  for each row execute function public.touch_updated_at();
+create index attendance_records_student on uniattend.attendance_records(student_id, created_at desc);
+create index attendance_records_module  on uniattend.attendance_records(module_id, status);
+create index attendance_records_device  on uniattend.attendance_records(session_id, device_hash);
+create trigger attendance_records_touch before update on uniattend.attendance_records
+  for each row execute function uniattend.touch_updated_at();
 
 -- Every attempt, accepted or not. This is the audit trail and the rate-limit source.
-create table public.attendance_verification_events (
+create table uniattend.attendance_verification_events (
   id              uuid primary key default gen_random_uuid(),
-  institution_id  uuid not null references public.institutions(id) on delete cascade,
+  institution_id  uuid not null references uniattend.institutions(id) on delete cascade,
   session_id      uuid not null,
   student_id      uuid not null,
   outcome         text not null check (outcome in ('accepted','review','rejected','duplicate')),
@@ -80,27 +80,27 @@ create table public.attendance_verification_events (
   reasons         jsonb not null default '[]'::jsonb,
   token_step      bigint,
   created_at      timestamptz not null default now(),
-  foreign key (institution_id, session_id) references public.class_sessions(institution_id, id) on delete cascade,
-  foreign key (institution_id, student_id) references public.students(institution_id, id) on delete cascade
+  foreign key (institution_id, session_id) references uniattend.class_sessions(institution_id, id) on delete cascade,
+  foreign key (institution_id, student_id) references uniattend.students(institution_id, id) on delete cascade
 );
-create index verification_events_attempts on public.attendance_verification_events(student_id, session_id, created_at desc);
+create index verification_events_attempts on uniattend.attendance_verification_events(student_id, session_id, created_at desc);
 
 -- Minimal evidence. Privacy by design: we keep the *distance* and *accuracy*, not
 -- the student's coordinates, and the device *hash*, not any device identifier.
-create table public.attendance_evidence (
+create table uniattend.attendance_evidence (
   id              uuid primary key default gen_random_uuid(),
-  institution_id  uuid not null references public.institutions(id) on delete cascade,
+  institution_id  uuid not null references uniattend.institutions(id) on delete cascade,
   record_id       uuid not null,
   kind            text not null check (kind in ('qr','gps','device','acoustic','manual')),
   data            jsonb not null,
   created_at      timestamptz not null default now(),
-  foreign key (institution_id, record_id) references public.attendance_records(institution_id, id) on delete cascade
+  foreign key (institution_id, record_id) references uniattend.attendance_records(institution_id, id) on delete cascade
 );
-create index attendance_evidence_record on public.attendance_evidence(record_id);
+create index attendance_evidence_record on uniattend.attendance_evidence(record_id);
 
-create table public.attendance_disputes (
+create table uniattend.attendance_disputes (
   id              uuid primary key default gen_random_uuid(),
-  institution_id  uuid not null references public.institutions(id) on delete cascade,
+  institution_id  uuid not null references uniattend.institutions(id) on delete cascade,
   record_id       uuid not null,
   student_id      uuid not null,
   reason          text not null check (length(trim(reason)) between 10 and 2000),
@@ -110,17 +110,17 @@ create table public.attendance_disputes (
   resolution_note text,
   created_at      timestamptz not null default now(),
   resolved_at     timestamptz,
-  foreign key (institution_id, record_id)  references public.attendance_records(institution_id, id) on delete cascade,
-  foreign key (institution_id, student_id) references public.students(institution_id, id) on delete cascade
+  foreign key (institution_id, record_id)  references uniattend.attendance_records(institution_id, id) on delete cascade,
+  foreign key (institution_id, student_id) references uniattend.students(institution_id, id) on delete cascade
 );
-create unique index attendance_disputes_one_open on public.attendance_disputes(record_id) where status = 'open';
+create unique index attendance_disputes_one_open on uniattend.attendance_disputes(record_id) where status = 'open';
 
 -- Ambient acoustic layer (ported from the aa_* design). Fingerprints are transient:
 -- acoustic_submissions has RLS with no SELECT policy and rows are deleted after
 -- analysis by the analyse-window Edge Function, which holds the service role.
-create table public.acoustic_windows (
+create table uniattend.acoustic_windows (
   id              uuid primary key default gen_random_uuid(),
-  institution_id  uuid not null references public.institutions(id) on delete cascade,
+  institution_id  uuid not null references uniattend.institutions(id) on delete cascade,
   session_id      uuid not null,
   idx             int not null,
   seconds         int not null default 5 check (seconds between 3 and 15),
@@ -132,11 +132,11 @@ create table public.acoustic_windows (
   lecturer_bound  boolean not null default false,
   unique (session_id, idx),
   unique (institution_id, id),
-  foreign key (institution_id, session_id) references public.class_sessions(institution_id, id) on delete cascade
+  foreign key (institution_id, session_id) references uniattend.class_sessions(institution_id, id) on delete cascade
 );
 
-create table public.acoustic_submissions (
-  window_id   uuid not null references public.acoustic_windows(id) on delete cascade,
+create table uniattend.acoustic_submissions (
+  window_id   uuid not null references uniattend.acoustic_windows(id) on delete cascade,
   user_id     uuid not null references auth.users(id) on delete cascade,
   hash_count  int not null,
   hashes      int[] not null,

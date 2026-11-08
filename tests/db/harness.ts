@@ -9,7 +9,7 @@ import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 
 const MIGRATIONS = join(__dirname, "..", "..", "supabase", "migrations");
 
-const SUPABASE_SHIM = `
+export const SUPABASE_SHIM = `
   create role anon nologin;
   create role authenticated nologin;
   create role service_role nologin bypassrls;
@@ -44,13 +44,7 @@ export async function createDb(): Promise<Db> {
       throw new Error(`migration ${f} failed: ${(e as Error).message}`);
     }
   }
-  // Supabase's default table privileges; RLS is what actually restricts.
-  await db.exec(`
-    grant usage on schema public to anon, authenticated;
-    grant select, insert, update, delete on all tables in schema public to anon, authenticated;
-    grant usage on all sequences in schema public to anon, authenticated;
-  `);
-
+  
   db.admin = async (sql, params = []) => {
     await db.exec("reset role; select set_config('request.jwt.claim.sub', '', false);");
     return (await db.query(sql, params)).rows as never;
