@@ -16,6 +16,8 @@ export default function config(phase: string): NextConfig {
     // never corrupt a production build's .next folder (or the other way round).
     distDir: phase === PHASE_DEVELOPMENT_SERVER ? ".next-dev" : ".next",
     poweredByHeader: false,
+    // pdf.js loads its worker and data files at runtime; bundling breaks that.
+    serverExternalPackages: ["pdfjs-dist"],
     async headers() {
       return [{ source: "/(.*)", headers: securityHeaders }];
     },

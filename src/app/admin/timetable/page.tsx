@@ -5,6 +5,7 @@ import { Card, CardTitle, Field, Input, PageHeader, Select } from "@/components/
 import { DAYS, WeekGrid, type Slot } from "@/components/week-grid";
 import { requireRole } from "@/lib/auth";
 import { addTimetableSlots, removeTimetableSlot } from "../actions";
+import { PdfImport } from "./pdf-import";
 
 export const metadata = { title: "Timetable" };
 
@@ -28,6 +29,10 @@ export default async function Timetable({ searchParams }: { searchParams: Promis
   return (
     <>
       <PageHeader title="Timetable" subtitle="Classes added here appear on every enrolled student's timetable and campus map." />
+      <Card className="mb-6">
+        <CardTitle>Import a timetable PDF</CardTitle>
+        <PdfImport />
+      </Card>
       <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
         <Card className="h-fit">
           <CardTitle>Add a class</CardTitle>
