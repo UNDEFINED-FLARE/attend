@@ -40,7 +40,7 @@ export default async function History() {
       </Card>
 
       <div className="grid gap-6 md:grid-cols-2">
-        <Card>
+        <Card id="dispute" className="scroll-mt-24">
           <CardTitle>Dispute a record</CardTitle>
           {disputable.length === 0 ? <p className="text-sm text-muted">Nothing to dispute.</p> : (
             <ActionForm action={dispute} submit="Submit dispute" pending="Submitting…">

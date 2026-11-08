@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
@@ -9,12 +10,15 @@ const securityHeaders = [
   { key: "Permissions-Policy", value: "camera=(self), geolocation=(self), microphone=(self)" },
 ];
 
-const nextConfig: NextConfig = {
-  poweredByHeader: false,
-  async headers() {
-    return [{ source: "/(.*)", headers: securityHeaders }];
-  },
-  experimental: { serverActions: { bodySizeLimit: "6mb" } },
-};
-
-export default nextConfig;
+export default function config(phase: string): NextConfig {
+  return {
+    // `next dev` writes to its own folder, so a dev server left running can
+    // never corrupt a production build's .next folder (or the other way round).
+    distDir: phase === PHASE_DEVELOPMENT_SERVER ? ".next-dev" : ".next",
+    poweredByHeader: false,
+    async headers() {
+      return [{ source: "/(.*)", headers: securityHeaders }];
+    },
+    experimental: { serverActions: { bodySizeLimit: "6mb" } },
+  };
+}

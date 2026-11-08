@@ -21,7 +21,7 @@ export function LinkButton({ variant = "primary", className, ...p }: ComponentPr
 }
 
 export function Card({ className, ...p }: ComponentProps<"section">) {
-  return <section className={cx("rounded-xl border border-line bg-surface p-5 shadow-sm", className)} {...p} />;
+  return <section className={cx("rounded-2xl bg-surface p-5 shadow-card", className)} {...p} />;
 }
 
 export function CardTitle({ children, action }: { children: ReactNode; action?: ReactNode }) {

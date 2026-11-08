@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, Input, Notice } from "@/components/ui";
+import { Icon } from "@/components/icons";
 import { VenueMap } from "@/components/map/venue-map";
 import { distanceM, insidePolygon, type LatLng } from "@/lib/campuses";
 import { collectGps, deviceHash, parseScan, type GpsSample } from "@/lib/evidence";
@@ -102,9 +103,24 @@ export function CheckIn({ initialSession, initialToken }: { initialSession: stri
 
       {phase !== "done" && (
         <Card className="space-y-4">
-          <div id="qr-reader" className={phase === "scanning" ? "overflow-hidden rounded-lg" : "hidden"} />
+          <div className="text-center">
+            <p className="font-semibold">Scan the QR code</p>
+            <p className="text-xs text-muted">Hold your phone steady with the code on the projector inside the frame</p>
+          </div>
+          <div className="scan-frame mx-auto aspect-square w-full max-w-72 rounded-2xl bg-bg">
+            <span className="scan-corners" aria-hidden />
+            {phase === "scanning" && <span className="scan-line" aria-hidden />}
+            <div id="qr-reader" className={phase === "scanning" ? "size-full overflow-hidden rounded-2xl [&_video]:!size-full [&_video]:object-cover" : "hidden"} />
+            {phase !== "scanning" && (
+              <button type="button" onClick={startScan} disabled={busy}
+                className="flex size-full flex-col items-center justify-center gap-3 rounded-2xl text-muted transition hover:text-accent disabled:opacity-50">
+                <Icon name="qr" size={64} strokeWidth={1.2} />
+                <span className="text-sm font-medium">{busy ? "Working…" : "Tap to open camera"}</span>
+              </button>
+            )}
+          </div>
           {phase !== "scanning" ? (
-            <Button className="h-14 w-full text-base" onClick={startScan} disabled={busy}>Scan QR code</Button>
+            <Button className="h-14 w-full rounded-xl text-base" onClick={startScan} disabled={busy}><Icon name="scan" />Scan QR code</Button>
           ) : (
             <Button variant="secondary" className="w-full" onClick={() => { void scanner.current?.stop(); setPhase("idle"); }}>Cancel</Button>
           )}

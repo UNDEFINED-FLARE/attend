@@ -1,23 +1,27 @@
 @import "tailwindcss";
 
-/* UniAttend: navy and white. Institution branding overrides --brand at runtime. */
+/* UniAttend: navy and white, with a bright accent blue for highlights and charts.
+   Institution branding overrides --brand at runtime. */
 :root {
   --brand: #0b2545;
   --brand-ink: #ffffff;
-  --bg: #f6f8fb;
+  --accent: #2f6fed;
+  --bg: #f3f6fb;
   --surface: #ffffff;
   --ink: #0f1b2d;
-  --muted: #5b6b82;
-  --line: #dfe5ee;
-  --ok: #157f3d;
-  --warn: #a15c00;
-  --bad: #b42318;
-  --info: #1d4ed8;
+  --muted: #64748b;
+  --line: #e4e9f2;
+  --ok: #16a34a;
+  --warn: #d97706;
+  --bad: #dc2626;
+  --info: #2563eb;
+  --violet: #7c3aed;
 }
 
 @theme inline {
   --color-brand: var(--brand);
   --color-brand-ink: var(--brand-ink);
+  --color-accent: var(--accent);
   --color-bg: var(--bg);
   --color-surface: var(--surface);
   --color-ink: var(--ink);
@@ -27,7 +31,9 @@
   --color-warn: var(--warn);
   --color-bad: var(--bad);
   --color-info: var(--info);
+  --color-violet: var(--violet);
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --shadow-card: 0 1px 2px rgb(15 27 45 / 0.04), 0 4px 16px rgb(15 27 45 / 0.04);
 }
 
 body {
@@ -39,3 +45,16 @@ body {
   outline: 2px solid var(--info);
   outline-offset: 2px;
 }
+
+/* QR scanner: corner brackets around the camera view */
+.scan-frame { position: relative; }
+.scan-frame::before, .scan-frame::after, .scan-frame > .scan-corners::before, .scan-frame > .scan-corners::after {
+  content: ""; position: absolute; width: 36px; height: 36px; border: 4px solid var(--accent); z-index: 2; pointer-events: none;
+}
+.scan-frame::before { top: -2px; left: -2px; border-right: 0; border-bottom: 0; border-top-left-radius: 14px; }
+.scan-frame::after { top: -2px; right: -2px; border-left: 0; border-bottom: 0; border-top-right-radius: 14px; }
+.scan-frame > .scan-corners::before { bottom: -2px; left: -2px; border-right: 0; border-top: 0; border-bottom-left-radius: 14px; }
+.scan-frame > .scan-corners::after { bottom: -2px; right: -2px; border-left: 0; border-top: 0; border-bottom-right-radius: 14px; }
+.scan-line { position: absolute; left: 8%; right: 8%; height: 2px; background: var(--accent); box-shadow: 0 0 12px var(--accent); animation: scan 2.2s ease-in-out infinite; z-index: 2; }
+@keyframes scan { 0%, 100% { top: 12%; } 50% { top: 86%; } }
+@media (prefers-reduced-motion: reduce) { .scan-line { animation: none; top: 50%; } }

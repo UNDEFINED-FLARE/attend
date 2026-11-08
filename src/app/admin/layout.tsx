@@ -1,17 +1,19 @@
 import { Shell } from "@/components/shell";
 import { Notice } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
+import { shellData } from "@/lib/shell-data";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const { current, choices } = await requireRole("institution_admin");
+  const s = await requireRole("institution_admin");
+  const { current, choices } = s;
   return (
-    <Shell area="Administration" current={current} choices={choices} nav={[
-      { href: "/admin", label: "Overview" },
-      { href: "/admin/structure", label: "Faculties & venues" },
-      { href: "/admin/modules", label: "Modules" },
-      { href: "/admin/people", label: "Lecturers & students" },
-      { href: "/admin/settings", label: "Policy & branding" },
-      { href: "/admin/audit", label: "Audit log" },
+    <Shell area="Administration" current={current} choices={choices} {...await shellData(s)} nav={[
+      { href: "/admin", label: "Dashboard", icon: "dashboard" },
+      { href: "/admin/structure", label: "Venues & map", icon: "map" },
+      { href: "/admin/modules", label: "Modules", icon: "book" },
+      { href: "/admin/people", label: "People", icon: "users" },
+      { href: "/admin/settings", label: "Policy", icon: "settings", mobile: false },
+      { href: "/admin/audit", label: "Audit log", icon: "shield", mobile: false },
     ]}>
       {current.institution_status !== "active" && (
         <div className="mb-6"><Notice tone="warn">

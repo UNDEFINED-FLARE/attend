@@ -1,12 +1,14 @@
 import { Shell } from "@/components/shell";
 import { requireRole } from "@/lib/auth";
+import { shellData } from "@/lib/shell-data";
 
 export default async function SuperLayout({ children }: { children: React.ReactNode }) {
-  const { current } = await requireRole("super_admin");
+  const s = await requireRole("super_admin");
   return (
-    <Shell area="Platform" current={{ ...current, institution_name: "UniAttend platform" }} choices={[]} nav={[
-      { href: "/super", label: "Institutions" },
-      { href: "/super/plans", label: "Plans & pricing" },
+    <Shell area="Platform" current={{ ...s.current, institution_name: "Platform administration" }} choices={[]} {...await shellData(s)} nav={[
+      { href: "/super", label: "Institutions", icon: "building" },
+      { href: "/super/plans", label: "Plans & pricing", icon: "card" },
+      { href: "/notifications", label: "Alerts", icon: "bell" },
     ]}>{children}</Shell>
   );
 }
