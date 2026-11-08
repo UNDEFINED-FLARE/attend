@@ -2,6 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireRole } from "@/lib/auth";
+import { coveringRadius } from "@/lib/campuses";
 import { csvObjects, parseCsv } from "@/lib/csv";
 
 type S = { error?: string; ok?: string } | undefined;
@@ -233,4 +234,68 @@ export async function saveBranding(_: S, f: FormData): Promise<S> {
   }).eq("id", institutionId);
   revalidatePath("/admin", "layout");
   return fail(error) ?? { ok: "Saved." };
+}
+
+const DAY_NAMES = ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+export async function addTimetableSlots(_: S, f: FormData): Promise<S> {
+  const p = z.object({
+    module_id: uuid,
+    venue_id: optUuid,
+    kind: z.enum(["lecture", "tutorial", "practical", "test", "other"]),
+    starts_at: z.string().regex(/^\d{2}:\d{2}$/, "Choose a start time."),
+    ends_at: z.string().regex(/^\d{2}:\d{2}$/, "Choose an end time."),
+    group_name: z.string().trim().max(40),
+  }).safeParse(Object.fromEntries(f));
+  if (!p.success) return { error: p.error.issues[0].message };
+  if (p.data.ends_at <= p.data.starts_at) return { error: "The class must end after it starts." };
+  const days = f.getAll("weekday").map(Number).filter((d) => d >= 1 && d <= 7);
+  if (!days.length) return { error: "Tick at least one day." };
+  const { supabase, institutionId, user } = await ctx();
+  // One insert per day, so a clash on one day does not block the others.
+  const done: string[] = [], clashes: string[] = [];
+  for (const weekday of days) {
+    const { error } = await supabase.from("timetables").insert({
+      institution_id: institutionId, module_id: p.data.module_id, venue_id: p.data.venue_id, weekday,
+      starts_at: p.data.starts_at, ends_at: p.data.ends_at, kind: p.data.kind,
+      group_name: p.data.group_name || null, created_by: user.id,
+    });
+    if (error) clashes.push(error.message); else done.push(DAY_NAMES[weekday]);
+  }
+  revalidatePath("/admin/timetable");
+  if (!clashes.length) return { ok: `Added on ${done.join(", ")}. Enrolled students see it on their timetable now.` };
+  return { error: `${done.length ? `Added on ${done.join(", ")}. ` : ""}${clashes.join(" ")}` };
+}
+
+export async function removeTimetableSlot(f: FormData) {
+  const id = uuid.parse(f.get("id"));
+  const { supabase, institutionId } = await ctx();
+  await supabase.from("timetables").delete().eq("id", id).eq("institution_id", institutionId);
+  revalidatePath("/admin/timetable");
+}
+
+/** Auto-geofence: create many venues at once from building outlines picked on the map. */
+export async function addVenuesBulk(_: S, f: FormData): Promise<S> {
+  const Row = z.object({
+    name: z.string().trim().min(2).max(120),
+    polygon: z.array(z.tuple([z.number().min(-90).max(90), z.number().min(-180).max(180)])).min(3).max(500),
+  });
+  let parsed: z.infer<typeof Row>[];
+  try {
+    const r = z.array(Row).min(1).max(200).safeParse(JSON.parse(String(f.get("venues") ?? "[]")));
+    if (!r.success) return { error: "Tick at least one building with a name." };
+    parsed = r.data;
+  } catch { return { error: "Tick at least one building." }; }
+  const { supabase, institutionId } = await ctx();
+  const rows = parsed.map((v) => {
+    const c: [number, number] = [
+      +(v.polygon.reduce((a, p) => a + p[0], 0) / v.polygon.length).toFixed(6),
+      +(v.polygon.reduce((a, p) => a + p[1], 0) / v.polygon.length).toFixed(6),
+    ];
+    return { institution_id: institutionId, name: v.name, lat: c[0], lng: c[1], polygon: v.polygon, radius_m: coveringRadius(c, v.polygon) };
+  });
+  const { error } = await supabase.from("venues").insert(rows);
+  revalidatePath("/admin/structure");
+  revalidatePath("/admin/timetable");
+  return fail(error) ?? { ok: `${rows.length} venue${rows.length > 1 ? "s" : ""} created with their building outlines.` };
 }

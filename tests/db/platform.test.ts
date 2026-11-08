@@ -333,3 +333,36 @@ describe("commercial controls", () => {
     expect(r.import_students.errors.map((e) => e.row)).toEqual([2, 3, 4]);
   });
 });
+
+describe("timetables and the dashboard rollup", () => {
+  it("admin adds slots; a venue cannot be double-booked", async () => {
+    await db.as(u.adminA, `insert into uniattend.timetables (institution_id, module_id, venue_id, weekday, starts_at, ends_at)
+                           values ($1, $2, $3, 1, '08:00', '10:00')`, [id.instA, id.modA, id.venueA]);
+    await expect(db.as(u.adminA, `insert into uniattend.timetables (institution_id, module_id, venue_id, weekday, starts_at, ends_at)
+                           values ($1, $2, $3, 1, '09:00', '11:00')`, [id.instA, id.modA, id.venueA]))
+      .rejects.toThrow(/already booked on Monday from 08:00 to 10:00 for CSC101/);
+    // back-to-back is fine, and so is the same time on another day
+    await db.as(u.adminA, `insert into uniattend.timetables (institution_id, module_id, venue_id, weekday, starts_at, ends_at, kind)
+                           values ($1, $2, $3, 1, '10:00', '11:00', 'tutorial'), ($1, $2, $3, 2, '08:00', '10:00', 'practical')`,
+      [id.instA, id.modA, id.venueA]);
+  });
+
+  it("students see their module's timetable, not another institution's", async () => {
+    const mine = await db.as<{ kind: string }>(u.sA1, "select kind from uniattend.timetables order by weekday, starts_at");
+    expect(mine.map((r) => r.kind)).toEqual(["lecture", "tutorial", "practical"]);
+    expect(await db.as(u.sB1, "select * from uniattend.timetables where institution_id = $1", [id.instA])).toHaveLength(0);
+    await expect(db.as(u.sA1, `insert into uniattend.timetables (institution_id, module_id, weekday, starts_at, ends_at)
+                               values ($1, $2, 3, '08:00', '09:00')`, [id.instA, id.modA])).rejects.toThrow(/row-level security/);
+  });
+
+  it("dashboard rollup returns today's figures for the admin's own institution only", async () => {
+    const d = (await db.asOne<{ institution_dashboard: { today: { present: number }; daily: unknown[]; gps: { inside: number }; recent: unknown[] } }>(
+      u.adminA, "select uniattend.institution_dashboard($1)", [id.instA])).institution_dashboard;
+    expect(d.today.present).toBeGreaterThanOrEqual(2);
+    expect(d.daily).toHaveLength(14);
+    expect(d.gps.inside).toBeGreaterThanOrEqual(1);
+    expect(d.recent.length).toBeGreaterThan(0);
+    await expect(db.as(u.adminB, "select uniattend.institution_dashboard($1)", [id.instA])).rejects.toThrow(/admin only/);
+    await expect(db.as(u.sA1, "select uniattend.institution_dashboard($1)", [id.instA])).rejects.toThrow(/admin only/);
+  });
+});

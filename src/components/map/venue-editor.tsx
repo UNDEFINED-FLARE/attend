@@ -19,11 +19,12 @@ const TOOLS: [Tool, string, string][] = [
   ["centre", "Centre + radius", "Click the middle of the hall, then set the radius."],
 ];
 
-export function VenueEditor({ venues, institutionName, save, remove }: {
+export function VenueEditor({ venues, institutionName, save, remove, bulk }: {
   venues: Venue[];
   institutionName: string | null;
   save: (s: State, f: FormData) => Promise<State>;
   remove: (s: State, f: FormData) => Promise<State>;
+  bulk: (s: State, f: FormData) => Promise<State>;
 }) {
   const campuses = useMemo(() => campusesFor(institutionName), [institutionName]);
   const [campus, setCampus] = useState<Campus>(campuses[0]);
@@ -41,6 +42,17 @@ export function VenueEditor({ venues, institutionName, save, remove }: {
     if (r?.ok) setDraft(EMPTY);
     return r;
   }, undefined);
+
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [bulkResult, runBulk] = useActionState(async (s: State, f: FormData) => {
+    const r = await bulk(s, f);
+    if (r?.ok) setPicked(new Set());
+    return r;
+  }, undefined);
+  // Named buildings on this campus that are not already a venue.
+  const available = useMemo(() => (buildings ?? []).filter((b) => b.name &&
+    !venues.some((v) => (v.polygon?.length && distanceM(centroid(v.polygon), b.center) < 4) ||
+      v.name.trim().toLowerCase() === b.name!.trim().toLowerCase())), [buildings, venues]);
 
   const ref = useRef<HTMLDivElement>(null);
   const m = useLeaflet(ref, campus.center, campus.zoom, { scrollWheelZoom: true });
@@ -213,6 +225,39 @@ export function VenueEditor({ venues, institutionName, save, remove }: {
             {removed?.error && <Notice tone="bad">{removed.error}</Notice>}
           </form>
         )}
+
+        <details className="rounded-lg border border-line p-4" open={venues.length === 0}>
+          <summary className="cursor-pointer text-sm font-semibold">Auto-geofence this campus</summary>
+          <p className="mt-2 text-xs text-muted">
+            {buildings == null ? "Loading buildings from OpenStreetMap…" : available.length
+              ? `${available.length} named buildings here are not venues yet. Tick the lecture venues and create them all at once, outlines included.`
+              : "Every named building on this campus is already a venue. Use Draw outline for any others."}
+          </p>
+          {available.length > 0 && (
+            <form action={runBulk} className="mt-3 space-y-2">
+              <input type="hidden" name="venues" value={JSON.stringify(available.filter((b) => picked.has(b.id)).map((b) => ({ name: b.name, polygon: b.polygon })))} />
+              <label className="flex items-center gap-2 text-xs font-medium">
+                <input type="checkbox" className="size-4" checked={picked.size === available.length}
+                  onChange={(e) => setPicked(e.target.checked ? new Set(available.map((b) => b.id)) : new Set())} />
+                Select all
+              </label>
+              <div className="max-h-56 space-y-0.5 overflow-y-auto rounded-md bg-bg p-1">
+                {available.map((b) => (
+                  <label key={b.id} className="flex items-center gap-2 rounded px-2 py-1 text-sm hover:bg-surface"
+                    onMouseEnter={() => m?.map.panTo(b.center)}>
+                    <input type="checkbox" className="size-4" checked={picked.has(b.id)}
+                      onChange={(e) => setPicked((p) => { const n = new Set(p); if (e.target.checked) n.add(b.id); else n.delete(b.id); return n; })} />
+                    <span className="truncate">{b.name}</span>
+                  </label>
+                ))}
+              </div>
+              {bulkResult?.error && <Notice tone="bad">{bulkResult.error}</Notice>}
+              {bulkResult?.ok && <Notice tone="ok">{bulkResult.ok}</Notice>}
+              <Button type="submit" className="w-full" disabled={picked.size === 0}>Create {picked.size || ""} venue{picked.size === 1 ? "" : "s"}</Button>
+            </form>
+          )}
+          {bulkResult?.ok && available.length === 0 && <div className="mt-2"><Notice tone="ok">{bulkResult.ok}</Notice></div>}
+        </details>
       </div>
     </div>
   );

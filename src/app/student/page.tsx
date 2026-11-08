@@ -4,6 +4,8 @@ import { Icon, type IconName } from "@/components/icons";
 import { Badge, pct } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { greeting, timeOf } from "@/lib/stats";
+import { myTimetable, nowHHMM } from "@/lib/student-data";
+import { hhmm, todayWeekday } from "@/components/week-grid";
 
 export const metadata = { title: "Home" };
 
@@ -25,6 +27,8 @@ export default async function StudentHome() {
       .eq("institution_id", institutionId).order("created_at", { ascending: false }).limit(5),
   ]);
   const rows = ((data ?? []) as Row[]).filter((r) => r.institution_id === institutionId);
+  const now = nowHHMM();
+  const todaySlots = (await myTimetable(supabase, institutionId)).filter((t) => t.weekday === todayWeekday());
   const done = new Set((recent ?? []).map((r) => r.session_id));
   const live = (open ?? []).filter((s) => !done.has(s.id));
   const att = rows.reduce((a, r) => a + r.attended, 0), tot = rows.reduce((a, r) => a + r.attended + r.absent, 0);
@@ -95,9 +99,32 @@ export default async function StudentHome() {
       <div className="grid grid-cols-4 gap-3">
         <Quick href="/student/check-in" icon="scan" label="Check in" tone="text-accent bg-accent/10" />
         <Quick href="/student/history" icon="history" label="History" tone="text-ok bg-ok/10" />
-        <Quick href="/student/history#dispute" icon="flag" label="Dispute" tone="text-warn bg-warn/10" />
-        <Quick href="/notifications" icon="bell" label="Alerts" tone="text-violet bg-violet/10" />
+        <Quick href="/student/timetable" icon="calendar" label="Timetable" tone="text-warn bg-warn/10" />
+        <Quick href="/student/map" icon="map" label="Campus map" tone="text-violet bg-violet/10" />
       </div>
+
+      {/* Today */}
+      <section>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Today&apos;s classes</h2>
+          <Link href="/student/timetable" className="text-sm font-medium text-accent">Full timetable</Link>
+        </div>
+        {todaySlots.length === 0
+          ? <p className="rounded-2xl bg-surface p-5 text-sm text-muted shadow-card">No classes on your timetable today.</p>
+          : <div className="flex snap-x gap-3 overflow-x-auto pb-1">
+              {todaySlots.map((t) => {
+                const live = hhmm(t.starts_at) <= now && now < hhmm(t.ends_at), done = hhmm(t.ends_at) <= now;
+                return (
+                  <Link key={t.id} href="/student/map" className={`min-w-56 snap-start rounded-2xl bg-surface p-4 shadow-card ${done ? "opacity-60" : ""} ${live ? "ring-2 ring-accent" : ""}`}>
+                    <p className="text-xs font-semibold tabular-nums text-muted">{hhmm(t.starts_at)}–{hhmm(t.ends_at)}{live && <span className="ml-2 text-accent">now</span>}</p>
+                    <p className="mt-1 font-semibold" style={{ color: colorFor(t.code) }}>{t.code}</p>
+                    <p className="truncate text-sm">{t.title}</p>
+                    <p className="mt-1 flex items-center gap-1 text-xs text-muted"><Icon name="pin" size={13} />{t.venue ?? "No venue"} · {t.kind}</p>
+                  </Link>
+                );
+              })}
+            </div>}
+      </section>
 
       {/* Modules */}
       <section>

@@ -3,7 +3,7 @@ import { VenueEditor } from "@/components/map/venue-editor";
 import { Card, CardTitle, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import type { LatLng } from "@/lib/campuses";
-import { addDepartment, addFaculty, removeVenue, saveVenue } from "../actions";
+import { addDepartment, addFaculty, addVenuesBulk, removeVenue, saveVenue } from "../actions";
 
 export const metadata = { title: "Faculties & venues" };
 
@@ -22,7 +22,7 @@ export default async function Structure() {
 
       <Card className="mb-6">
         <CardTitle>Campus map & lecture venues</CardTitle>
-        <VenueEditor venues={venues} institutionName={current.institution_name} save={saveVenue} remove={removeVenue} />
+        <VenueEditor venues={venues} institutionName={current.institution_name} save={saveVenue} remove={removeVenue} bulk={addVenuesBulk} />
         <div className="mt-6">
           <Table head={["Venue", "Capacity", "Location check"]} empty="No venues yet. Pick a building on the map above.">
             {venues.map((v) => (
