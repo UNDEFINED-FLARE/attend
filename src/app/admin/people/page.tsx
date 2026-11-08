@@ -1,7 +1,8 @@
 import { ActionForm } from "@/components/form";
 import { Badge, Card, CardTitle, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
-import { addLecturer, grantAdmin, importStudents } from "../actions";
+import { addLecturer, addStudent, grantAdmin, importStudents, pasteStudents } from "../actions";
+import { StudentAdder } from "./student-adder";
 
 export const metadata = { title: "Lecturers & students" };
 
@@ -12,11 +13,12 @@ export default async function People({ searchParams }: { searchParams: Promise<{
   let students = supabase.from("students").select("id, student_number, full_name, email, user_id, status", { count: "exact" })
     .eq("institution_id", institutionId).is("deleted_at", null).order("student_number").limit(50);
   if (term) students = students.or(`student_number.ilike.%${term}%,full_name.ilike.%${term}%`);
-  const [{ data: lecturers }, { data: studentRows, count }, { data: departments }, { data: admins }] = await Promise.all([
+  const [{ data: lecturers }, { data: studentRows, count }, { data: departments }, { data: admins }, { data: modules }] = await Promise.all([
     supabase.from("lecturers").select("id, staff_number, full_name, email, user_id, status").eq("institution_id", institutionId).is("deleted_at", null).order("full_name"),
     students,
     supabase.from("departments").select("id, name").eq("institution_id", institutionId).is("deleted_at", null).order("name"),
     supabase.from("user_roles").select("id, user_id, status").eq("institution_id", institutionId).eq("role", "institution_admin"),
+    supabase.from("modules").select("code, title").eq("institution_id", institutionId).is("deleted_at", null).order("code"),
   ]);
   const { data: adminProfiles } = await supabase.from("profiles").select("id, full_name, email")
     .in("id", (admins ?? []).map((a) => a.user_id));
@@ -24,18 +26,11 @@ export default async function People({ searchParams }: { searchParams: Promise<{
 
   return (
     <>
-      <PageHeader title="Lecturers & students" />
+      <PageHeader title="Lecturers & students" subtitle="Add students one at a time, paste a list, or upload a CSV file." />
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
-          <CardTitle>Import students (CSV)</CardTitle>
-          <p className="mb-3 text-sm text-muted">
-            Columns: <code>student_number, full_name</code>, optional <code>email, module_code</code>. Re-importing updates
-            names and adds enrolments; it never creates duplicates. Students get access when they sign up with the listed
-            email (or a university email whose name part is their student number, once your domain is verified).
-          </p>
-          <ActionForm action={importStudents} submit="Import" pending="Importing…">
-            <Input type="file" name="file" accept=".csv,text/csv" required className="py-1.5" />
-          </ActionForm>
+          <CardTitle>Add students</CardTitle>
+          <StudentAdder modules={modules ?? []} addOne={addStudent} paste={pasteStudents} upload={importStudents} />
         </Card>
         <Card>
           <CardTitle>Add a lecturer</CardTitle>

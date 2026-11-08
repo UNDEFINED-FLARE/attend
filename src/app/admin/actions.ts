@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireRole } from "@/lib/auth";
-import { csvObjects } from "@/lib/csv";
+import { csvObjects, parseCsv } from "@/lib/csv";
 
 type S = { error?: string; ok?: string } | undefined;
 const uuid = z.string().uuid();
@@ -127,14 +127,61 @@ export async function importStudents(_: S, f: FormData): Promise<S> {
   if (!("student_number" in rows[0]) || !("full_name" in rows[0])) {
     return { error: "The first row must have columns student_number and full_name (optional: email, module_code)." };
   }
+  return runImport(rows as ImportRow[], 1); // +1: the header is line 1 of the file (columns checked above)
+}
+
+type ImportRow = { student_number: string; full_name: string; email?: string; module_code?: string };
+
+// All three ways of adding students (one form, a pasted list, a CSV file) go
+// through import_students(), so validation, de-duplication against existing
+// records, the student-number format and plan limits are identical.
+async function runImport(rows: ImportRow[], lineOffset: number, single = false): Promise<S> {
   const { supabase, institutionId } = await ctx();
   const { data, error } = await supabase.rpc("import_students", { p_inst: institutionId, p_rows: rows });
   if (error) return { error: error.message };
   const r = data as { inserted: number; updated: number; enrolled: number; errors: { row: number; error: string }[] };
   revalidatePath("/admin/people");
-  const errs = r.errors.slice(0, 8).map((e) => `row ${e.row + 1}: ${e.error}`).join("; ");
+  revalidatePath("/admin/modules");
+  if (single) {
+    if (r.errors.length) return { error: r.errors[0].error.replace(/^./, (c) => c.toUpperCase()) + "." };
+    const what = r.inserted ? "Student added" : "Student already existed; details updated";
+    return { ok: `${what}${r.enrolled ? ` and enrolled in ${r.enrolled} module${r.enrolled > 1 ? "s" : ""}` : ""}.` };
+  }
+  const errs = r.errors.slice(0, 8).map((e) => `line ${e.row + lineOffset}: ${e.error}`).join("; ");
   const msg = `${r.inserted} added, ${r.updated} updated, ${r.enrolled} enrolments.`;
-  return r.errors.length ? { error: `${msg} ${r.errors.length} rows skipped — ${errs}${r.errors.length > 8 ? "…" : ""}` } : { ok: msg };
+  return r.errors.length ? { error: `${msg} ${r.errors.length} skipped — ${errs}${r.errors.length > 8 ? "…" : ""}` } : { ok: msg };
+}
+
+export async function addStudent(_: S, f: FormData): Promise<S> {
+  const p = z.object({
+    student_number: z.string().trim().min(3, "Enter the student number.").max(32),
+    full_name: z.string().trim().min(2, "Enter the student's full name.").max(200),
+    email: z.union([z.literal(""), z.string().trim().toLowerCase().email("That email is not valid.")]),
+  }).safeParse({ student_number: f.get("student_number"), full_name: f.get("full_name"), email: f.get("email") ?? "" });
+  if (!p.success) return { error: p.error.issues[0].message };
+  const modules = f.getAll("module_code").map(String).filter(Boolean);
+  const base = { student_number: p.data.student_number, full_name: p.data.full_name, ...(p.data.email ? { email: p.data.email } : {}) };
+  // One row per module; identical details on each row, so they merge into one student.
+  const rows = modules.length ? modules.map((module_code) => ({ ...base, module_code })) : [base];
+  return runImport(rows, 0, true);
+}
+
+export async function pasteStudents(_: S, f: FormData): Promise<S> {
+  const text = String(f.get("list") ?? "").trim();
+  if (!text) return { error: "Paste at least one line." };
+  if (text.length > 1_000_000) return { error: "That list is too long. Split it, or upload a CSV file." };
+  // Excel copies cells as tab-separated; typed lists use commas.
+  const lines = parseCsv(text.includes("\t") ? text.replace(/\t/g, ",") : text);
+  const hasHeader = /student|number|name/i.test(lines[0]?.join(" ") ?? "") && !/\d{4,}/.test(lines[0]?.[0] ?? "");
+  const body = hasHeader ? lines.slice(1) : lines;
+  const defaultModule = String(f.get("module_code") ?? "").trim();
+  const rows: ImportRow[] = body.map(([number = "", name = "", email = "", module = ""]) => ({
+    student_number: number.trim(), full_name: name.trim(),
+    ...(email.trim() ? { email: email.trim() } : {}),
+    ...((module.trim() || defaultModule) ? { module_code: module.trim() || defaultModule } : {}),
+  }));
+  if (!rows.length) return { error: "No students found in the list." };
+  return runImport(rows, hasHeader ? 1 : 0);
 }
 
 export async function grantAdmin(_: S, f: FormData): Promise<S> {
