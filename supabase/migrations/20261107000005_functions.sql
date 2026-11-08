@@ -920,7 +920,10 @@ begin
     when module_code is not null and not exists (select 1 from uniattend.modules m
          where m.institution_id = p_inst and upper(m.code) = pg_temp._imp.module_code and m.deleted_at is null)
       then 'unknown module code ' || module_code
-  end;
+  end
+  -- Every row starts with error null, so this matches all of them. The clause
+  -- is required: Supabase's pg_safeupdate rejects UPDATE without WHERE.
+  where error is null;
   -- a student number repeated with different names in one file is an error, not a merge
   update pg_temp._imp i set error = 'student number appears more than once with different details'
   where error is null and exists (select 1 from pg_temp._imp j where j.sn = i.sn and j.row_no <> i.row_no
