@@ -30,7 +30,7 @@ export async function signUp(_: FormState, form: FormData): Promise<FormState> {
     full_name: z.string().trim().min(2, "Enter your full name.").max(200),
     email,
     password,
-    consent: z.literal("on", { errorMap: () => ({ message: "Please accept the privacy notice to continue." }) }),
+    consent: z.literal("on", { error: "Please accept the privacy notice to continue." }),
   }).safeParse(Object.fromEntries(form));
   if (!parsed.success) return { error: parsed.error.issues[0].message };
   const supabase = await supabaseServer();
