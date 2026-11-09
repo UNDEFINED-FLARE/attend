@@ -4,7 +4,15 @@ import { removePushSubscription, savePushSubscription, sendTestPush } from "@/ap
 import { Icon } from "@/components/icons";
 
 type Prefs = { classes: boolean; announcements: boolean; attendance: boolean };
-type State = "loading" | "unsupported" | "app" | "ios" | "denied" | "off" | "on";
+type State = "loading" | "unsupported" | "ios" | "denied" | "off" | "on"
+  // Inside the Android app (Capacitor): Android's own notification permission.
+  | "app-ask" | "app-on" | "app-denied" | "app-update";
+
+type Cap = { isNativePlatform?: () => boolean; isPluginAvailable?: (n: string) => boolean };
+const cap = () => (window as unknown as { Capacitor?: Cap }).Capacitor;
+/** Inside the Android app: the Capacitor bridge, or Android's WebView marker as a fallback. */
+const inApp = () => !!cap()?.isNativePlatform?.() || /; wv\)/.test(navigator.userAgent);
+const nativeNotifications = async () => (await import("@capacitor/local-notifications")).LocalNotifications;
 const PREFS_KEY = "ua_push_prefs";
 const KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? "";
 
@@ -39,8 +47,14 @@ export function PushToggle({ compact = false, logo, institution }: { compact?: b
     void (async () => {
       setPrefs(readPrefs());
       try { if (compact && localStorage.getItem("ua_push_banner_hidden")) setHidden(true); } catch { /* ignore */ }
-      const w = window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } };
-      if (w.Capacitor?.isNativePlatform?.()) { setState("app"); return; }
+      if (inApp()) {
+        if (!cap()?.isPluginAvailable?.("LocalNotifications")) { setState("app-update"); return; }
+        try {
+          const p = await (await nativeNotifications()).checkPermissions();
+          setState(p.display === "granted" ? "app-on" : p.display === "denied" ? "app-denied" : "app-ask");
+        } catch { setState("app-update"); }
+        return;
+      }
       const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
       const standalone = matchMedia("(display-mode: standalone)").matches;
       if (!("serviceWorker" in navigator) || !("PushManager" in window) || !KEY) { setState(ios && !standalone ? "ios" : "unsupported"); return; }
@@ -70,6 +84,35 @@ export function PushToggle({ compact = false, logo, institution }: { compact?: b
     } catch {
       setMsg("Notifications couldn't be turned on in this browser.");
     } finally { setBusy(false); }
+  }
+
+  async function enableNative() {
+    setBusy(true); setMsg(null);
+    try {
+      const n = await nativeNotifications();
+      const p = await n.requestPermissions();
+      if (p.display === "granted") {
+        setState("app-on");
+        window.dispatchEvent(new Event("ua-reminders")); // schedule this week's class reminders now
+      } else setState("app-denied");
+    } catch { setState("app-update"); } finally { setBusy(false); }
+  }
+
+  async function testNative() {
+    setBusy(true);
+    try {
+      const n = await nativeNotifications();
+      await n.schedule({ notifications: [{ id: 799_999, title: "Notifications are on",
+        body: `Class reminders from ${institution || "UniAttend"} arrive 15 minutes before each class.`,
+        schedule: { at: new Date(Date.now() + 3000), allowWhileIdle: true } }] });
+      setMsg("A test notification arrives in 3 seconds.");
+    } catch { setMsg("The test couldn't be sent."); } finally { setBusy(false); }
+  }
+
+  async function recheck() {
+    if (Notification.permission === "denied") { setMsg("Still blocked. Follow the steps above, then reload the page."); return; }
+    setMsg(null);
+    setState("off");
   }
 
   async function disable() {
@@ -102,7 +145,7 @@ export function PushToggle({ compact = false, logo, institution }: { compact?: b
     : <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-accent text-white shadow-card"><Icon name="bell" size={24} /></span>;
 
   if (compact) {
-    if (hidden || state !== "off") return null;
+    if (hidden || (state !== "off" && state !== "app-ask")) return null;
     return (
       <section className="flex items-center gap-3 rounded-[28px] bg-surface p-4 shadow-card">
         {mark}
@@ -111,7 +154,7 @@ export function PushToggle({ compact = false, logo, institution }: { compact?: b
           <p className="text-xs text-muted">Reminders before class, announcements{institution ? ` from ${institution}` : ""} and attendance updates.</p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <button type="button" onClick={() => enable()} disabled={busy} className="h-10 rounded-xl bg-accent px-4 text-sm font-semibold text-white disabled:opacity-60">{busy ? "…" : "Allow"}</button>
+          <button type="button" onClick={() => (state === "app-ask" ? enableNative() : enable())} disabled={busy} className="h-10 rounded-xl bg-accent px-4 text-sm font-semibold text-white disabled:opacity-60">{busy ? "…" : "Allow"}</button>
           <button type="button" onClick={() => { setHidden(true); try { localStorage.setItem("ua_push_banner_hidden", "1"); } catch { /* ignore */ } }} className="text-[11px] font-medium text-muted">Not now</button>
         </div>
       </section>
@@ -133,16 +176,45 @@ export function PushToggle({ compact = false, logo, institution }: { compact?: b
         {mark}
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted">On this device</p>
-          <p className="text-lg font-bold">{state === "on" ? "Notifications are on" : "Phone notifications"}</p>
+          <p className="text-lg font-bold">{state === "on" || state === "app-on" ? "Notifications are on" : "Phone notifications"}</p>
         </div>
-        {state === "on" && <span className="rounded-full bg-ok px-2.5 py-1 text-xs font-semibold text-white">On</span>}
+        {(state === "on" || state === "app-on") && <span className="rounded-full bg-ok px-2.5 py-1 text-xs font-semibold text-white">On</span>}
       </div>
 
       {state === "loading" && <p className="mt-3 text-sm text-muted">Checking this browser…</p>}
-      {state === "app" && <p className="mt-3 text-sm text-muted">In the UniAttend Android app, class reminders are set on your phone automatically. Announcements and attendance updates appear in this list.</p>}
+      {state === "app-ask" && (
+        <>
+          <p className="mt-3 text-sm text-muted">Allow notifications so the app can remind you 15 minutes before each class on your timetable.</p>
+          <button type="button" onClick={enableNative} disabled={busy} className="mt-4 h-12 w-full rounded-2xl bg-accent font-semibold text-white disabled:opacity-60">{busy ? "Asking…" : "Allow notifications"}</button>
+        </>
+      )}
+      {state === "app-on" && (
+        <>
+          <p className="mt-3 text-sm text-muted">Class reminders are scheduled on this phone 15 minutes before each class, even without signal. Announcements and attendance updates appear in this list.</p>
+          <button type="button" onClick={testNative} disabled={busy} className="mt-4 h-11 w-full rounded-2xl bg-bg text-sm font-semibold disabled:opacity-60">Send a test</button>
+        </>
+      )}
+      {state === "app-denied" && (
+        <Steps title="Notifications are turned off for the UniAttend app" steps={[
+          "Open your phone's Settings",
+          "Tap Apps (or Applications) → UniAttend",
+          "Tap Notifications and switch them on",
+          "Come back to UniAttend",
+        ]} onCheck={async () => {
+          const p = await (await nativeNotifications()).checkPermissions().catch(() => null);
+          if (p?.display === "granted") { setState("app-on"); window.dispatchEvent(new Event("ua-reminders")); } else setMsg("Still off. Follow the steps, then tap Check again.");
+        }} />
+      )}
+      {state === "app-update" && <p className="mt-3 text-sm text-muted">This version of the app can&apos;t show notifications. Install the latest UniAttend app (ask your administrator for the new APK), then open this page again.</p>}
       {state === "ios" && <p className="mt-3 text-sm text-muted">On iPhone, tap <b className="text-ink">Share → Add to Home Screen</b>, open UniAttend from your home screen, then turn notifications on here.</p>}
       {state === "unsupported" && <p className="mt-3 text-sm text-muted">This browser can&apos;t receive notifications. Try Chrome, Edge or Firefox.</p>}
-      {state === "denied" && <p className="mt-3 text-sm text-muted">Notifications are blocked for this site. Allow them in your browser&apos;s site settings (the lock icon next to the address), then come back.</p>}
+      {state === "denied" && (
+        <Steps title="Notifications are blocked for this site in your browser" steps={
+          /android/i.test(typeof navigator === "undefined" ? "" : navigator.userAgent)
+            ? ["Tap the icon left of the web address (a lock or sliders)", "Tap Permissions (or Site settings) → Notifications", "Choose Allow", "Reload this page"]
+            : ["Click the icon left of the web address (a lock or sliders)", "Find Notifications and choose Allow", "Reload this page"]
+        } note="Private or incognito windows can't receive notifications. Open UniAttend in a normal window." onCheck={recheck} />
+      )}
 
       {state === "off" && (
         <>
@@ -166,5 +238,22 @@ export function PushToggle({ compact = false, logo, institution }: { compact?: b
       )}
       {msg && <p className="mt-3 text-sm text-muted" role="status">{msg}</p>}
     </section>
+  );
+}
+
+function Steps({ title, steps, note, onCheck }: { title: string; steps: string[]; note?: string; onCheck: () => void }) {
+  return (
+    <div className="mt-3">
+      <p className="text-sm font-semibold">{title}</p>
+      <ol className="mt-3 space-y-2">
+        {steps.map((t, i) => (
+          <li key={t} className="flex items-center gap-3 text-sm">
+            <span className="grid size-7 shrink-0 place-items-center rounded-full bg-accent/10 text-xs font-bold text-accent">{i + 1}</span>{t}
+          </li>
+        ))}
+      </ol>
+      {note && <p className="mt-3 text-xs text-muted">{note}</p>}
+      <button type="button" onClick={onCheck} className="mt-4 h-11 w-full rounded-2xl bg-bg text-sm font-semibold">Check again</button>
+    </div>
   );
 }

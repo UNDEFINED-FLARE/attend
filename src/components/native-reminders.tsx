@@ -15,12 +15,11 @@ export function NativeReminders({ slots, institution }: { slots: ReminderSlot[];
   useEffect(() => {
     const w = window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } };
     if (!w.Capacitor?.isNativePlatform?.()) return;
-    void (async () => {
+    const run = () => void (async () => {
       try {
         const { LocalNotifications } = await import("@capacitor/local-notifications");
-        let perm = await LocalNotifications.checkPermissions();
-        if (perm.display === "prompt" || perm.display === "prompt-with-rationale") perm = await LocalNotifications.requestPermissions();
-        if (perm.display !== "granted") return;
+        const perm = await LocalNotifications.checkPermissions();
+        if (perm.display !== "granted") return; // the notification card asks for permission
 
         const pending = await LocalNotifications.getPending();
         const ours = pending.notifications.filter((n) => n.id >= ID_BASE && n.id < ID_BASE + ID_MAX);
@@ -49,6 +48,10 @@ export function NativeReminders({ slots, institution }: { slots: ReminderSlot[];
         });
       } catch { /* the app works without reminders */ }
     })();
+    run();
+    // The notification card fires this after the student allows notifications.
+    window.addEventListener("ua-reminders", run);
+    return () => window.removeEventListener("ua-reminders", run);
   }, [slots, institution]);
   return null;
 }
