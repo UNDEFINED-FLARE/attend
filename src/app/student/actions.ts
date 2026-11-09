@@ -11,6 +11,10 @@ export type Verdict = {
   module_code?: string;
   session_title?: string;
   venue?: VenueShape | null;
+  minutes_late?: number | null;
+  checked_in_at?: string | null;
+  opens_at?: string;
+  late_after?: string;
 };
 
 const Sample = z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180), accuracy: z.number().positive().max(100_000) });

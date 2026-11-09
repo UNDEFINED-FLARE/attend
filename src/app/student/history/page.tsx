@@ -1,12 +1,13 @@
 import { ActionForm } from "@/components/form";
 import { Badge, Card, CardTitle, PageHeader, Table, Td, Textarea, when } from "@/components/ui";
+import { LateChip } from "@/components/late";
 import { requireRole } from "@/lib/auth";
 import { dispute } from "../actions";
 
 export const metadata = { title: "History & disputes" };
 
 type Rec = {
-  id: string; status: string; checked_in_at: string | null; score: number | null; explanation: string[];
+  id: string; status: string; minutes_late: number | null; checked_in_at: string | null; score: number | null; explanation: string[];
   class_sessions: { title: string; opens_at: string; modules: { code: string } } | null;
 };
 
@@ -14,7 +15,7 @@ export default async function History() {
   const { supabase, institutionId } = await requireRole("student");
   const [{ data: recs }, { data: disputes }] = await Promise.all([
     supabase.from("attendance_records")
-      .select("id, status, checked_in_at, score, explanation, class_sessions(title, opens_at, modules(code))")
+      .select("id, status, minutes_late, checked_in_at, score, explanation, class_sessions(title, opens_at, modules(code))")
       .eq("institution_id", institutionId).order("created_at", { ascending: false }).limit(200),
     supabase.from("attendance_disputes").select("id, record_id, status, reason, resolution_note, created_at")
       .eq("institution_id", institutionId).order("created_at", { ascending: false }),
@@ -32,7 +33,7 @@ export default async function History() {
             <tr key={r.id}>
               <Td><b>{r.class_sessions?.modules.code}</b> {r.class_sessions?.title}</Td>
               <Td>{when(r.class_sessions?.opens_at)}</Td>
-              <Td><Badge status={r.status} /></Td>
+              <Td><span className="flex flex-wrap items-center gap-1"><Badge status={r.status} /><LateChip minutes={r.minutes_late} /></span></Td>
               <Td className="max-w-xs text-xs text-muted">{(r.explanation ?? []).join(" ")}</Td>
             </tr>
           ))}

@@ -30,7 +30,7 @@ export default async function LecturerHome() {
   const week = (sessions ?? []).filter((s) => s.opens_at >= sastMidnight(6)).length;
   const byModule = groupBy(recs ?? [], (r) => r.module_id as string);
   const enrolled = groupBy(enrol ?? [], (e) => e.module_id as string);
-  const toReview = (recs ?? []).filter((r) => r.status === "pending_verification" || r.status === "disputed").length;
+  const toReview = (recs ?? []).filter((r) => r.status === "pending_verification" || r.status === "disputed" || r.status === "late_pending").length;
 
   return (
     <>

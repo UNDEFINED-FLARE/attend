@@ -6,9 +6,11 @@ import { requireRole } from "@/lib/auth";
 import { closeSession, override } from "../../actions";
 import { VenueMap } from "@/components/map/venue-map";
 import type { LatLng } from "@/lib/campuses";
+import { LateChip } from "@/components/late";
+import { LateArrivals, type LateRow } from "./late-arrivals";
 import { LiveQr, RealtimeRefresh } from "./live";
 
-type Rec = { student_id: string; status: string; score: number | null; checked_in_at: string | null;
+type Rec = { id: string; student_id: string; status: string; minutes_late: number | null; overridden_by: string | null; score: number | null; checked_in_at: string | null;
              explanation: string[]; method: string; override_note: string | null };
 
 export default async function SessionPage({ params }: { params: Promise<{ id: string }> }) {
@@ -20,7 +22,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
   if (!s) notFound();
   const [{ data: enrolled }, { data: recs }] = await Promise.all([
     supabase.from("module_enrolments").select("students(id, student_number, full_name)").eq("module_id", s.module_id).eq("status", "active"),
-    supabase.from("attendance_records").select("student_id, status, score, checked_in_at, explanation, method, override_note").eq("session_id", id),
+    supabase.from("attendance_records").select("id, student_id, status, minutes_late, overridden_by, score, checked_in_at, explanation, method, override_note").eq("session_id", id),
   ]);
   const byStudent = new Map(((recs ?? []) as Rec[]).map((r) => [r.student_id, r]));
   const roster = (enrolled ?? []).map((e) => e.students as unknown as { id: string; student_number: string; full_name: string })
@@ -28,6 +30,18 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
   const count = (st: string) => (recs ?? []).filter((r) => r.status === st).length;
   const mod = s.modules as unknown as { code: string; title: string };
   const open = s.status === "open";
+  const lateRecs = ((recs ?? []) as Rec[]).filter((r) => r.minutes_late != null && ["late_pending", "late", "absent"].includes(r.status));
+  const { data: gpsRows } = lateRecs.length
+    ? await supabase.from("attendance_evidence").select("record_id, data").eq("kind", "gps").in("record_id", lateRecs.map((r) => r.id))
+    : { data: [] };
+  const gpsOf = new Map((gpsRows ?? []).map((g) => [g.record_id as string, g.data as LateRow["gps"]]));
+  const who = new Map(roster.map((st) => [st.id, st]));
+  const lateRows: LateRow[] = lateRecs.flatMap((r) => {
+    const st = who.get(r.student_id);
+    return st ? [{ student_id: r.student_id, student_number: st.student_number, full_name: st.full_name, status: r.status,
+      minutes_late: r.minutes_late!, checked_in_at: r.checked_in_at, score: r.score, gps: gpsOf.get(r.id) ?? null,
+      decided_by_close: r.status === "late" && !r.overridden_by }] : [];
+  });
   const venue = s.venues as unknown as { name: string; lat: number | null; lng: number | null; radius_m: number | null; polygon: LatLng[] | null } | null;
 
   return (
@@ -50,7 +64,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
           {venue && (venue.polygon || venue.lat != null) && <VenueMap venue={venue} height={220} />}
           <div className="grid grid-cols-2 gap-3">
             <Stat label="Present" value={count("present")} />
-            <Stat label="Late" value={count("late")} />
+            <Stat label="Late" value={count("late") + count("late_pending")} hint={count("late_pending") ? `${count("late_pending")} awaiting you` : undefined} />
             <Stat label="To review" value={count("pending_verification")} />
             <Stat label={open ? "Not yet in" : "Absent"} value={open ? roster.length - (recs ?? []).length : count("absent")} />
           </div>
@@ -74,6 +88,8 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
           </Card>
         </div>
 
+        <div>
+        <LateArrivals session={id} rows={lateRows} />
         <Card>
           <CardTitle>Register ({roster.length})</CardTitle>
           <Table head={["Student", "Status", "Time", "Confidence", "Why"]}>
@@ -82,7 +98,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
               return (
                 <tr key={st.id}>
                   <Td><b className="font-mono">{st.student_number}</b> {st.full_name}</Td>
-                  <Td>{r ? <Badge status={r.status} /> : <span className="text-muted">—</span>}</Td>
+                  <Td>{r ? <span className="flex flex-wrap items-center gap-1"><Badge status={r.status} /><LateChip minutes={r.minutes_late} /></span> : <span className="text-muted">—</span>}</Td>
                   <Td className="text-xs">{r?.checked_in_at ? new Date(r.checked_in_at).toLocaleTimeString("en-ZA") : ""}</Td>
                   <Td>{r?.score != null ? `${r.score}` : ""}</Td>
                   <Td className="max-w-xs text-xs text-muted">{r?.override_note ? `Corrected: ${r.override_note}` : (r?.explanation ?? []).join(" ")}</Td>
@@ -91,6 +107,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
             })}
           </Table>
         </Card>
+        </div>
       </div>
     </>
   );

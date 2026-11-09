@@ -60,6 +60,7 @@ const STATUS: Record<string, [string, string]> = {
   absent: ["Absent", "bg-bad/10 text-bad"],
   excused: ["Excused", "bg-info/10 text-info"],
   pending_verification: ["Pending review", "bg-warn/10 text-warn"],
+  late_pending: ["Late · awaiting lecturer", "bg-muted/15 text-muted"],
   disputed: ["Disputed", "bg-info/10 text-info"],
   open: ["Open", "bg-ok/10 text-ok"],
   closed: ["Closed", "bg-muted/10 text-muted"],

@@ -43,6 +43,21 @@ export async function closeSession(form: FormData) {
   revalidatePath(`/lecturer/sessions/${id}`);
 }
 
+/** Accept (counts as attended, late) or deny (absent) one or more late arrivals. */
+export async function decideLate(form: FormData) {
+  const p = z.object({
+    session: uuid,
+    students: z.array(uuid).min(1).max(2000),
+    accept: z.enum(["1", "0"]),
+  }).parse({ session: form.get("session"), students: form.getAll("student"), accept: form.get("accept") });
+  const supabase = await supabaseServer();
+  const { error } = await supabase.rpc("decide_late", {
+    p_session: p.session, p_students: p.students, p_accept: p.accept === "1", p_note: null,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/lecturer/sessions/${p.session}`);
+}
+
 export async function override(_: S, form: FormData): Promise<S> {
   const p = z.object({
     session: uuid, student: uuid,

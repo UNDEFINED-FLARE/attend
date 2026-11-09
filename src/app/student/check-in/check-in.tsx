@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, Input, Notice } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { ArrivalTimeline, LateChip } from "@/components/late";
 import { VenueMap } from "@/components/map/venue-map";
 import { distanceM, insidePolygon, type LatLng } from "@/lib/campuses";
 import { collectGps, deviceHash, parseScan, type GpsSample } from "@/lib/evidence";
@@ -71,6 +72,7 @@ export function CheckIn({ initialSession, initialToken }: { initialSession: stri
   }
 
   const busy = phase === "locating" || phase === "sending";
+  const late = result?.status === "late_pending";
 
   return (
     <div className="mx-auto max-w-md space-y-4">
@@ -78,12 +80,24 @@ export function CheckIn({ initialSession, initialToken }: { initialSession: stri
 
       {result && (
         <Card className="overflow-hidden p-0" aria-live="polite">
-          <div className={`${HEADLINE[result.outcome][1]} px-5 py-4 text-white`}>
-            <p className="text-lg font-semibold">{HEADLINE[result.outcome][0]}</p>
+          <div className={`${late ? "bg-muted" : HEADLINE[result.outcome][1]} px-5 py-4 text-white`}>
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-lg font-semibold">{late ? "You're in — arrived late" : HEADLINE[result.outcome][0]}</p>
+              {result.minutes_late != null && <span className="shrink-0 rounded-full bg-white/20 px-2.5 py-0.5 text-xs font-semibold">{result.minutes_late} min late</span>}
+            </div>
             {result.module_code && <p className="text-sm opacity-90">{result.module_code} · {result.session_title}</p>}
           </div>
           <div className="space-y-3 p-5 text-sm">
-            {result.status && <p>Recorded as <b>{result.status.replace("_", " ")}</b>{result.score != null && <> · confidence {result.score}/100</>}</p>}
+            {late && result.opens_at && result.late_after && result.checked_in_at && (
+              <ArrivalTimeline opensAt={result.opens_at} lateAfter={result.late_after} arrivedAt={result.checked_in_at} />
+            )}
+            {late && (
+              <div className="rounded-xl bg-bg p-3">
+                <p className="font-medium">Waiting for your lecturer</p>
+                <p className="mt-0.5 text-muted">Your lecturer decides whether this late arrival counts. If they don&apos;t deny it, it counts as attended (late) when the class closes. You&apos;ll get a notification either way.</p>
+              </div>
+            )}
+            {result.status && !late && <p>Recorded as <b>{result.status.replace("_", " ")}</b>{result.minutes_late != null && <> <LateChip minutes={result.minutes_late} /></>}{result.score != null && <> · confidence {result.score}/100</>}</p>}
             {result.outcome === "review" && <p>Your lecturer will confirm this. It does not count against you while it is pending.</p>}
             {result.venue && (result.venue.polygon || result.venue.lat != null) && (
               <VenueMap venue={result.venue} height={220} me={fix ? { ...fix, inside: isInside(fix, result.venue) } : null} />

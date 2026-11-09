@@ -297,6 +297,63 @@ describe("closing, corrections, disputes, reports", () => {
   });
 });
 
+describe("late arrivals: the lecturer has the final say", () => {
+  let S: Awaited<ReturnType<typeof openSession>>;
+  const rec = async (user: string) => (await db.as<{ status: string; minutes_late: number | null }>(user,
+    "select status, minutes_late from uniattend.attendance_records where session_id = $1", [S.id]))[0];
+  const studentId = async (no: string) => (await db.as<{ id: string }>(u.lectA, "select id from uniattend.students where student_number = $1", [no]))[0].id;
+  beforeAll(async () => {
+    S = await openSession("A");
+    // The grace period ended 17 minutes ago.
+    await db.admin("update uniattend.class_sessions set late_after = now() - interval '17 minutes' where id = $1", [S.id]);
+  });
+
+  it("a student who arrives after the grace period is recorded grey (late_pending) with minutes late", async () => {
+    const v = await checkIn(u.sA1, S.id, null, S.token, gpsAt(0), hex("d")) as Verdict & { minutes_late: number };
+    expect(v.outcome).toBe("accepted");
+    expect(v.status).toBe("late_pending");
+    expect(v.minutes_late).toBe(17);
+    expect(v.reasons.join(" ")).toMatch(/17 min after the grace period.*Location confirmed/);
+    await checkIn(u.sA2, S.id, null, S.token, gpsAt(0), hex("e"));
+    expect(await rec(u.sA2)).toEqual({ status: "late_pending", minutes_late: 17 });
+  });
+
+  it("a late arrival is not a duplicate-proof way around the lecturer", async () => {
+    expect((await checkIn(u.sA1, S.id, null, S.token, gpsAt(0), hex("d"))).outcome).toBe("duplicate");
+  });
+
+  it("only the lecturer or an admin may decide", async () => {
+    await expect(db.as(u.sA1, "select uniattend.decide_late($1, $2, true)", [S.id, [await studentId("A001")]]))
+      .rejects.toThrow(/only the module lecturer/);
+    await expect(db.as(u.lectB, "select uniattend.decide_late($1, $2, true)", [S.id, [await studentId("A001")]]))
+      .rejects.toThrow(/only the module lecturer/);
+  });
+
+  it("denied → absent; the decision can be changed", async () => {
+    const a2 = await studentId("A002");
+    expect((await db.asOne<{ decide_late: number }>(u.lectA, "select uniattend.decide_late($1, $2, false)", [S.id, [a2]])).decide_late).toBe(1);
+    expect((await rec(u.sA2)).status).toBe("absent");
+    await db.as(u.lectA, "select uniattend.decide_late($1, $2, true)", [S.id, [a2]]);
+    expect((await rec(u.sA2)).status).toBe("late");
+    await db.as(u.lectA, "select uniattend.decide_late($1, $2, false, 'Arrived after the test started')", [S.id, [a2]]);
+    expect((await rec(u.sA2)).status).toBe("absent");
+  });
+
+  it("decide_late never touches on-time records", async () => {
+    // A003 has no record; A001 is pending. Only A001 changes.
+    const n = (await db.asOne<{ decide_late: number }>(u.lectA, "select uniattend.decide_late($1, $2, true)",
+      [S.id, [await studentId("A003")]])).decide_late;
+    expect(n).toBe(0);
+  });
+
+  it("undecided late arrivals count as attended when the session closes", async () => {
+    const res = await db.asOne<{ close_session: Record<string, number> }>(u.lectA, "select uniattend.close_session($1)", [S.id]);
+    expect(res.close_session.late_auto_accepted).toBe(1);
+    expect(await rec(u.sA1)).toEqual({ status: "late", minutes_late: 17 });
+    expect((await rec(u.sA2)).status).toBe("absent");
+  });
+});
+
 describe("commercial controls", () => {
   it("plan limits are enforced by the database", async () => {
     await db.as(u.super, "insert into uniattend.subscription_plans (code, name, max_students) values ('tiny', 'Tiny', 5)");

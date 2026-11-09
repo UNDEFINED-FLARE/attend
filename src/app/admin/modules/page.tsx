@@ -4,6 +4,7 @@ import { Card, CardTitle, Field, Input, PageHeader, Select } from "@/components/
 import { requireRole } from "@/lib/auth";
 import { addModule, assignLecturer } from "../actions";
 import { changeEnrolment, updateModule } from "../data-actions";
+import { AssignImport } from "./assign-import";
 
 export const metadata = { title: "Modules" };
 
@@ -69,6 +70,8 @@ export default async function Modules({ searchParams }: { searchParams: Promise<
           ) : <p className="text-sm text-muted">Add a module first.</p>}
         </Card>
       </div>
+
+      <AssignImport />
 
       <Card>
         <CardTitle action={<form><Input name="q" defaultValue={q} placeholder="Search code or title" className="h-9 w-56" /></form>}>All modules</CardTitle>
