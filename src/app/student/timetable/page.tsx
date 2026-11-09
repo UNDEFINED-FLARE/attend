@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AppTitle } from "@/components/app-chrome";
 import { Icon } from "@/components/icons";
 import { Card, CardTitle } from "@/components/ui";
 import { hhmm, moduleColor, todayWeekday, WeekGrid } from "@/components/week-grid";
@@ -17,22 +18,15 @@ export default async function StudentTimetable() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">My timetable</h1>
-          <p className="text-sm text-muted">Every class in the modules you&apos;re registered for, set by your faculty.</p>
-        </div>
-        <Link href="/student/map" className="inline-flex h-10 items-center gap-2 rounded-xl border border-line bg-surface px-4 text-sm font-medium hover:bg-bg">
-          <Icon name="map" size={18} />Campus map
-        </Link>
-      </div>
+      <AppTitle title="Timetable" eyebrow={new Date().toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long", timeZone: "Africa/Johannesburg" })}
+        action={<Link href="/student/map" aria-label="Campus map" className="hidden h-11 items-center gap-2 rounded-2xl bg-surface px-4 text-sm font-semibold shadow-card sm:inline-flex"><Icon name="map" size={18} />Campus map</Link>} />
 
       <div className="grid gap-4 md:grid-cols-2">
-        <NowCard label="Now" slot={current} empty="No class right now" tone="bg-gradient-to-br from-[#1d4ed8] to-[#0b2545] text-white" />
+        <NowCard label="Now" slot={current} empty="No class right now" tone="bg-gradient-to-br from-accent to-brand text-white" />
         <NowCard label="Next today" slot={next} empty={today.length ? "No more classes today" : "No classes today"} tone="bg-surface" />
       </div>
 
-      <Card>
+      <Card className="rounded-[28px]">
         <CardTitle>This week</CardTitle>
         {slots.length === 0
           ? <p className="py-10 text-center text-sm text-muted">No timetable yet. Your faculty adds classes for each module, and they appear here automatically.</p>
@@ -45,11 +39,11 @@ export default async function StudentTimetable() {
 function NowCard({ label, slot, empty, tone }: { label: string; slot?: { code: string; title: string; starts_at: string; ends_at: string; venue: string | null; kind: string }; empty: string; tone: string }) {
   const dark = tone.includes("text-white");
   return (
-    <section className={`rounded-3xl p-5 shadow-card ${tone}`}>
-      <p className={`text-xs font-semibold uppercase tracking-wider ${dark ? "opacity-80" : "text-muted"}`}>{label}</p>
+    <section className={`rounded-[28px] p-5 shadow-card ${tone}`}>
+      <p className={`text-[11px] font-bold uppercase tracking-[0.14em] ${dark ? "opacity-80" : "text-muted"}`}>{label}</p>
       {slot ? (
         <>
-          <p className="mt-2 text-lg font-semibold" style={dark ? undefined : { color: moduleColor(slot.code) }}>{slot.title}</p>
+          <p className="mt-2 text-lg font-bold" style={dark ? undefined : { color: moduleColor(slot.code) }}>{slot.title}</p>
           <p className={`text-sm ${dark ? "opacity-90" : "text-muted"}`}>{slot.code} · {slot.kind} · {hhmm(slot.starts_at)}–{hhmm(slot.ends_at)}</p>
           <p className={`mt-1 flex items-center gap-1 text-sm ${dark ? "opacity-90" : "text-muted"}`}><Icon name="pin" size={15} />{slot.venue ?? "No venue set"}</p>
         </>

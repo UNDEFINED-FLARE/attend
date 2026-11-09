@@ -49,12 +49,12 @@ body {
 /* QR scanner: corner brackets around the camera view */
 .scan-frame { position: relative; }
 .scan-frame::before, .scan-frame::after, .scan-frame > .scan-corners::before, .scan-frame > .scan-corners::after {
-  content: ""; position: absolute; width: 36px; height: 36px; border: 4px solid var(--accent); z-index: 2; pointer-events: none;
+  content: ""; position: absolute; width: 44px; height: 44px; border: 5px solid var(--accent); z-index: 2; pointer-events: none;
 }
-.scan-frame::before { top: -2px; left: -2px; border-right: 0; border-bottom: 0; border-top-left-radius: 14px; }
-.scan-frame::after { top: -2px; right: -2px; border-left: 0; border-bottom: 0; border-top-right-radius: 14px; }
-.scan-frame > .scan-corners::before { bottom: -2px; left: -2px; border-right: 0; border-top: 0; border-bottom-left-radius: 14px; }
-.scan-frame > .scan-corners::after { bottom: -2px; right: -2px; border-left: 0; border-top: 0; border-bottom-right-radius: 14px; }
+.scan-frame::before { top: -2px; left: -2px; border-right: 0; border-bottom: 0; border-top-left-radius: 22px; }
+.scan-frame::after { top: -2px; right: -2px; border-left: 0; border-bottom: 0; border-top-right-radius: 22px; }
+.scan-frame > .scan-corners::before { bottom: -2px; left: -2px; border-right: 0; border-top: 0; border-bottom-left-radius: 22px; }
+.scan-frame > .scan-corners::after { bottom: -2px; right: -2px; border-left: 0; border-top: 0; border-bottom-right-radius: 22px; }
 .scan-line { position: absolute; left: 8%; right: 8%; height: 2px; background: var(--accent); box-shadow: 0 0 12px var(--accent); animation: scan 2.2s ease-in-out infinite; z-index: 2; }
 @keyframes scan { 0%, 100% { top: 12%; } 50% { top: 86%; } }
 @media (prefers-reduced-motion: reduce) { .scan-line { animation: none; top: 50%; } }

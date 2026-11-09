@@ -12,7 +12,7 @@ const link = z.object({ label: text(40).min(1), url: z.string().trim().max(500).
 export const STUDENT_CARDS = ["hero", "live", "quick", "today", "modules", "recent"] as const;
 export type StudentCard = (typeof STUDENT_CARDS)[number];
 export const CARD_LABEL: Record<StudentCard, string> = {
-  hero: "Attendance summary", live: "Check-in prompt", quick: "Quick actions", today: "Today's classes", modules: "My modules", recent: "Recent",
+  hero: "Attendance summary", live: "Check-in prompt", quick: "At a glance", today: "Today's classes", modules: "My modules", recent: "Recent",
 };
 
 export const ThemeSchema = z.object({

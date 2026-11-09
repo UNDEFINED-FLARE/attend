@@ -5,7 +5,7 @@ import { shellData } from "@/lib/shell-data";
 export default async function StudentLayout({ children }: { children: React.ReactNode }) {
   const s = await requireRole("student");
   return (
-    <Shell area="Student" current={s.current} choices={s.choices} {...await shellData(s)} nav={[
+    <Shell area="Student" app={{ center: "/student/check-in" }} current={s.current} choices={s.choices} {...await shellData(s)} nav={[
       { href: "/student", label: "Home", icon: "dashboard" },
       { href: "/student/timetable", label: "Timetable", icon: "calendar" },
       { href: "/student/check-in", label: "Check in", icon: "scan" },

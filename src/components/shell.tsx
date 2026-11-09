@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { signOut, switchInstitution } from "@/app/actions";
+import { AppProvider, AppTabBar } from "@/components/app-chrome";
 import { Icon } from "@/components/icons";
 import { SideNav, TabBar, type NavItem } from "@/components/nav";
 import type { RoleRow } from "@/lib/auth";
@@ -26,7 +27,7 @@ function Logo({ name, theme, onDark }: { name: string; theme: Theme; onDark: boo
 
 const TONE = { info: "bg-info/10 text-info", ok: "bg-ok/10 text-ok", warn: "bg-warn/10 text-warn", bad: "bg-bad/10 text-bad" } as const;
 
-export function Shell({ nav, children, current, choices, area, user, unread = 0, theme = DEFAULT_THEME }: {
+export function Shell({ nav, children, current, choices, area, user, unread = 0, theme = DEFAULT_THEME, app }: {
   nav: NavItem[];
   children: ReactNode;
   current: RoleRow;
@@ -35,9 +36,12 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
   user: { email?: string | null; name?: string | null };
   unread?: number;
   theme?: Theme;
+  /** Phone-app layout (students): page titles carry the avatar, and a floating tab bar raises this item. */
+  app?: { center: string };
 }) {
   const instName = current.institution_name ?? "Platform";
   const who = user.name || user.email || "";
+  const initials = (user.name || user.email || "?").split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
   const today = new Date().toLocaleDateString("en-ZA", { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "Africa/Johannesburg" });
 
   // Sidebar and header styles chosen on the Design page.
@@ -73,7 +77,7 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
 
       <div className="flex min-h-dvh flex-col lg:pl-64">
         {/* Top bar */}
-        <header className={`sticky top-0 z-10 border-b ${head === "light" ? "border-line bg-surface/90 backdrop-blur" : "border-transparent"}`}
+        <header className={`sticky top-0 z-10 border-b ${app ? "hidden lg:block" : ""} ${head === "light" ? "border-line bg-surface/90 backdrop-blur" : "border-transparent"}`}
           style={{ background: headBg, color: headInk, ["--muted" as string]: headInk ? "rgb(255 255 255 / 0.75)" : undefined }}>
           <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 lg:px-8">
             <div className="lg:hidden"><Logo name={instName} theme={theme} onDark={!!headInk} /></div>
@@ -111,10 +115,12 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
           <div role="status" className={`px-4 py-2 text-center text-sm font-medium lg:px-8 ${TONE[theme.announcement.tone]}`}>{theme.announcement.text}</div>
         )}
 
-        <main className="mx-auto w-full max-w-7xl flex-1 px-4 pt-6 pb-28 lg:px-8 lg:pb-10">{children}</main>
+        <main className={`mx-auto w-full max-w-7xl flex-1 px-4 lg:px-8 lg:pb-10 ${app ? "pt-[max(20px,env(safe-area-inset-top))] pb-36 lg:pt-6" : "pt-6 pb-28"}`}>
+          {app ? <AppProvider me={{ name: who || "Student", initials, unread, institution: instName }}>{children}</AppProvider> : children}
+        </main>
 
         {theme.footer.show && (theme.footer.text || theme.footer.links.length > 0) && (
-          <footer className="border-t border-line bg-surface px-4 pt-5 pb-24 text-sm text-muted lg:px-8 lg:pb-5">
+          <footer className={`border-t border-line bg-surface px-4 pt-5 ${app ? "pb-36" : "pb-24"} text-sm text-muted lg:px-8 lg:pb-5`}>
             <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3">
               <span>{theme.footer.text}</span>
               <nav aria-label="Footer" className="flex flex-wrap gap-x-4 gap-y-1">
@@ -127,7 +133,7 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
         )}
       </div>
 
-      <TabBar items={nav} />
+      {app ? <AppTabBar items={nav} center={app.center} /> : <TabBar items={nav} />}
     </div>
   );
 }

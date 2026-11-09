@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button, Card, Input, Notice } from "@/components/ui";
+import { Button, Input, Notice } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { ArrivalTimeline, LateChip } from "@/components/late";
 import { VenueMap } from "@/components/map/venue-map";
@@ -74,81 +74,148 @@ export function CheckIn({ initialSession, initialToken }: { initialSession: stri
   const busy = phase === "locating" || phase === "sending";
   const late = result?.status === "late_pending";
 
+  // First visit: explain the camera and location before asking for them.
+  const [intro, setIntro] = useState(false);
+  const [typing, setTyping] = useState(false);
+  useEffect(() => {
+    try { if (!initialSession && !localStorage.getItem("ua_checkin_intro")) setIntro(true); } catch { /* storage blocked: skip the intro */ }
+  }, [initialSession]);
+  const startFromIntro = () => { try { localStorage.setItem("ua_checkin_intro", "1"); } catch { /* ignore */ } setIntro(false); };
+
+  if (intro) {
+    return (
+      <div className="mx-auto flex min-h-[calc(100dvh-11rem)] max-w-md flex-col rounded-[32px] bg-surface px-6 pb-6 pt-10 text-center shadow-card lg:min-h-0">
+        <div className="relative mx-auto mt-6 grid size-56 place-items-center">
+          <span aria-hidden className="absolute inset-0 rounded-[46%_54%_42%_58%/55%_45%_55%_45%] bg-accent/12" />
+          <span aria-hidden className="absolute inset-6 rounded-[58%_42%_50%_50%/45%_55%_45%_55%] bg-accent/10" />
+          <span className="relative grid size-24 place-items-center rounded-3xl bg-surface text-accent shadow-card"><Icon name="scan" size={52} strokeWidth={1.6} /></span>
+        </div>
+        <h1 className="mt-10 text-2xl font-bold tracking-tight">Welcome to check-in</h1>
+        <p className="mx-auto mt-3 max-w-xs text-sm leading-relaxed text-muted">
+          Allow your <b className="text-ink">camera</b> so you can scan the code on the projector, and your <b className="text-ink">location</b> so we can confirm you&apos;re in the venue. Your location is checked once and not stored.
+        </p>
+        <div className="mt-6 flex justify-center gap-1.5" aria-hidden><i className="size-1.5 rounded-full bg-line" /><i className="h-1.5 w-5 rounded-full bg-accent" /><i className="size-1.5 rounded-full bg-line" /></div>
+        <button type="button" onClick={startFromIntro} className="mt-auto h-14 w-full rounded-2xl bg-accent text-base font-semibold text-white shadow-[0_10px_24px_color-mix(in_srgb,var(--accent)_35%,transparent)] transition active:scale-[0.98] lg:mt-10">
+          Let&apos;s get started
+        </button>
+      </div>
+    );
+  }
+
+  const status = phase === "scanning" ? "Scanning code…" : phase === "locating" ? "Checking your location…" : phase === "sending" ? "Recording your attendance…" : "Ready when you are";
+
   return (
-    <div className="mx-auto max-w-md space-y-4">
-      <h1 className="text-2xl font-semibold">Check in</h1>
-
-      {result && (
-        <Card className="overflow-hidden p-0" aria-live="polite">
-          <div className={`${late ? "bg-muted" : HEADLINE[result.outcome][1]} px-5 py-4 text-white`}>
-            <div className="flex items-start justify-between gap-3">
-              <p className="text-lg font-semibold">{late ? "You're in — arrived late" : HEADLINE[result.outcome][0]}</p>
-              {result.minutes_late != null && <span className="shrink-0 rounded-full bg-white/20 px-2.5 py-0.5 text-xs font-semibold">{result.minutes_late} min late</span>}
-            </div>
-            {result.module_code && <p className="text-sm opacity-90">{result.module_code} · {result.session_title}</p>}
-          </div>
-          <div className="space-y-3 p-5 text-sm">
-            {late && result.opens_at && result.late_after && result.checked_in_at && (
-              <ArrivalTimeline opensAt={result.opens_at} lateAfter={result.late_after} arrivedAt={result.checked_in_at} />
-            )}
-            {late && (
-              <div className="rounded-xl bg-bg p-3">
-                <p className="font-medium">Waiting for your lecturer</p>
-                <p className="mt-0.5 text-muted">Your lecturer decides whether this late arrival counts. If they don&apos;t deny it, it counts as attended (late) when the class closes. You&apos;ll get a notification either way.</p>
+    <div className="relative mx-auto max-w-md">
+      {/* The brand band behind the sheet, edge to edge on phones. */}
+      <div aria-hidden className="absolute -inset-x-4 -top-[max(20px,env(safe-area-inset-top))] h-44 rounded-b-[40px] bg-gradient-to-br from-brand to-accent lg:hidden" />
+      <div className="relative space-y-4 pt-10 lg:pt-0">
+        {result && (
+          <section className="overflow-hidden rounded-[28px] bg-surface shadow-card" aria-live="polite">
+            <div className={`${late ? "bg-muted" : HEADLINE[result.outcome][1]} px-5 py-5 text-white`}>
+              <div className="flex items-start justify-between gap-3">
+                <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-white/20">
+                  <Icon name={late ? "clock" : result.outcome === "accepted" ? "check" : result.outcome === "rejected" ? "x" : "alert"} size={26} strokeWidth={2.4} />
+                </span>
+                {result.minutes_late != null && <span className="shrink-0 rounded-full bg-white/20 px-2.5 py-0.5 text-xs font-semibold">{result.minutes_late} min late</span>}
               </div>
-            )}
-            {result.status && !late && <p>Recorded as <b>{result.status.replace("_", " ")}</b>{result.minutes_late != null && <> <LateChip minutes={result.minutes_late} /></>}{result.score != null && <> · confidence {result.score}/100</>}</p>}
-            {result.outcome === "review" && <p>Your lecturer will confirm this. It does not count against you while it is pending.</p>}
-            {result.venue && (result.venue.polygon || result.venue.lat != null) && (
-              <VenueMap venue={result.venue} height={220} me={fix ? { ...fix, inside: isInside(fix, result.venue) } : null} />
-            )}
-            {result.reasons.length > 0 && (
-              <ul className="list-disc space-y-1 pl-5 text-muted">{result.reasons.map((r) => <li key={r}>{r}</li>)}</ul>
-            )}
-            <Link href="/student" className="inline-block text-info hover:underline">Back to my attendance</Link>
-          </div>
-        </Card>
-      )}
+              <p className="mt-3 text-xl font-bold">{late ? "You're in — arrived late" : HEADLINE[result.outcome][0]}</p>
+              {result.module_code && <p className="text-sm opacity-90">{result.module_code} · {result.session_title}</p>}
+            </div>
+            <div className="space-y-3 p-5 text-sm">
+              {late && result.opens_at && result.late_after && result.checked_in_at && (
+                <ArrivalTimeline opensAt={result.opens_at} lateAfter={result.late_after} arrivedAt={result.checked_in_at} />
+              )}
+              {late && (
+                <div className="rounded-2xl bg-bg p-3">
+                  <p className="font-semibold">Waiting for your lecturer</p>
+                  <p className="mt-0.5 text-muted">Your lecturer decides whether this late arrival counts. If they don&apos;t deny it, it counts as attended (late) when the class closes. You&apos;ll get a notification either way.</p>
+                </div>
+              )}
+              {result.status && !late && <p>Recorded as <b>{result.status.replace("_", " ")}</b>{result.minutes_late != null && <> <LateChip minutes={result.minutes_late} /></>}{result.score != null && <> · confidence {result.score}/100</>}</p>}
+              {result.outcome === "review" && <p className="text-muted">Your lecturer will confirm this. It does not count against you while it is pending.</p>}
+              {result.venue && (result.venue.polygon || result.venue.lat != null) && (
+                <div className="overflow-hidden rounded-2xl"><VenueMap venue={result.venue} height={200} me={fix ? { ...fix, inside: isInside(fix, result.venue) } : null} /></div>
+              )}
+              {result.reasons.length > 0 && (
+                <ul className="list-disc space-y-1 pl-5 text-muted">{result.reasons.map((r) => <li key={r}>{r}</li>)}</ul>
+              )}
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <Link href="/student" className="grid h-12 place-items-center rounded-2xl bg-bg font-semibold">Dashboard</Link>
+                <button type="button" onClick={() => { setPhase("idle"); setResult(null); }} className="h-12 rounded-2xl bg-accent font-semibold text-white">Scan again</button>
+              </div>
+            </div>
+          </section>
+        )}
 
-      {error && <Notice tone="bad">{error}</Notice>}
-      {busy && (
-        <Notice>{phase === "locating" ? "Checking your location… keep this screen open." : "Recording your attendance…"}</Notice>
-      )}
+        {phase !== "done" && (
+          <section className="rounded-[32px] bg-surface px-5 pb-6 pt-3 shadow-[0_-4px_30px_rgb(15_27_45/0.08)]">
+            <div className="mx-auto h-1.5 w-12 rounded-full bg-line" aria-hidden />
+            <div className="mt-3 flex justify-end">
+              <Link href="/student/history" aria-label="Attendance history" className="grid size-10 place-items-center rounded-xl border-2 border-accent/30 text-accent"><Icon name="history" size={18} /></Link>
+            </div>
+            <h1 className="-mt-4 text-center text-xl font-bold">Scan QR code</h1>
+            <p className="mx-auto mt-2 max-w-64 text-center text-sm leading-relaxed text-muted">Place the code on the projector inside the frame and hold steady for a quick scan.</p>
 
-      {phase !== "done" && (
-        <Card className="space-y-4">
-          <div className="text-center">
-            <p className="font-semibold">Scan the QR code</p>
-            <p className="text-xs text-muted">Hold your phone steady with the code on the projector inside the frame</p>
-          </div>
-          <div className="scan-frame mx-auto aspect-square w-full max-w-72 rounded-2xl bg-bg">
-            <span className="scan-corners" aria-hidden />
-            {phase === "scanning" && <span className="scan-line" aria-hidden />}
-            <div id="qr-reader" className={phase === "scanning" ? "size-full overflow-hidden rounded-2xl [&_video]:!size-full [&_video]:object-cover" : "hidden"} />
-            {phase !== "scanning" && (
+            <div className="scan-frame relative mx-auto mt-7 aspect-square w-full max-w-64 rounded-3xl">
+              <span className="scan-corners" aria-hidden />
+              {(phase === "scanning" || busy) && <span className="scan-line" aria-hidden />}
+              <div id="qr-reader" className={phase === "scanning" ? "size-full overflow-hidden rounded-3xl [&_video]:!size-full [&_video]:object-cover" : "hidden"} />
+              {phase !== "scanning" && (
+                <button type="button" onClick={startScan} disabled={busy} aria-label="Open the camera"
+                  className="grid size-full place-items-center rounded-3xl p-10 text-ink transition disabled:opacity-60">
+                  <QrArt />
+                </button>
+              )}
+            </div>
+            <p className={`mt-5 text-center text-sm font-medium ${busy || phase === "scanning" ? "text-accent" : "text-muted"}`} aria-live="polite">{status}</p>
+
+            <div className="mt-5 flex items-center justify-center gap-8 text-muted">
+              <button type="button" onClick={() => setTyping((t) => !t)} aria-pressed={typing} className={`flex flex-col items-center gap-1 text-[11px] font-semibold ${typing ? "text-accent" : ""}`}><Icon name="file" size={22} />Type code</button>
+              <Link href="/student/map" className="flex flex-col items-center gap-1 text-[11px] font-semibold"><Icon name="map" size={22} />Venue map</Link>
+              <Link href="/privacy" className="flex flex-col items-center gap-1 text-[11px] font-semibold"><Icon name="shield" size={22} />Privacy</Link>
+            </div>
+
+            {typing && (
+              <form className="mt-5 flex gap-2" onSubmit={(e) => { e.preventDefault(); void submit({ session: null, token: null, code }); }}>
+                <Input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={6} placeholder="ABC234" autoFocus
+                  className="h-14 flex-1 rounded-2xl text-center font-mono text-xl tracking-[0.35em]" aria-label="Session code" autoCapitalize="characters" />
+                <Button type="submit" className="h-14 rounded-2xl px-6" disabled={busy || code.length !== 6}>Go</Button>
+              </form>
+            )}
+
+            {error && <div className="mt-4"><Notice tone="bad">{error}</Notice></div>}
+
+            {phase !== "scanning" ? (
               <button type="button" onClick={startScan} disabled={busy}
-                className="flex size-full flex-col items-center justify-center gap-3 rounded-2xl text-muted transition hover:text-accent disabled:opacity-50">
-                <Icon name="qr" size={64} strokeWidth={1.2} />
-                <span className="text-sm font-medium">{busy ? "Working…" : "Tap to open camera"}</span>
+                className="mt-6 flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-accent text-base font-semibold text-white shadow-[0_10px_24px_color-mix(in_srgb,var(--accent)_35%,transparent)] transition active:scale-[0.98] disabled:opacity-60">
+                <Icon name="scan" size={20} />{busy ? "Working…" : "Scan QR code"}
               </button>
+            ) : (
+              <button type="button" onClick={() => { void scanner.current?.stop(); setPhase("idle"); }}
+                className="mt-6 h-14 w-full rounded-2xl bg-bg text-base font-semibold">Cancel</button>
             )}
-          </div>
-          {phase !== "scanning" ? (
-            <Button className="h-14 w-full rounded-xl text-base" onClick={startScan} disabled={busy}><Icon name="scan" />Scan QR code</Button>
-          ) : (
-            <Button variant="secondary" className="w-full" onClick={() => { void scanner.current?.stop(); setPhase("idle"); }}>Cancel</Button>
-          )}
-          <div className="flex items-center gap-3 text-xs text-muted"><span className="h-px flex-1 bg-line" />or type the code<span className="h-px flex-1 bg-line" /></div>
-          <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void submit({ session: null, token: null, code }); }}>
-            <Input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={6} placeholder="ABC234"
-              className="h-12 text-center font-mono text-lg tracking-[0.3em]" aria-label="Session code" autoCapitalize="characters" />
-            <Button type="submit" className="h-12" disabled={busy || code.length !== 6}>Go</Button>
-          </form>
-          <p className="text-xs text-muted">Your location is checked once against the venue and not stored. Scanning the live QR gives the strongest proof; a typed code may be sent for review.</p>
-        </Card>
-      )}
-      {phase === "done" && <Button variant="secondary" className="w-full" onClick={() => { setPhase("idle"); setResult(null); }}>Check in to another session</Button>}
+            <p className="mt-4 text-center text-xs text-muted">The live QR gives the strongest proof; a typed code may be sent for review.</p>
+          </section>
+        )}
+      </div>
     </div>
+  );
+}
+
+/** A stylised QR code for the idle frame. */
+function QrArt() {
+  const finder = (x: number, y: number) => (
+    <g key={`${x}-${y}`}>
+      <rect x={x} y={y} width="28" height="28" rx="8" fill="none" stroke="currentColor" strokeWidth="6" />
+      <rect x={x + 9} y={y + 9} width="10" height="10" rx="3" fill="currentColor" />
+    </g>
+  );
+  const dots = [[44, 6], [56, 6], [44, 20], [6, 46], [20, 46], [34, 46], [48, 40], [62, 48], [76, 46], [90, 46], [48, 56], [62, 64], [76, 60], [90, 70], [48, 72], [62, 82], [76, 78], [90, 90], [48, 90], [76, 94]];
+  return (
+    <svg viewBox="0 0 100 100" className="size-full opacity-85" aria-hidden>
+      {finder(4, 4)}{finder(68, 4)}{finder(4, 68)}
+      {dots.map(([x, y]) => <rect key={`${x}-${y}`} x={x} y={y} width="9" height="9" rx="3" fill="currentColor" />)}
+    </svg>
   );
 }
 
