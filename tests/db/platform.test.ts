@@ -366,3 +366,32 @@ describe("timetables and the dashboard rollup", () => {
     await expect(db.as(u.sA1, "select uniattend.institution_dashboard($1)", [id.instA])).rejects.toThrow(/admin only/);
   });
 });
+
+describe("institution setup by the platform administrator", () => {
+  it("ships a directory of 14 institutions that only the super admin can see", async () => {
+    const all = await db.as<{ name: string; timetable_source_type: string }>(u.super, "select name, timetable_source_type from uniattend.institution_directory order by name");
+    expect(all).toHaveLength(14);
+    expect(all.find((d) => d.name === "Tshwane University of Technology")?.timetable_source_type).toBe("pdf_links");
+    expect(all.find((d) => d.name === "University of Venda")?.timetable_source_type).toBe("viewer_json");
+    expect(await db.as(u.adminA, "select * from uniattend.institution_directory")).toHaveLength(0);
+    await expect(db.as(u.adminA, "insert into uniattend.institution_directory (name) values ('Sneaky')")).rejects.toThrow(/row-level security/);
+  });
+
+  it("only the super admin can set where an institution's timetable is collected from", async () => {
+    await expect(db.as(u.adminA, "update uniattend.institution_settings set timetable_source_type = 'pdf_url', timetable_source_url = 'https://evil.example/x.pdf' where institution_id = $1", [id.instA]))
+      .rejects.toThrow(/platform administrator/);
+    await db.as(u.super, "update uniattend.institution_settings set timetable_source_type = 'pdf_links', timetable_source_url = 'https://www.tut.ac.za/timetables' where institution_id = $1", [id.instA]);
+    // other policy fields stay editable by the institution's own admin
+    await db.as(u.adminA, "update uniattend.institution_settings set min_attendance_pct = 80 where institution_id = $1", [id.instA]);
+    await expect(db.as(u.super, "update uniattend.institution_settings set timetable_source_url = 'http://insecure.example' where institution_id = $1", [id.instA]))
+      .rejects.toThrow(/check constraint/);
+  });
+
+  it("stores campus outlines for the institution's maps", async () => {
+    await db.as(u.super, `insert into uniattend.campuses (institution_id, name, town, lat, lng, zoom, outline, osm_ref)
+      values ($1, 'Main campus', 'Town', -23.9, 29.7, 16, '[[-23.9,29.7],[-23.9,29.71],[-23.91,29.71]]', 'way/1')`, [id.instA]);
+    const rows = await db.as<{ name: string }>(u.sA1, "select name from uniattend.campuses");
+    expect(rows.map((r) => r.name)).toContain("Main campus");
+    expect(await db.as(u.sB1, "select * from uniattend.campuses where institution_id = $1", [id.instA])).toHaveLength(0);
+  });
+});

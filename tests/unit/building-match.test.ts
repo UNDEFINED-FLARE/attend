@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { guessBuilding, matchBuilding, type Place } from "@/lib/building-match";
 
-// Real names from OpenStreetMap on the UNIVEN campus (2026-11-09).
+// Real building names from OpenStreetMap on a South African campus (2026-11-09).
 const P = (name: string, polygon = false): Place => ({ id: name, name, polygon: polygon ? [[0, 0], [0, 1], [1, 1]] : null, center: [0, 0] });
 const places = [
   P("E-block", true), P("E-Block lecture hall"), P("D-Block lecture hall"), P("A-Block", true), P("B- Block lecture halls", true),
@@ -18,7 +18,6 @@ describe("timetable building -> campus map", () => {
     expect(m("EDUCATION")).toBe("School of Education (exact)");
     expect(m("MAIN AUDITORIUM")).toBe("auditorium (exact)");
     expect(m("NATURAL SCIENCE")).toBe("school of mathematical and natural sciencses (likely)");
-    expect(m("A1-A9")).toBe("A-Block (guess)");
   });
   it("does not invent matches", () => {
     expect(m("OLD EDUCATION")).toBeNull();
@@ -26,6 +25,7 @@ describe("timetable building -> campus map", () => {
     expect(m("HUMANITIES AND SOCIAL SCIENCE")).toBeNull();
     expect(m("MUSIC")).toBeNull();
     expect(m("C-BLOCK")).toBeNull();
+    expect(m("A1-A9")).toBeNull(); // different names on the map are placed by hand, not guessed
   });
   it("reads the building out of an imported venue name", () => {
     expect(guessBuilding("E-Block E4")).toBe("E-Block");

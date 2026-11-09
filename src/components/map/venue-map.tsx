@@ -1,7 +1,7 @@
 "use client";
 import type * as Leaflet from "leaflet";
 import { useEffect, useMemo, useRef } from "react";
-import { CAMPUSES, type LatLng } from "@/lib/campuses";
+import { FALLBACK_CENTER, type LatLng } from "@/lib/campuses";
 import { BRAND, drawVenue, INFO, OK, useLeaflet, WARN, type Venueish } from "./use-leaflet";
 
 /**
@@ -16,7 +16,7 @@ export function VenueMap({ venue, me, height = 260 }: {
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const start = useMemo<LatLng>(
-    () => (venue.lat != null && venue.lng != null ? [venue.lat, venue.lng] : venue.polygon?.[0] ?? CAMPUSES[0].center),
+    () => (venue.lat != null && venue.lng != null ? [venue.lat, venue.lng] : venue.polygon?.[0] ?? FALLBACK_CENTER),
     [venue]);
   const m = useLeaflet(ref, start, 17);
 
@@ -24,8 +24,6 @@ export function VenueMap({ venue, me, height = 260 }: {
     if (!m) return;
     const { map, L } = m;
     const g = L.layerGroup().addTo(map);
-    const campus = CAMPUSES.find((c) => c.outline && L.latLngBounds(c.outline).contains(start));
-    if (campus?.outline) L.polygon(campus.outline, { color: "#ffffff", weight: 1, dashArray: "4 4", fill: false, interactive: false }).addTo(g);
     const shape = drawVenue(L, g, venue, BRAND, { weight: 3 });
     const bounds: Leaflet.LatLngBounds | null = shape && "getBounds" in shape ? (shape as Leaflet.Polygon).getBounds() : null;
     if (me) {

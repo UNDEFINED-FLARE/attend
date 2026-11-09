@@ -20,17 +20,7 @@ export function tokens(s: string): string[] {
 
 const same = (a: string, b: string) => a === b || (a.length >= 5 && b.length >= 5 && a.slice(0, 5) === b.slice(0, 5));
 
-/** Known UNIVEN timetable building names whose map name is different, confirmed by eye. */
-export const ALIASES: Record<string, { name: string; confidence: Match["confidence"] }> = {
-  "A1-A9": { name: "A-Block", confidence: "guess" },
-};
-
 export function matchBuilding(building: string, places: Place[]): Match | null {
-  const alias = ALIASES[building.trim().toUpperCase()];
-  if (alias) {
-    const p = places.find((x) => x.name.trim().toLowerCase() === alias.name.toLowerCase());
-    if (p) return { place: p, confidence: alias.confidence };
-  }
   const want = tokens(building);
   if (!want.length) return null;
   let best: { place: Place; score: number; exact: boolean } | null = null;

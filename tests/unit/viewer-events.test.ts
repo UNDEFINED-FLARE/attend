@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { eventToClass, groupLabel, type UnivenEvent } from "@/lib/univen-events";
+import { eventToClass, groupLabel, type ViewerEvent } from "@/lib/viewer-events";
 
-const ev = (over: Partial<UnivenEvent>): UnivenEvent => ({
+const ev = (over: Partial<ViewerEvent>): ViewerEvent => ({
   eventId: 1, moduleName: "ECS1245", dayOfWeek: 1, startTime: "15:00", endTime: "16:50",
   rooms: [{ name: "BUILDING : E-BLOCK @ ROOM : E4", capacity: 350 }], staff: ["A LECTURER"], groups: [{ name: "ECS1245_2", studentCount: 313 }], ...over,
 });
 
-describe("timetable.univen.ac.za events", () => {
+describe("timetable viewer API events", () => {
   it("maps day 0 to Monday and keeps room capacity and group", () => {
     expect(eventToClass(ev({ dayOfWeek: 0 }))).toEqual({
       code: "ECS1245", weekday: 1, starts_at: "15:00", ends_at: "16:50", online: false, building: "E-BLOCK", room: "E4",

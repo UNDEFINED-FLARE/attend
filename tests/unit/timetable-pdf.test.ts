@@ -52,3 +52,47 @@ describe("timetable PDF parser", () => {
     expect(new Set(r.classes.map((c) => c.weekday))).toEqual(new Set([1, 2, 3, 4, 5]));
   }, 60_000);
 });
+
+describe("CELCAT timetable PDFs (rotated page, wrapped lines)", () => {
+  // Same shape as a real Tshwane University of Technology export: day headers share
+  // an x value because the page is rotated, so days run along y.
+  const it2 = (x: number, y: number, s: string): TextItem => ({ x, y, h: 10, s, page: 1 });
+  const items = [
+    it2(41, 157, "DEPARTMENT OF TESTING - 2026 - #ABCD19_Y1_GROUP_A"),
+    it2(72, 100, "Monday"), it2(72, 229, "Tuesday"), it2(72, 352, "Wednesday"), it2(72, 487, "Thursday"), it2(72, 610, "Friday"), it2(72, 740, "Saturday"),
+    it2(435, 188, "CLASS, 05:15pm-08:"), it2(447, 188, "45pm"), it2(463, 188, "Module: PMP107V"), it2(474, 188, "Staff: MONYAI TT"),
+    it2(485, 188, "Rooms: 31-106 - PTA (170"), it2(496, 188, "seats); ONLINE - PTA"),
+    it2(92, 708, "TUTORIAL, 08:00am-10:"), it2(103, 708, "30am"), it2(119, 708, "Module: ADM107V"), it2(142, 708, "Room: 31-119 - PTA (170"), it2(153, 708, "seats)"),
+    it2(222, 58, "CLASS, 12:00pm-01:"), it2(233, 58, "00pm"), it2(249, 58, "Module: STI107V"), it2(260, 58, "Staff: STEYNBERG L"), it2(272, 58, "Room: ONLINE - PTA"),
+    it2(10, 10, "Published 2025/11/26 - CELCAT Timetabling"),
+  ];
+  it("reads type, 12-hour times, day, room, campus, capacity and lecturer", () => {
+    const r = parseTimetableItems(items);
+    expect(r.title).toBe("ABCD19_Y1_GROUP_A");
+    expect(r.warnings).toEqual([]);
+    expect(r.classes.map((c) => [c.code, c.weekday, c.starts_at, c.ends_at, c.kind, c.venue, c.capacity, c.lecturer, c.group, c.online])).toEqual([
+      ["STI107V", 1, "12:00", "13:00", "lecture", null, null, "STEYNBERG L", "Online", true],
+      ["PMP107V", 2, "17:15", "20:45", "lecture", "31-106 (PTA)", 170, "MONYAI TT", "Also online", false],
+      ["ADM107V", 6, "08:00", "10:30", "tutorial", "31-119 (PTA)", 170, null, null, false],
+    ]);
+  });
+});
+
+describe("CELCAT layout, 24-hour times on separate lines", () => {
+  it("does not read the M of 'Module' as am/pm", () => {
+    const at = (s: string, x: number, y: number) => ({ s, x, y, h: 8, page: 1 });
+    const items = [
+      { s: "Group timetable - #ADIM19_Y4_GROUP_UA", x: 256, y: 559, h: 12, page: 1 },
+      at("CLASS, 17:15-20:15", 42, 508), at("Module: EDY107V", 42, 495), at("Staff: MELLO NS", 42, 486), at("Room: 1-G43", 42, 477),
+      at("PRACTICAL, 17:15-20:15", 338, 508), at("Module: IFA107V", 338, 495), at("Staff: SELOWA KT", 338, 486), at("Room: 1-G92E", 338, 477),
+      at("Monday", 96, 524), at("Tuesday", 242, 524), at("Wednesday", 383, 524),
+      { s: "Published 3/13/2026 - CELCAT Timetabling", x: 250, y: 18, h: 10, page: 1 },
+    ];
+    const r = parseTimetableItems(items);
+    expect(r.title).toBe("ADIM19_Y4_GROUP_UA");
+    expect(r.classes.map((c) => [c.code, c.weekday, c.starts_at, c.ends_at, c.room, c.lecturer, c.kind])).toEqual([
+      ["EDY107V", 1, "17:15", "20:15", "1-G43", "MELLO NS", "lecture"],
+      ["IFA107V", 3, "17:15", "20:15", "1-G92E", "SELOWA KT", "practical"],
+    ]);
+  });
+});

@@ -4,7 +4,7 @@ import { Submit } from "@/components/form";
 import { Icon } from "@/components/icons";
 import { Badge, Notice } from "@/components/ui";
 import { guessBuilding, matchBuilding, type Match, type Place } from "@/lib/building-match";
-import { campusesFor, coveringRadius, loadPlaces, type LatLng } from "@/lib/campuses";
+import { coveringRadius, loadPlaces, type Campus, type LatLng } from "@/lib/campuses";
 import { mapVenuesBulk } from "./map-actions";
 
 type V = { id: string; name: string; building: string | null; lat: number | null; lng: number | null; polygon: LatLng[] | null };
@@ -17,19 +17,20 @@ const TONE: Record<Match["confidence"], string> = { exact: "active", likely: "tr
  * matching building from OpenStreetMap. The admin sees each proposed match
  * with how sure it is, and only ticked buildings are applied.
  */
-export function AutoMap({ venues, institutionName }: { venues: V[]; institutionName: string | null }) {
-  const campus = campusesFor(institutionName)[0];
+export function AutoMap({ venues, campuses }: { venues: V[]; campuses: Campus[] }) {
   const [places, setPlaces] = useState<Place[] | null>(null);
   const [skip, setSkip] = useState<Set<string>>(new Set());
   const [result, apply] = useActionState(mapVenuesBulk, undefined as S);
 
   useEffect(() => {
     let alive = true;
-    // a margin around the campus outline catches buildings on its edge
-    const [s, w, n, e] = campus.bbox, pad = 0.002;
-    void loadPlaces([s - pad, w - pad, n + pad, e + pad]).then((p) => alive && setPlaces(p));
+    if (!campuses.length) { setPlaces([]); return; }
+    // every campus of the institution, with a margin that catches buildings on the edge
+    const pad = 0.002;
+    void Promise.all(campuses.map((c) => loadPlaces([c.bbox[0] - pad, c.bbox[1] - pad, c.bbox[2] + pad, c.bbox[3] + pad])))
+      .then((lists) => alive && setPlaces(lists.flat()));
     return () => { alive = false; };
-  }, [campus]);
+  }, [campuses]);
 
   const unplaced = venues.filter((v) => v.lat == null && !(v.polygon?.length));
   const groups = useMemo(() => {
@@ -42,6 +43,9 @@ export function AutoMap({ venues, institutionName }: { venues: V[]; institutionN
       .sort((a, b) => Number(!!b.match) - Number(!!a.match) || a.building.localeCompare(b.building));
   }, [unplaced, places]);
 
+  if (!campuses.length) {
+    return <p className="text-sm text-muted">Automatic mapping needs your campus map, which UniAttend sets up when your institution is approved. You can still place venues on the map below.</p>;
+  }
   if (unplaced.length === 0) {
     return <p className="text-sm text-muted">Every venue has a location. New venues from a timetable import will appear here to be placed.</p>;
   }

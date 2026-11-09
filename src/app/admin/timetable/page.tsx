@@ -6,7 +6,7 @@ import { DAYS, WeekGrid, type Slot } from "@/components/week-grid";
 import { requireRole } from "@/lib/auth";
 import { addTimetableSlots, removeTimetableSlot } from "../actions";
 import { PdfImport } from "./pdf-import";
-import { UnivenImport } from "./univen-import";
+import { SourceImport } from "./source-import";
 
 export const metadata = { title: "Timetable" };
 // Fetching a batch from the university timetable site can take ~15 s.
@@ -15,7 +15,11 @@ export const maxDuration = 60;
 export default async function Timetable({ searchParams }: { searchParams: Promise<{ module?: string }> }) {
   const { module: filter } = await searchParams;
   const { supabase, institutionId, current } = await requireRole("institution_admin");
-  const isUniven = /venda|univen/i.test(`${current.institution_name} ${current.institution_slug}`);
+  // Where this institution's timetable is collected from, set by the platform administrator.
+  const { data: settings } = await supabase.from("institution_settings").select("*").eq("institution_id", institutionId).maybeSingle();
+  const source = settings as { timetable_source_type?: string; timetable_source_url?: string | null } | null;
+  const hasSource = !!source?.timetable_source_url && !!source.timetable_source_type && source.timetable_source_type !== "none";
+  const sourceLabel = hasSource ? new URL(source!.timetable_source_url!).host.replace(/^www\./, "") : "";
   const [{ data: modules }, { data: venues }, { data: rows }] = await Promise.all([
     supabase.from("modules").select("id, code, title").eq("institution_id", institutionId).is("deleted_at", null).order("code"),
     supabase.from("venues").select("id, name").eq("institution_id", institutionId).is("deleted_at", null).order("name"),
@@ -33,12 +37,12 @@ export default async function Timetable({ searchParams }: { searchParams: Promis
   return (
     <>
       <PageHeader title="Timetable" subtitle="Classes added here appear on every enrolled student's timetable and campus map." />
-      {isUniven && (
-        <Card className="mb-6">
-          <CardTitle>Import from the UNIVEN timetable website</CardTitle>
-          <UnivenImport />
-        </Card>
-      )}
+      <Card className="mb-6">
+        <CardTitle>Import from your timetable source</CardTitle>
+        {hasSource
+          ? <SourceImport sourceLabel={sourceLabel} />
+          : <p className="text-sm text-muted">No timetable source is connected for {current.institution_name ?? "your institution"} yet. UniAttend connects it when your institution is set up; until then, upload timetable PDFs below or add classes by hand.</p>}
+      </Card>
       <Card className="mb-6">
         <CardTitle>Import a timetable PDF</CardTitle>
         <PdfImport />

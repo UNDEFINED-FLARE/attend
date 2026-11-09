@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireRole } from "@/lib/auth";
 import { extractPdfItems, parseTimetableItems, type ParsedClass, type ParsedTimetable } from "@/lib/timetable-pdf";
-import { fetchUnivenClasses, fetchUnivenCourses, type UnivenCourse } from "@/lib/univen-timetable";
+import { sourceCatalog, sourceClasses, type SourceItem, type SourceType } from "@/lib/timetable-sources";
 
 type S = { error?: string; ok?: string } | undefined;
 
@@ -31,6 +31,7 @@ const ClassRow = z.object({
   capacity: z.number().int().positive().max(10000).nullable().optional(),
   students: z.number().int().min(0).max(100000).nullable().optional(),
   sourceId: z.number().int().optional(),
+  kind: z.enum(["lecture", "tutorial", "practical", "test", "other"]).optional(),
 });
 const MAX_CLASSES = 20000;
 
@@ -77,23 +78,35 @@ export async function previewTimetablePdf(_: PreviewState, f: FormData): Promise
   return buildPreview(parsed);
 }
 
-// ------------------------------------------------- from timetable.univen.ac.za
+// ------------------------------------- from the institution's timetable source
 
-/** The programmes the university's timetable site lists. */
-export async function listUnivenCourses(): Promise<{ courses?: UnivenCourse[]; error?: string }> {
-  await ctx();
+/** The source the platform administrator set for this institution. Never taken from the browser. */
+async function institutionSource(): Promise<{ type: SourceType; url: string } | null> {
+  const { supabase, institutionId } = await ctx();
+  const { data } = await supabase.from("institution_settings").select("*").eq("institution_id", institutionId).maybeSingle();
+  const row = data as { timetable_source_type?: SourceType; timetable_source_url?: string | null } | null;
+  if (!row?.timetable_source_type || row.timetable_source_type === "none" || !row.timetable_source_url) return null;
+  return { type: row.timetable_source_type, url: row.timetable_source_url };
+}
+
+/** What can be imported: programmes from a timetable viewer, or PDF files from the timetable pages. */
+export async function listSourceItems(): Promise<{ items?: SourceItem[]; type?: SourceType; error?: string }> {
+  const src = await institutionSource();
+  if (!src) return { error: "No timetable source is set up for your institution yet. Ask UniAttend to connect it." };
   try {
-    return { courses: await fetchUnivenCourses() };
-  } catch {
-    return { error: "The university timetable site did not respond. Try again in a minute." };
+    const items = await sourceCatalog(src.type, src.url);
+    return items.length ? { items, type: src.type } : { error: "The timetable source didn't list any timetables." };
+  } catch (e) {
+    return { error: e instanceof Error && e.message.length < 140 ? `Couldn't read the timetable source: ${e.message}` : "The timetable source did not respond. Try again in a minute." };
   }
 }
 
-/** Fetch one batch of programmes (the browser calls this repeatedly, so no request runs long). */
-export async function fetchUnivenBatch(ids: number[]): Promise<{ classes: ParsedClass[]; failed: number[] }> {
-  await ctx();
-  const clean = z.array(z.number().int().positive().max(100000)).max(10).parse(ids);
-  return fetchUnivenClasses(clean);
+/** One batch (the browser calls this repeatedly, so no request runs long). Ids are re-checked against the source. */
+export async function fetchSourceBatch(ids: string[]): Promise<{ classes: ParsedClass[]; failed: string[] }> {
+  const clean = z.array(z.string().min(1).max(500)).max(10).parse(ids);
+  const src = await institutionSource();
+  if (!src) return { classes: [], failed: clean };
+  return sourceClasses(src.type, src.url, clean);
 }
 
 /** Preview classes gathered from the site. Re-validated: they came back through the browser. */
@@ -252,7 +265,7 @@ export async function applyTimetableImport(_: S, f: FormData): Promise<S> {
     }
     have.add(k);
     rows.push({ institution_id: institutionId, module_id, venue_id, weekday: c.weekday, starts_at: c.starts_at, ends_at: c.ends_at,
-                kind: "lecture", group_name: c.group ?? (c.online ? "Online" : null), created_by: user.id,
+                kind: c.kind ?? "lecture", group_name: c.group ?? (c.online ? "Online" : null), created_by: user.id,
                 lecturer_id: c.lecturer ? lectId.get(c.lecturer.toUpperCase()) ?? null : null });
   }
 

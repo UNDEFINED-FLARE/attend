@@ -42,7 +42,10 @@ import into the new schema.
    insert into uniattend.user_roles (user_id, role)
    select id, 'super_admin' from auth.users where email = 'you@example.com';
    ```
-6. Optional, for payments: `npx supabase functions deploy paystack-webhook --no-verify-jwt` and
+6. **Set up each institution.** The code has no institution built in. When an institution registers, open
+   Super → Institutions → *Set up*: apply its entry from Super → Directory (campus maps and timetable link;
+   14 institutions are seeded), adjust the map, test the timetable source, then approve.
+7. Optional, for payments: `npx supabase functions deploy paystack-webhook --no-verify-jwt` and
    `npx supabase secrets set PAYSTACK_SECRET_KEY=...`.
 
 No storage buckets are needed yet. Logos will go in a public `branding` bucket (Phase 6).

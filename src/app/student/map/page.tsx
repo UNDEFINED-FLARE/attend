@@ -3,6 +3,7 @@ import { todayWeekday } from "@/components/week-grid";
 import { requireRole } from "@/lib/auth";
 import type { LatLng } from "@/lib/campuses";
 import { timeOf } from "@/lib/stats";
+import { loadCampuses } from "@/lib/shell-data";
 import { nowHHMM } from "@/lib/student-data";
 
 export const metadata = { title: "Campus map" };
@@ -11,7 +12,7 @@ type Row = { venue_id: string | null; module_id: string; weekday: number; kind: 
   modules: { code: string; title: string } | null; venues: { name: string } | null; lecturers?: { full_name: string } | null };
 
 export default async function StudentMap() {
-  const { supabase, institutionId, current } = await requireRole("student");
+  const { supabase, institutionId } = await requireRole("student");
   const today = todayWeekday(), tomorrow = (today % 7) + 1;
 
   // Lecturer names need database update 0008; without it, load classes without them.
@@ -27,6 +28,7 @@ export default async function StudentMap() {
     supabase.from("class_sessions").select("venue_id, module_id, opens_at, closes_at, modules(code, title), venues(name)")
       .eq("institution_id", institutionId).eq("status", "open"),
   ]);
+  const campuses = await loadCampuses(supabase, institutionId);
   const mine = new Set((enrol ?? []).map((e) => e.module_id as string));
   const venues: MapVenue[] = (venueRows ?? []).map((v) => ({ ...v, polygon: (v.polygon as LatLng[] | null) ?? null }));
   const rows = (slots.data ?? []) as unknown as Row[];
@@ -59,7 +61,7 @@ export default async function StudentMap() {
       </div>
       {venues.length === 0
         ? <p className="rounded-2xl bg-surface p-8 text-center text-sm text-muted shadow-card">Your institution hasn&apos;t mapped its venues yet.</p>
-        : <CampusMap venues={venues} classes={classes} upcoming={upcoming} institutionName={current.institution_name} now={nowHHMM()} />}
+        : <CampusMap venues={venues} classes={classes} upcoming={upcoming} campuses={campuses} now={nowHHMM()} />}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
-import { campusesFor, distanceM, insidePolygon, type LatLng } from "@/lib/campuses";
+import { distanceM, fallbackCampus, insidePolygon, type Campus, type LatLng } from "@/lib/campuses";
 import { BRAND, drawVenue, OK, useLeaflet, type Venueish } from "./use-leaflet";
 
 export type MapVenue = Venueish & { id: string };
@@ -30,12 +30,12 @@ function sastNow() {
 }
 const mins = (hhmm: string) => +hhmm.slice(0, 2) * 60 + +hhmm.slice(3, 5);
 
-export function CampusMap({ venues, classes, upcoming = [], institutionName, now: initialNow }: {
-  venues: MapVenue[]; classes: MapClass[]; upcoming?: MapClass[]; institutionName: string | null; now: string;
+export function CampusMap({ venues, classes, upcoming = [], campuses = [], now: initialNow }: {
+  venues: MapVenue[]; classes: MapClass[]; upcoming?: MapClass[]; campuses?: Campus[]; now: string;
 }) {
   const [now, setNow] = useState(initialNow);
   useEffect(() => { const t = setInterval(() => setNow(sastNow()), 30_000); return () => clearInterval(t); }, []);
-  const campus = campusesFor(institutionName)[0];
+  const campus = campuses[0] ?? fallbackCampus(venues.map((v) => centerOf(v)).filter(Boolean) as LatLng[]);
   const start: LatLng = useMemo(() => {
     const pts = venues.map(centerOf).filter(Boolean) as LatLng[];
     return pts.length ? [pts.reduce((a, p) => a + p[0], 0) / pts.length, pts.reduce((a, p) => a + p[1], 0) / pts.length] : campus.center;
@@ -68,7 +68,7 @@ export function CampusMap({ venues, classes, upcoming = [], institutionName, now
     if (!m) return;
     const { map, L } = m;
     const g = L.layerGroup().addTo(map);
-    if (campus.outline) L.polygon(campus.outline, { color: "#fff", weight: 2, dashArray: "6 6", fill: false, interactive: false }).addTo(g);
+    for (const c of campuses) if (c.outline) L.polygon(c.outline, { color: "#fff", weight: 2, dashArray: "6 6", fill: false, interactive: false }).addTo(g);
     const bounds: LatLng[] = [];
     // Rooms in one building share its outline, so live labels are grouped per spot.
     const labels = new Map<string, { at: LatLng; codes: string[]; mine: boolean; live: boolean }>();
@@ -104,7 +104,7 @@ export function CampusMap({ venues, classes, upcoming = [], institutionName, now
     }
     if (bounds.length > 1) map.fitBounds(L.latLngBounds(bounds).pad(0.25), { maxZoom: 18 });
     return () => { g.remove(); };
-  }, [m, venues, byVenue, now, campus]);
+  }, [m, venues, byVenue, now, campuses]);
 
   // Live position.
   useEffect(() => {

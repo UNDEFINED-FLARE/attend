@@ -28,8 +28,8 @@ export default async function Onboarding() {
             taken; you can set up faculties, modules and venues in the meantime.
           </p>
           <ActionForm action={applyForInstitution} submit="Submit application" pending="Submitting…">
-            <Field label="Institution name"><Input name="name" placeholder="University of Venda" required /></Field>
-            <Field label="Short name" hint="Used in links. Lowercase, e.g. univen.">
+            <Field label="Institution name"><Input name="name" placeholder="University of …" required /></Field>
+            <Field label="Short name" hint="Used in links. Lowercase, e.g. uni-north.">
               <Input name="slug" pattern="[a-z0-9][a-z0-9\-]{1,40}" required />
             </Field>
             <Field label="Contact email"><Input name="contact_email" type="email" defaultValue={s.user.email} required /></Field>

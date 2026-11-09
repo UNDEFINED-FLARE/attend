@@ -1,8 +1,9 @@
-// Converts events from timetable.univen.ac.za's JSON into ParsedClass rows.
+// Converts events from a "timetable viewer" JSON API (one in use in South
+// African universities: /api/courses and /api/timetable/course/{id}) into ParsedClass rows.
 // Pure (no server-only imports) so it can be unit-tested.
 import { venueName, type ParsedClass } from "@/lib/timetable-pdf";
 
-export type UnivenEvent = {
+export type ViewerEvent = {
   eventId: number; moduleName: string; dayOfWeek: number; startTime: string; endTime: string;
   rooms: { name: string; capacity: number | null }[]; staff: string[]; groups: { name: string; studentCount: number | null }[];
 };
@@ -11,12 +12,12 @@ const WHERE_RE = /^BUILDING\s*:\s*(.+?)\s*@\s*ROOM\s*:\s*(.+)$/i;
 const CODE_RE = /^[A-Z]{2,6}\d{3,5}[A-Z]?$/;
 
 /** "ECS1245_2" -> "Group 2"; several groups joined. */
-export function groupLabel(groups: UnivenEvent["groups"]): string | null {
+export function groupLabel(groups: ViewerEvent["groups"]): string | null {
   const labels = groups.map((g) => /_(\w+)$/.exec(g.name)?.[1]).filter(Boolean).map((n) => `Group ${n}`);
   return labels.length ? [...new Set(labels)].join(", ").slice(0, 40) : null;
 }
 
-export function eventToClass(e: UnivenEvent): ParsedClass | null {
+export function eventToClass(e: ViewerEvent): ParsedClass | null {
   const code = e.moduleName?.replace(/\s+/g, "").toUpperCase();
   if (!code || !CODE_RE.test(code)) return null;
   if (!(e.dayOfWeek >= 0 && e.dayOfWeek <= 6)) return null; // the viewer counts Monday as 0

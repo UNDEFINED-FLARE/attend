@@ -5,7 +5,7 @@
 export type GpsSample = { lat: number; lng: number; accuracy: number };
 
 /**
- * Several fresh readings over a few seconds (ported from univen.html's
+ * Several fresh readings over a few seconds (ported from the original app's
  * collectGpsSamples). Resolves with whatever it has when time runs out, or null
  * if location is unavailable or refused — a refusal is reported, not punished.
  */

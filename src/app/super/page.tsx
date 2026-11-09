@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ActionForm, Submit } from "@/components/form";
 import { Badge, Card, CardTitle, Input, PageHeader, Select, Stat, Table, Td, Textarea, when } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
@@ -40,7 +41,8 @@ export default async function SuperHome() {
             {pending.map((i) => (
               <li key={i.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <div><b>{i.name}</b> <span className="text-muted">/{i.slug}</span><div className="text-xs text-muted">{i.contact_email} · applied {when(i.created_at)}</div></div>
-                <form action={setStatus}><input type="hidden" name="id" value={i.id} /><input type="hidden" name="status" value="active" /><Submit label="Approve" /></form>
+                <span className="flex gap-2"><Link href={`/super/institutions/${i.id}`} className="inline-flex h-10 items-center rounded-xl border border-line px-3 text-sm font-medium hover:bg-bg">Set up map &amp; timetable</Link>
+                <form action={setStatus}><input type="hidden" name="id" value={i.id} /><input type="hidden" name="status" value="active" /><Submit label="Approve" /></form></span>
               </li>
             ))}
           </ul>
@@ -55,7 +57,7 @@ export default async function SuperHome() {
             const plan = s?.subscription_plans as unknown as { code: string; name: string } | undefined;
             return (
               <tr key={i.id}>
-                <Td><b>{i.name}</b><div className="text-xs text-muted">/{i.slug}</div></Td>
+                <Td><Link href={`/super/institutions/${i.id}`} className="font-semibold hover:text-accent">{i.name}</Link><div className="text-xs text-muted">/{i.slug} · <Link href={`/super/institutions/${i.id}`} className="text-accent">set up</Link></div></Td>
                 <Td><Badge status={i.status} /></Td>
                 <Td className="text-sm">{plan ? <>{plan.name} <Badge status={s?.status} /><div className="text-xs text-muted">to {when(s?.current_period_end)}</div></> : "—"}</Td>
                 <Td>

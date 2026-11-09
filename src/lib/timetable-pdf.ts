@@ -1,4 +1,4 @@
-// Parser for timetable PDFs exported by the University of Venda "Timetable
+// Parser for timetable PDFs exported by university "Timetable
 // System" (and layouts like it): a week grid with one column per day and, in
 // each column, blocks of
 //
@@ -28,6 +28,7 @@ export type ParsedClass = {
   group?: string | null;
   capacity?: number | null;
   students?: number | null; // size of the group(s) in this class
+  kind?: "lecture" | "tutorial" | "practical" | "test" | "other";
   sourceId?: number;
 };
 
@@ -47,13 +48,20 @@ export function venueName(building: string, room: string): string {
   const tidy = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase()
     .replace(/(^|[\s-])([a-z])/g, (_, p, c) => p + c.toUpperCase())
     .replace(/\b([A-Za-z])(\d)/g, (_, a, d) => a.toUpperCase() + d)        // e4 -> E4, lh-01 stays LH-01 below
-    .replace(/\b(Lh|Ict|Uigc|Ems)\b/g, (w) => w.toUpperCase());
+    .replace(/\b(Lh|Ict|Ems)\b/g, (w) => w.toUpperCase());
   const b = tidy(building), r = tidy(room);
   if (b.toLowerCase().includes(r.toLowerCase())) return b;
   return `${b} ${r}`;
 }
 
+/** Reads either supported layout; the layout is detected from the text. */
 export function parseTimetableItems(items: TextItem[]): ParsedTimetable {
+  const celcat = items.some((i) => CELCAT_START.test(i.s.trim())) || items.some((i) => /CELCAT/i.test(i.s));
+  return celcat ? parseCelcatItems(items) : parseBlockItems(items);
+}
+
+/** Layout 1: blocks of code / time / BUILDING : x @ ROOM : y / lecturer, one column per day. */
+function parseBlockItems(items: TextItem[]): ParsedTimetable {
   const warnings: string[] = [];
   const text = items.map((i) => i.s.trim());
   const expected = Number(text.map((t) => /^(\d+)\s+events?$/i.exec(t)?.[1]).find(Boolean) ?? NaN);
@@ -128,4 +136,126 @@ export async function extractPdfItems(data: Uint8Array): Promise<TextItem[]> {
   }
   await task.destroy();
   return out;
+}
+
+
+// ----------------------------------------------------------------- CELCAT layout
+//
+// Layout 2: PDFs from CELCAT Timetabling (e.g. Tshwane University of Technology).
+// Each class is a block such as
+//   CLASS, 05:15pm-08:   45pm   Module: ADM107V   Staff: EBEWO PE
+//   Rooms: 31-102 - PTA (112   seats); ONLINE - PTA
+// where long lines wrap into separate text items that share the block's column.
+// Pages are often rotated, so the day columns may run along x or along y.
+
+const CELCAT_TIME = String.raw`\d{1,2}:\d{2}(?:\s*[ap]m\b)?`;
+const CELCAT_START = new RegExp(String.raw`^([A-Za-z][A-Za-z /&-]{1,30}),\s*${CELCAT_TIME}`, "i");
+const CELCAT_DAY = /^(mon|tue|tues|wed|wednes|thu|thur|thurs|fri|sat|satur|sun)(day)?$/i;
+const DAY_NUM: Record<string, number> = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };
+
+function to24(t: string): string | null {
+  const m = /^(\d{1,2}):(\d{2})\s*([ap]m)?$/i.exec(t.trim());
+  if (!m) return null;
+  let h = +m[1];
+  const min = +m[2];
+  if (m[3]) { const pm = m[3].toLowerCase() === "pm"; if (h === 12) h = pm ? 12 : 0; else if (pm) h += 12; }
+  return h < 24 && min < 60 ? `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}` : null;
+}
+
+function kindOf(label: string): ParsedClass["kind"] {
+  const l = label.toLowerCase();
+  if (/tut/.test(l)) return "tutorial";
+  if (/prac|lab|workshop/.test(l)) return "practical";
+  if (/test|exam|assess|quiz/.test(l)) return "test";
+  if (/class|lect|lesson|contact/.test(l)) return "lecture";
+  return "other";
+}
+
+/** "31-106 - PTA (170 seats)" -> room 31-106, campus PTA, capacity 170; "ONLINE - PTA" -> online. */
+function parseRooms(raw: string) {
+  const parts = raw.split(";").map((p) => p.trim()).filter(Boolean);
+  const physical = parts.find((p) => !/^online\b/i.test(p));
+  const alsoOnline = parts.some((p) => /^online\b/i.test(p));
+  if (!physical) return { online: true, alsoOnline, venue: null, building: null, room: null, capacity: null };
+  const m = /^(.+?)(?:\s+-\s+([A-Za-z][A-Za-z ]{0,30}?))?\s*(?:\((\d+)\s*seats?\))?$/i.exec(physical);
+  const room = (m?.[1] ?? physical).trim();
+  const campus = m?.[2]?.trim() || null;
+  const capacity = m?.[3] ? Math.min(+m[3], 10000) : null;
+  const blockNo = /^([A-Za-z]*\d+)[-.\s]/.exec(room)?.[1];
+  return {
+    online: false, alsoOnline, room, capacity,
+    venue: campus ? `${room} (${campus})` : room,
+    building: blockNo ? `${campus ? `${campus} ` : ""}Building ${blockNo}` : campus,
+  };
+}
+
+function parseCelcatItems(items: TextItem[]): ParsedTimetable {
+  const warnings: string[] = [];
+  const title = items.map((i) => i.s.trim()).find((t) => /#\S+/.test(t))?.match(/#(\S+)/)?.[1]
+    ?? items.find((i) => i.h >= 12)?.s.trim() ?? null;
+
+  // Day headers, and which axis the day columns run along on each page.
+  const headers = new Map<number, { pos: number; day: number }[]>();
+  const axisOf = new Map<number, "x" | "y">();
+  const byPage = new Map<number, TextItem[]>();
+  for (const i of items) {
+    const m = CELCAT_DAY.exec(i.s.trim());
+    if (m) byPage.set(i.page, [...(byPage.get(i.page) ?? []), i]);
+  }
+  for (const [page, hs] of byPage) {
+    const xs = hs.map((h) => h.x), ys = hs.map((h) => h.y);
+    const axis = Math.max(...xs) - Math.min(...xs) >= Math.max(...ys) - Math.min(...ys) ? "x" : "y";
+    axisOf.set(page, axis);
+    headers.set(page, hs.map((h) => ({ pos: axis === "x" ? h.x : h.y, day: DAY_NUM[CELCAT_DAY.exec(h.s.trim())![1].slice(0, 3).toLowerCase()] }))
+      .sort((a, b) => a.pos - b.pos));
+  }
+  const colOf = (i: TextItem) => ((axisOf.get(i.page) ?? "x") === "x" ? i.x : i.y);
+  const dayAt = (i: TextItem) => {
+    const hs = headers.get(i.page) ?? [];
+    if (!hs.length) return null;
+    const p = colOf(i);
+    // A block starts at the left edge of its column; the header sits a little further in.
+    const ahead = hs.filter((h) => h.pos >= p - 10).sort((a, b) => a.pos - b.pos)[0];
+    return (ahead ?? hs[hs.length - 1]).day;
+  };
+
+  const classes: ParsedClass[] = [];
+  const seen = new Set<string>();
+  for (let k = 0; k < items.length; k++) {
+    if (!CELCAT_START.test(items[k].s.trim())) continue;
+    const start = items[k];
+    // Join the wrapped pieces of this block: same column, until the next block starts.
+    let text = start.s.trim();
+    let j = k + 1;
+    for (; j < items.length; j++) {
+      const it = items[j];
+      if (it.page !== start.page || Math.abs(colOf(it) - colOf(start)) > 3 || CELCAT_START.test(it.s.trim())) break;
+      text += (/[:\-(]$/.test(text) ? "" : " ") + it.s.trim();
+    }
+    k = j - 1;
+
+    const m = new RegExp(String.raw`^(.+?),\s*(${CELCAT_TIME})\s*-\s*(${CELCAT_TIME})\s*(.*)$`, "i").exec(text);
+    const code = m?.[4].match(/Module:\s*([A-Za-z]{2,6}\s?\d{3,5}[A-Za-z]?)/i)?.[1].replace(/\s+/g, "").toUpperCase();
+    if (!m || !code) { warnings.push(`Could not read a class: "${text.slice(0, 60)}"`); continue; }
+    const starts_at = to24(m[2]), ends_at = to24(m[3]);
+    if (!starts_at || !ends_at || ends_at <= starts_at) { warnings.push(`${code}: unreadable or impossible time "${m[2]}-${m[3]}".`); continue; }
+    const weekday = dayAt(start);
+    if (!weekday) { warnings.push(`${code}: could not tell which day it is on.`); continue; }
+    const rest = m[4];
+    const staff = /Staff:\s*(.*?)(?=\s+(?:Rooms?|Groups?|Module|Notes?):|$)/i.exec(rest)?.[1].trim() || null;
+    const roomsRaw = /Rooms?:\s*(.*?)(?=\s+(?:Staff|Groups?|Module|Notes?):|$)/i.exec(rest)?.[1].trim() ?? "";
+    const r = roomsRaw ? parseRooms(roomsRaw) : { online: true, alsoOnline: false, venue: null, building: null, room: null, capacity: null };
+    const c: ParsedClass = {
+      code, weekday, starts_at, ends_at, online: r.online, building: r.building, room: r.room, venue: r.venue,
+      lecturer: staff ? staff.split(/[;,]/)[0].trim().toUpperCase() : null,
+      capacity: r.capacity, group: r.online ? "Online" : r.alsoOnline ? "Also online" : null, kind: kindOf(m[1]),
+    };
+    const key = [c.code, c.weekday, c.starts_at, c.ends_at, c.venue ?? "online"].join("|");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    classes.push(c);
+  }
+  classes.sort((a, b) => a.weekday - b.weekday || a.starts_at.localeCompare(b.starts_at) || a.code.localeCompare(b.code));
+  if (!classes.length) warnings.push("No classes were found in this timetable.");
+  return { title, expected: null, classes, warnings };
 }

@@ -25,3 +25,10 @@ export async function shellData(s: Pick<S, "user" | "supabase"> & { institutionI
   const meta = s.user.user_metadata as { full_name?: string } | undefined;
   return { user: { email: s.user.email, name: meta?.full_name || null }, unread: count ?? 0, theme };
 }
+
+/** The institution's campuses that have a location, for the maps. Works before migration 0009 (no outline/zoom yet). */
+export async function loadCampuses(supabase: S["supabase"], institutionId: string): Promise<import("@/lib/campuses").Campus[]> {
+  const { toCampus } = await import("@/lib/campuses");
+  const { data } = await supabase.from("campuses").select("*").eq("institution_id", institutionId).is("deleted_at", null).order("name");
+  return (data ?? []).map((r) => toCampus(r as Parameters<typeof toCampus>[0])).filter((c): c is NonNullable<typeof c> => !!c);
+}

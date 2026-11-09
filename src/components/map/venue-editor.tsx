@@ -2,7 +2,7 @@
 import type * as Leaflet from "leaflet";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Field, Input, Notice } from "@/components/ui";
-import { campusesFor, coveringRadius, distanceM, loadBuildings, type Building, type Campus, type LatLng } from "@/lib/campuses";
+import { coveringRadius, distanceM, fallbackCampus, loadBuildings, type Building, type Campus, type LatLng } from "@/lib/campuses";
 import { collectGps } from "@/lib/evidence";
 import { BRAND, drawVenue, INFO, OK, useLeaflet, type Venueish } from "./use-leaflet";
 
@@ -19,14 +19,15 @@ const TOOLS: [Tool, string, string][] = [
   ["centre", "Centre + radius", "Click the middle of the hall, then set the radius."],
 ];
 
-export function VenueEditor({ venues, institutionName, save, remove, bulk }: {
+export function VenueEditor({ venues, campuses: given, save, remove, bulk }: {
   venues: Venue[];
-  institutionName: string | null;
+  campuses: Campus[];
   save: (s: State, f: FormData) => Promise<State>;
   remove: (s: State, f: FormData) => Promise<State>;
   bulk: (s: State, f: FormData) => Promise<State>;
 }) {
-  const campuses = useMemo(() => campusesFor(institutionName), [institutionName]);
+  const campuses = useMemo(() => (given.length ? given
+    : [fallbackCampus(venues.filter((v) => v.lat != null && v.lng != null).map((v) => [v.lat!, v.lng!] as LatLng))]), [given, venues]);
   const [campus, setCampus] = useState<Campus>(campuses[0]);
   const [tool, setTool] = useState<Tool>("building");
   const [draft, setDraft] = useState<Draft>(EMPTY);
@@ -65,7 +66,8 @@ export function VenueEditor({ venues, institutionName, save, remove, bulk }: {
     setDraft((d) => (d.id ? d : EMPTY)); // an unsaved venue belongs to the campus it was placed on
     setBuildings(null);
     let alive = true;
-    void loadBuildings(campus.bbox).then((b) => alive && setBuildings(b));
+    // No building lookup for the whole-country view: there is no campus to look in.
+    if (campus.id === "fallback-country") setBuildings([]); else void loadBuildings(campus.bbox).then((b) => alive && setBuildings(b));
     return () => { alive = false; };
   }, [m, campus]);
 
@@ -158,6 +160,11 @@ export function VenueEditor({ venues, institutionName, save, remove, bulk }: {
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
       <div className="space-y-2">
+        {given.length === 0 && (
+          <p className="rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn">
+            Your campus map hasn&apos;t been set up yet. UniAttend sets it up when your institution is approved; you can still place venues by searching the map.
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           {campuses.map((c) => (
             <button key={c.id} type="button" onClick={() => setCampus(c)}
@@ -199,9 +206,9 @@ export function VenueEditor({ venues, institutionName, save, remove, bulk }: {
           <input type="hidden" name="lat" value={draft.lat ?? ""} />
           <input type="hidden" name="lng" value={draft.lng ?? ""} />
           <input type="hidden" name="polygon" value={draft.polygon.length >= 3 ? JSON.stringify(draft.polygon) : ""} />
-          <Field label="Name"><Input name="name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="UIGC Lecture Hall" required /></Field>
+          <Field label="Name"><Input name="name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Lecture Hall 1" required /></Field>
           <div className="grid grid-cols-2 gap-2">
-            <Field label="Code"><Input name="code" value={draft.code} onChange={(e) => setDraft({ ...draft, code: e.target.value })} placeholder="UIGC-1" /></Field>
+            <Field label="Code"><Input name="code" value={draft.code} onChange={(e) => setDraft({ ...draft, code: e.target.value })} placeholder="LH-1" /></Field>
             <Field label="Capacity"><Input name="capacity" type="number" min={1} value={draft.capacity} onChange={(e) => setDraft({ ...draft, capacity: e.target.value })} /></Field>
           </div>
           <Field label={`Radius: ${draft.radius} m`} hint={draft.polygon.length >= 3 ? "Used only as a fallback; the outline is what counts." : "Should just cover the hall plus about 15 m for GPS error."}>

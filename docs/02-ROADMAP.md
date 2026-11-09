@@ -21,7 +21,7 @@ This file is the record of completed and outstanding work. Update it at the end 
 - ✅ `supabase/install-uniattend.sql`: one-transaction installer, tested beside a simulated acvosa `public`
 - ✅ Installer run on acvosa and `uniattend` schema exposed (verified through the API, 2026-11-08)
 - 🟡 `supabase/remove-acvosa.sql`: permanently removes the ACVOSA app (owner's decision, 2026-11-08), keeps `aa_*` and all logins; tested on a simulated copy, self-checking, not yet run on acvosa
-- ⬜ Import legacy `aa_*` UNIVEN data into the UNIVEN tenant
+- ⬜ Optional: import legacy `aa_*` attendance data into the matching tenant
 
 > **Session 1 result (2026-11-07):** `npm run test` → 37/37 pass (32 database, 5 unit). `tsc`, `eslint` and
 > `next build` are clean. Everything marked 🟡 compiles and is wired to tested database functions, but has not
@@ -70,4 +70,5 @@ This file is the record of completed and outstanding work. Update it at the end 
 - ⬜ **Before any real students:** Supabase Auth → *Confirm email* must be ON for the acvosa project (it may be switched off during testing). Linking a student record trusts confirmed emails only.
 - ⬜ Vercel project + env vars
 - ⬜ Production Supabase, backups (PITR on Pro plan)
-- ⬜ UNIVEN pilot tenant + import from `acvosa` `aa_*` tables
+- ✅ Institution-neutral code: campus maps and timetable links live in the database, set up per institution by the super admin (directory seeded with 14 Limpopo/Gauteng/Free State institutions, migration 0009)
+- ⬜ First pilot tenant set up from the directory

@@ -1,60 +1,52 @@
-// Known campuses for the pilot region. Centres and outlines are from
-// OpenStreetMap (© OpenStreetMap contributors, ODbL), fetched 2026-11-08:
-//   University of Venda      — way 460936140
-//   Vhembe TVET College      — way 1245608817 (Thohoyandou campus)
-//   Vhembe TVET Thengwe      — node search result, no outline mapped
-// Building footprints inside a campus are loaded live from OpenStreetMap
-// (Overpass API) by the venue editor, so new buildings appear without a deploy.
+// Campus geometry helpers. Nothing about any institution is hard-coded: each
+// institution's campuses (centre, zoom, optional outline) come from its own
+// rows in uniattend.campuses, set up by the platform administrator.
+// Building footprints and named places are loaded live from OpenStreetMap.
 
 export type LatLng = [number, number];
 
 export type Campus = {
   id: string;
-  institution: string;
   name: string;
   center: LatLng;
   zoom: number;
-  outline?: LatLng[];
-  /** south, west, north, east — used to fetch building footprints */
+  outline?: LatLng[] | null;
+  /** south, west, north, east */
   bbox: [number, number, number, number];
 };
 
-export const CAMPUSES: Campus[] = [
-  {
-    id: "univen-main",
-    institution: "University of Venda",
-    name: "UNIVEN main campus, Thohoyandou",
-    center: [-22.9768, 30.4427],
-    zoom: 16,
-    bbox: [-22.9826, 30.4331, -22.9721, 30.4523],
-    outline: [[-22.976633,30.433125],[-22.981485,30.435296],[-22.982271,30.437609],[-22.982409,30.439106],[-22.982301,30.442459],[-22.982548,30.444126],[-22.9823,30.445896],[-22.98187,30.446745],[-22.981172,30.450228],[-22.980201,30.450957],[-22.975029,30.452039],[-22.972152,30.452224],[-22.972628,30.451527],[-22.973603,30.448904],[-22.97332,30.448734],[-22.973685,30.447641],[-22.97244,30.44671],[-22.97213,30.446634],[-22.973464,30.441398],[-22.976633,30.433125]],
-  },
-  {
-    id: "vhembe-tvet-thohoyandou",
-    institution: "Vhembe TVET College",
-    name: "Vhembe TVET, Thohoyandou campus",
-    center: [-22.9412, 30.4826],
-    zoom: 17,
-    bbox: [-22.9439, 30.4798, -22.9387, 30.4855],
-    outline: [[-22.942743,30.47987],[-22.943496,30.480564],[-22.942953,30.481015],[-22.943801,30.481693],[-22.941315,30.485428],[-22.93991,30.485111],[-22.938756,30.484749],[-22.939514,30.483174],[-22.942743,30.47987]],
-  },
-  {
-    id: "vhembe-tvet-thengwe",
-    institution: "Vhembe TVET College",
-    name: "Vhembe TVET, Thengwe campus",
-    center: [-22.7515, 30.5124],
-    zoom: 17,
-    bbox: [-22.7545, 30.5094, -22.7485, 30.5154],
-  },
-];
+/** Middle of South Africa, for an institution whose campus map isn't set up yet. */
+export const FALLBACK_CENTER: LatLng = [-28.5, 24.7];
+export const FALLBACK_ZOOM = 5;
 
-/** Campuses to offer first for an institution, matched on its name. */
-export function campusesFor(institutionName: string | null | undefined): Campus[] {
-  const n = (institutionName ?? "").toLowerCase();
-  const own = CAMPUSES.filter((c) =>
-    (/venda|univen/.test(n) && c.institution === "University of Venda") ||
-    (/vhembe/.test(n) && c.institution === "Vhembe TVET College"));
-  return own.length ? [...own, ...CAMPUSES.filter((c) => !own.includes(c))] : CAMPUSES;
+export function bboxOf(center: LatLng, outline?: LatLng[] | null, pad = 0.002): [number, number, number, number] {
+  if (outline && outline.length >= 3) {
+    const lat = outline.map((p) => p[0]), lng = outline.map((p) => p[1]);
+    return [Math.min(...lat) - pad, Math.min(...lng) - pad, Math.max(...lat) + pad, Math.max(...lng) + pad];
+  }
+  const d = 0.008; // ~900 m around the centre
+  return [center[0] - d, center[1] - d, center[0] + d, center[1] + d];
+}
+
+/** A campus row from the database, as the map components use it. */
+export function toCampus(r: { id: string; name: string; lat: number | null; lng: number | null; zoom?: number | null; outline?: unknown }): Campus | null {
+  if (r.lat == null || r.lng == null) return null;
+  const outline = Array.isArray(r.outline) && r.outline.length >= 3 ? (r.outline as LatLng[]) : null;
+  const center: LatLng = [r.lat, r.lng];
+  return { id: r.id, name: r.name, center, zoom: r.zoom ?? 16, outline, bbox: bboxOf(center, outline) };
+}
+
+/**
+ * The campus to open a map on when an institution has none set up yet: around
+ * its already-placed venues, otherwise a view of the whole country.
+ */
+export function fallbackCampus(points: LatLng[]): Campus {
+  if (points.length) {
+    const center: LatLng = [points.reduce((a, p) => a + p[0], 0) / points.length, points.reduce((a, p) => a + p[1], 0) / points.length];
+    return { id: "fallback-venues", name: "Your venues", center, zoom: 16, outline: null, bbox: bboxOf(center) };
+  }
+  return { id: "fallback-country", name: "Campus map not set up", center: FALLBACK_CENTER, zoom: FALLBACK_ZOOM, outline: null,
+           bbox: [FALLBACK_CENTER[0], FALLBACK_CENTER[1], FALLBACK_CENTER[0], FALLBACK_CENTER[1]] };
 }
 
 export type Building = { id: number; name: string | null; polygon: LatLng[]; center: LatLng };

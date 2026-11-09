@@ -37,7 +37,7 @@ export function StudentAdder({ modules, addOne, paste, upload }: {
             <Field label="Full name"><Input name="full_name" required autoComplete="off" placeholder="Thabo Mulaudzi" /></Field>
           </div>
           <Field label="Email (optional)" hint="Their university email. They get access when they sign up with it.">
-            <Input name="email" type="email" autoComplete="off" placeholder="22012345@mvula.univen.ac.za" />
+            <Input name="email" type="email" autoComplete="off" placeholder="22012345@students.example.ac.za" />
           </Field>
           <fieldset>
             <legend className="mb-1.5 text-sm font-medium">Enrol in modules (optional)</legend>
@@ -60,7 +60,7 @@ export function StudentAdder({ modules, addOne, paste, upload }: {
         <ActionForm action={paste} submit="Add students" pending="Adding…">
           <Field label="One student per line" hint="student number, full name, email (optional), module code (optional). You can paste straight from Excel.">
             <Textarea name="list" required rows={8} className="font-mono text-xs"
-              placeholder={"22012345, Thabo Mulaudzi, 22012345@mvula.univen.ac.za, CSC1541\n22012346, Lufuno Netshiongolwe\n22012347, Ntsako Baloyi, , CSC1541"} />
+              placeholder={"22012345, Thabo Mulaudzi, 22012345@students.example.ac.za, CSC1541\n22012346, Lufuno Netshiongolwe\n22012347, Ntsako Baloyi, , CSC1541"} />
           </Field>
           {modules.length > 0 && (
             <Field label="Enrol everyone in (optional)" hint="Used for lines without their own module code.">

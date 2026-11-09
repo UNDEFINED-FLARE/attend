@@ -5,17 +5,19 @@ import { requireRole } from "@/lib/auth";
 import type { LatLng } from "@/lib/campuses";
 import { addDepartment, addFaculty, addVenuesBulk, removeVenue, saveVenue } from "../actions";
 import { AutoMap } from "./auto-map";
+import { loadCampuses } from "@/lib/shell-data";
 import { DeleteButton } from "@/components/row-actions";
 
 export const metadata = { title: "Faculties & venues" };
 
 export default async function Structure() {
-  const { supabase, institutionId, current } = await requireRole("institution_admin");
+  const { supabase, institutionId } = await requireRole("institution_admin");
   const [{ data: faculties }, { data: departments }, { data: venueRows }] = await Promise.all([
     supabase.from("faculties").select("id, name, code").eq("institution_id", institutionId).is("deleted_at", null).order("name"),
     supabase.from("departments").select("id, name, code, faculties(code)").eq("institution_id", institutionId).is("deleted_at", null).order("name"),
     supabase.from("venues").select("*").eq("institution_id", institutionId).is("deleted_at", null).order("name"),
   ]);
+  const campuses = await loadCampuses(supabase, institutionId);
   const venues = (venueRows ?? []).map((v) => ({ ...v, building: (v.building as string | null | undefined) ?? null, polygon: (v.polygon as LatLng[] | null) ?? null }));
 
   return (
@@ -25,12 +27,12 @@ export default async function Structure() {
       {venues.some((v) => v.lat == null && !v.polygon) && (
         <Card className="mb-6">
           <CardTitle>Auto-map venues</CardTitle>
-          <AutoMap venues={venues} institutionName={current.institution_name} />
+          <AutoMap venues={venues} campuses={campuses} />
         </Card>
       )}
       <Card className="mb-6">
         <CardTitle>Campus map & lecture venues</CardTitle>
-        <VenueEditor venues={venues} institutionName={current.institution_name} save={saveVenue} remove={removeVenue} bulk={addVenuesBulk} />
+        <VenueEditor venues={venues} campuses={campuses} save={saveVenue} remove={removeVenue} bulk={addVenuesBulk} />
         <div className="mt-6">
           <Table head={["Venue", "Capacity", "Location check"]} empty="No venues yet. Pick a building on the map above.">
             {venues.map((v) => (
