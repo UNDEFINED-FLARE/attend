@@ -24,6 +24,10 @@ export type ParsedClass = {
   room: string | null;
   venue: string | null; // display name for the venue, null when online
   lecturer: string | null;
+  // Only from sources that provide them (the timetable website):
+  group?: string | null;
+  capacity?: number | null;
+  sourceId?: number;
 };
 
 export type ParsedTimetable = { title: string | null; expected: number | null; classes: ParsedClass[]; warnings: string[] };

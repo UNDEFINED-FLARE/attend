@@ -6,12 +6,16 @@ import { DAYS, WeekGrid, type Slot } from "@/components/week-grid";
 import { requireRole } from "@/lib/auth";
 import { addTimetableSlots, removeTimetableSlot } from "../actions";
 import { PdfImport } from "./pdf-import";
+import { UnivenImport } from "./univen-import";
 
 export const metadata = { title: "Timetable" };
+// Fetching a batch from the university timetable site can take ~15 s.
+export const maxDuration = 60;
 
 export default async function Timetable({ searchParams }: { searchParams: Promise<{ module?: string }> }) {
   const { module: filter } = await searchParams;
-  const { supabase, institutionId } = await requireRole("institution_admin");
+  const { supabase, institutionId, current } = await requireRole("institution_admin");
+  const isUniven = /venda|univen/i.test(`${current.institution_name} ${current.institution_slug}`);
   const [{ data: modules }, { data: venues }, { data: rows }] = await Promise.all([
     supabase.from("modules").select("id, code, title").eq("institution_id", institutionId).is("deleted_at", null).order("code"),
     supabase.from("venues").select("id, name").eq("institution_id", institutionId).is("deleted_at", null).order("name"),
@@ -29,6 +33,12 @@ export default async function Timetable({ searchParams }: { searchParams: Promis
   return (
     <>
       <PageHeader title="Timetable" subtitle="Classes added here appear on every enrolled student's timetable and campus map." />
+      {isUniven && (
+        <Card className="mb-6">
+          <CardTitle>Import from the UNIVEN timetable website</CardTitle>
+          <UnivenImport />
+        </Card>
+      )}
       <Card className="mb-6">
         <CardTitle>Import a timetable PDF</CardTitle>
         <PdfImport />
