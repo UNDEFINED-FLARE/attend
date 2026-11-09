@@ -21,6 +21,10 @@ const config: CapacitorConfig = {
     // Stay inside the app for UniAttend itself; anything else opens in the browser.
     allowNavigation: [url.host],
   },
+  plugins: {
+    // Class reminders scheduled on the phone (src/components/native-reminders.tsx).
+    LocalNotifications: { smallIcon: "ic_stat_uniattend", iconColor: "#2f6fed" },
+  },
   android: {
     allowMixedContent: false,
     // Chrome's remote inspector only for debug builds.

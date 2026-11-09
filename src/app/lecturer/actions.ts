@@ -1,5 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
+import { kickPush } from "@/lib/push";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { supabaseServer } from "@/lib/supabase/server";
@@ -22,6 +24,7 @@ export async function openSession(_: S, form: FormData): Promise<S> {
     p_minutes: p.data.minutes, p_late_minutes: p.data.late,
   });
   if (error) return { error: error.message };
+  after(kickPush); // "attendance is open" to enrolled students' phones
   redirect(`/lecturer/sessions/${(data as { id: string }).id}`);
 }
 
@@ -55,6 +58,7 @@ export async function decideLate(form: FormData) {
     p_session: p.session, p_students: p.students, p_accept: p.accept === "1", p_note: null,
   });
   if (error) throw new Error(error.message);
+  after(kickPush);
   revalidatePath(`/lecturer/sessions/${p.session}`);
 }
 
@@ -70,6 +74,7 @@ export async function override(_: S, form: FormData): Promise<S> {
     p_session: p.data.session, p_student: p.data.student, p_status: p.data.status, p_note: p.data.note,
   });
   if (error) return { error: error.message };
+  after(kickPush);
   revalidatePath(`/lecturer/sessions/${p.data.session}`);
   return { ok: "Saved." };
 }
@@ -87,6 +92,7 @@ export async function resolveDispute(_: S, form: FormData): Promise<S> {
     p_dispute: p.data.dispute, p_upheld: upheld, p_new_status: upheld ? p.data.decision : null, p_note: p.data.note,
   });
   if (error) return { error: error.message };
+  after(kickPush);
   revalidatePath("/lecturer/disputes");
   return { ok: "Resolved. The student has been notified." };
 }

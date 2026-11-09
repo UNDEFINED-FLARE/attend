@@ -3,6 +3,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getUserWithRetry } from "@/lib/supabase/resilient";
 
 const PUBLIC = ["/", "/login", "/signup", "/forgot-password", "/auth/callback", "/privacy"];
+// Machine endpoints that check their own secret.
+const PUBLIC_PREFIX = ["/api/push/"];
 
 // Refreshes the Supabase session cookie on every request and sends signed-out
 // users to /login. This is navigation only; authorization is enforced by RLS
@@ -27,7 +29,7 @@ export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
   // If Supabase is unreachable, let the request through: the page's own
   // server-side check will show a connection error instead of a false logout.
-  if (!user && !unreachable && !PUBLIC.includes(path)) {
+  if (!user && !unreachable && !PUBLIC.includes(path) && !PUBLIC_PREFIX.some((p) => path.startsWith(p))) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", path);
@@ -37,5 +39,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg|manifest.webmanifest|.*\\.(?:png|jpg|svg)$).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg|manifest.webmanifest|sw.js|icons/|.*\\.(?:png|jpg|svg)$).*)"],
 };

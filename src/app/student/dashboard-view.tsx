@@ -4,6 +4,7 @@ import { AppTitle } from "@/components/app-chrome";
 import { Ring } from "@/components/charts";
 import { Icon, type IconName } from "@/components/icons";
 import { LateChip } from "@/components/late";
+import { PushToggle } from "@/components/push-toggle";
 import { pct } from "@/components/ui";
 import { hhmm, type Slot } from "@/components/week-grid";
 import { timeOf } from "@/lib/stats";
@@ -218,7 +219,10 @@ export function DashboardView({ d }: { d: DashboardData }) {
     <div className="mx-auto max-w-5xl">
       <AppTitle eyebrow={`${hello}${first ? `, ${first}` : ""} 👋`} title="Dashboard"
         sub={d.studentNumber ? <span className="font-mono text-xs">{d.studentNumber}</span> : undefined} />
-      <div className="space-y-6">{blocks}</div>
+      <div className="space-y-6">
+        <PushToggle compact logo={theme.header.logoUrl || null} institution={theme.header.title || undefined} />
+        {blocks}
+      </div>
     </div>
   );
 }

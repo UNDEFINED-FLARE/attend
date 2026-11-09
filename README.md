@@ -62,6 +62,11 @@ work through `SECURITY DEFINER` functions that check `auth.uid()`.
 Set the site address in `mobile/app.json`, then `npm run android:build` (or run the *Android app* GitHub Action and
 download the APK). Publishing to Google Play: see [docs/android-app.md](docs/android-app.md).
 
+## Phone notifications
+
+Class reminders, attendance updates and announcements, with the institution's logo. Needs migration 0011, four
+environment variables and `supabase/push-schedule.sql`: see [docs/notifications.md](docs/notifications.md).
+
 ## Tests
 
 ```bash

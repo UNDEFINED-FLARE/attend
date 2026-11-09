@@ -452,3 +452,58 @@ describe("institution setup by the platform administrator", () => {
     expect(await db.as(u.sB1, "select * from uniattend.campuses where institution_id = $1", [id.instA])).toHaveLength(0);
   });
 });
+
+describe("phone notifications", () => {
+  const SECRET = "x".repeat(40);
+  const sub = (n: number) => [`https://push.example.com/send/${n}`, "B".repeat(40), "a".repeat(16)];
+  beforeAll(async () => {
+    await db.as(u.super, "select uniattend.set_push_secret($1, 15)", [SECRET]);
+    await db.as(u.sA1, "select uniattend.save_push_subscription($1, $2, $3, 'test')", sub(1));
+    await db.as(u.sA2, "select uniattend.save_push_subscription($1, $2, $3, 'test', '{\"classes\": false}')", sub(2));
+    await db.as(u.adminA, "update uniattend.institutions set theme = jsonb_build_object('header', jsonb_build_object('logoUrl', 'https://uni-a.example/logo.png', 'title', 'Uni A')) where id = $1", [id.instA]);
+  });
+  const claim = () => db.as<{ notification_id: string; kind: string; title: string; endpoint: string; logo_url: string | null; institution_name: string }>(
+    null, "select * from uniattend.push_claim($1)", [SECRET]);
+
+  it("only the secret holder can claim, and only a super admin sets the secret", async () => {
+    await expect(db.as(null, "select * from uniattend.push_claim('wrong')")).rejects.toThrow(/not allowed/);
+    await expect(db.as(u.adminA, "select uniattend.set_push_secret($1)", [SECRET])).rejects.toThrow(/super admin/);
+    expect(await db.as(u.sA1, "select * from uniattend.push_config")).toHaveLength(0);
+  });
+
+  it("students see only their own devices", async () => {
+    expect(await db.as(u.sA1, "select endpoint from uniattend.push_subscriptions")).toEqual([{ endpoint: sub(1)[0] }]);
+  });
+
+  it("an announcement reaches its audience, with the institution's logo", async () => {
+    await claim(); // drain anything earlier tests queued
+    await db.as(u.adminA, "insert into uniattend.announcements (institution_id, title, body, audience) values ($1, 'Campus closed Friday', 'Graduation day.', 'students')", [id.instA]);
+    const rows = await claim();
+    const ann = rows.filter((r) => r.kind === "announcement");
+    expect(ann.map((r) => r.endpoint).sort()).toEqual([sub(1)[0], sub(2)[0]]);
+    expect(ann[0]).toMatchObject({ title: "Campus closed Friday", logo_url: "https://uni-a.example/logo.png", institution_name: "Uni A" });
+    expect(await db.as(u.lectA, "select * from uniattend.notifications where kind = 'announcement'")).toHaveLength(0);
+    expect(await claim()).toHaveLength(0); // never sent twice
+  });
+
+  it("queues one reminder per student before a class, respecting each device's choice", async () => {
+    const [{ ok }] = await db.admin<{ ok: boolean }>(
+      "select ((now() at time zone 'Africa/Johannesburg') + interval '20 minutes')::date = (now() at time zone 'Africa/Johannesburg')::date as ok");
+    if (!ok) return; // too close to midnight for a same-day class
+    await db.admin(`insert into uniattend.timetables (institution_id, module_id, weekday, starts_at, ends_at)
+      select $1, $2, extract(isodow from now() at time zone 'Africa/Johannesburg')::int,
+             ((now() at time zone 'Africa/Johannesburg') + interval '10 minutes')::time(0),
+             ((now() at time zone 'Africa/Johannesburg') + interval '11 minutes')::time(0)`, [id.instA, id.modA]);
+    const rows = (await claim()).filter((r) => r.kind === "class_reminder");
+    expect(rows.map((r) => r.endpoint)).toEqual([sub(1)[0]]); // A2 turned class reminders off
+    expect(rows[0].title).toMatch(/^CSC101 starts at \d\d:\d\d$/);
+    const queued = await db.admin<{ n: number }>("select count(*)::int n from uniattend.notifications where kind = 'class_reminder'");
+    expect(queued[0].n).toBe(3); // all three A students get it in their inbox
+    expect(await db.admin<{ n: number }>("select uniattend.queue_class_reminders(15) n")).toEqual([{ n: 0 }]); // no duplicates
+  });
+
+  it("a gone subscription can be forgotten by the sender", async () => {
+    await db.as(null, "select uniattend.push_forget($1, $2)", [SECRET, sub(2)[0]]);
+    expect(await db.as(u.sA2, "select * from uniattend.push_subscriptions")).toHaveLength(0);
+  });
+});

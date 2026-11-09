@@ -1,5 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
+import { kickPush } from "@/lib/push";
 import { z } from "zod";
 import { requireRole } from "@/lib/auth";
 
@@ -53,5 +55,6 @@ export async function announce(_: S, f: FormData): Promise<S> {
   if (!p.success) return { error: p.error.issues[0].message };
   const { supabase, user } = await requireRole("super_admin");
   const { error } = await supabase.from("announcements").insert({ ...p.data, institution_id: null, created_by: user.id });
+  if (!error) after(kickPush);
   return error ? { error: error.message } : { ok: "Announcement published to all institutions." };
 }
