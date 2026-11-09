@@ -10,7 +10,7 @@ describe("timetable.univen.ac.za events", () => {
   it("maps day 0 to Monday and keeps room capacity and group", () => {
     expect(eventToClass(ev({ dayOfWeek: 0 }))).toEqual({
       code: "ECS1245", weekday: 1, starts_at: "15:00", ends_at: "16:50", online: false, building: "E-BLOCK", room: "E4",
-      venue: "E-Block E4", lecturer: "A LECTURER", group: "Group 2", capacity: 350, sourceId: 1,
+      venue: "E-Block E4", lecturer: "A LECTURER", group: "Group 2", capacity: 350, students: 313, sourceId: 1,
     });
   });
   it("treats Online rooms as online with no venue", () => {

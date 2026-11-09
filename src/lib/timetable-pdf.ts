@@ -27,6 +27,7 @@ export type ParsedClass = {
   // Only from sources that provide them (the timetable website):
   group?: string | null;
   capacity?: number | null;
+  students?: number | null; // size of the group(s) in this class
   sourceId?: number;
 };
 

@@ -5,7 +5,8 @@ import { campusesFor, distanceM, insidePolygon, type LatLng } from "@/lib/campus
 import { BRAND, drawVenue, OK, useLeaflet, type Venueish } from "./use-leaflet";
 
 export type MapVenue = Venueish & { id: string };
-export type MapClass = { venue_id: string; code: string; title: string; kind: string; starts_at: string; ends_at: string; mine: boolean; live: boolean };
+export type MapClass = { venue_id: string | null; code: string; title: string; kind: string; starts_at: string; ends_at: string; mine: boolean; live: boolean;
+  lecturer?: string | null; venue_name?: string | null; day?: "today" | "tomorrow" };
 
 const ACCENT = "#2f6fed";
 const WALK_M_PER_MIN = 80;
@@ -22,7 +23,18 @@ const centerOf = (v: MapVenue): LatLng | null =>
  * classes highlighted), and — only if they ask — their live position. The
  * position is used on this screen only; nothing here is sent anywhere.
  */
-export function CampusMap({ venues, classes, institutionName, now }: { venues: MapVenue[]; classes: MapClass[]; institutionName: string | null; now: string }) {
+/** "HH:MM" in South African time, ticking. */
+function sastNow() {
+  const d = new Date(Date.now() + 2 * 3600_000);
+  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+}
+const mins = (hhmm: string) => +hhmm.slice(0, 2) * 60 + +hhmm.slice(3, 5);
+
+export function CampusMap({ venues, classes, upcoming = [], institutionName, now: initialNow }: {
+  venues: MapVenue[]; classes: MapClass[]; upcoming?: MapClass[]; institutionName: string | null; now: string;
+}) {
+  const [now, setNow] = useState(initialNow);
+  useEffect(() => { const t = setInterval(() => setNow(sastNow()), 30_000); return () => clearInterval(t); }, []);
   const campus = campusesFor(institutionName)[0];
   const start: LatLng = useMemo(() => {
     const pts = venues.map(centerOf).filter(Boolean) as LatLng[];
@@ -37,10 +49,16 @@ export function CampusMap({ venues, classes, institutionName, now }: { venues: M
 
   const byVenue = useMemo(() => {
     const map = new Map<string, MapClass[]>();
-    for (const c of classes) map.set(c.venue_id, [...(map.get(c.venue_id) ?? []), c]);
+    for (const c of classes) if (c.venue_id) map.set(c.venue_id, [...(map.get(c.venue_id) ?? []), c]);
     return map;
   }, [classes]);
-  const myNext = classes.filter((c) => c.mine && c.ends_at.slice(0, 5) > now).sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0];
+  const activeNow = classes.filter((c) => c.live || (c.starts_at.slice(0, 5) <= now && now < c.ends_at.slice(0, 5)))
+    .sort((a, b) => Number(b.mine) - Number(a.mine) || a.code.localeCompare(b.code));
+  const nextUp = [
+    ...upcoming.filter((c) => c.day !== "tomorrow" && c.ends_at.slice(0, 5) > now),
+    ...upcoming.filter((c) => c.day === "tomorrow"),
+  ].slice(0, 4);
+  const myNext = nextUp.find((c) => c.day !== "tomorrow" && c.venue_id);
   const nextVenue = myNext ? venues.find((v) => v.id === myNext.venue_id) : undefined;
   const hereVenue = me ? venues.find((v) => inside(me.p, v)) : undefined;
   const toNext = me && nextVenue && centerOf(nextVenue) ? distanceM(me.p, centerOf(nextVenue)!) : null;
@@ -52,6 +70,8 @@ export function CampusMap({ venues, classes, institutionName, now }: { venues: M
     const g = L.layerGroup().addTo(map);
     if (campus.outline) L.polygon(campus.outline, { color: "#fff", weight: 2, dashArray: "6 6", fill: false, interactive: false }).addTo(g);
     const bounds: LatLng[] = [];
+    // Rooms in one building share its outline, so live labels are grouped per spot.
+    const labels = new Map<string, { at: LatLng; codes: string[]; mine: boolean; live: boolean }>();
     for (const v of venues) {
       const list = (byVenue.get(v.id) ?? []).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
       const nowClass = list.find((c) => c.live || (c.starts_at.slice(0, 5) <= now && now < c.ends_at.slice(0, 5)));
@@ -60,12 +80,27 @@ export function CampusMap({ venues, classes, institutionName, now }: { venues: M
       const shape = drawVenue(L, g, v, color, { label: false, weight: mine ? 3 : 2 });
       if (!shape) continue;
       const rows = list.length
-        ? list.map((c) => `<li style="margin:2px 0;${c.mine ? "font-weight:600" : ""}">${c.starts_at.slice(0, 5)}–${c.ends_at.slice(0, 5)} ${esc(c.code)} <span style="color:#64748b">${esc(c.kind)}${c.live ? " · attendance open" : ""}${c.mine ? " · yours" : ""}</span></li>`).join("")
+        ? list.map((c) => `<li style="margin:2px 0;${c.mine ? "font-weight:600" : ""}">${c.starts_at.slice(0, 5)}–${c.ends_at.slice(0, 5)} ${esc(c.code)} <span style="color:#64748b">${esc(c.kind)}${c.lecturer ? ` · ${esc(c.lecturer)}` : ""}${c.live ? " · attendance open" : ""}${c.mine ? " · yours" : ""}</span></li>`).join("")
         : `<li style="color:#64748b">No classes today</li>`;
       shape.bindPopup(`<strong>${esc(v.name)}</strong><ul style="margin:6px 0 0;padding-left:16px">${rows}</ul>`);
       shape.bindTooltip(`${v.name}${nowClass ? ` · now: ${nowClass.code}` : ""}`, { sticky: true });
       const c = centerOf(v);
       if (c) bounds.push(c);
+      if (c && nowClass) {
+        const key = `${c[0].toFixed(5)},${c[1].toFixed(5)}`;
+        const l = labels.get(key) ?? { at: c, codes: [], mine: false, live: false };
+        if (!l.codes.includes(nowClass.code)) l.codes.push(nowClass.code);
+        l.mine ||= nowClass.mine; l.live ||= nowClass.live;
+        labels.set(key, l);
+      }
+    }
+    for (const l of labels.values()) {
+      const text = l.codes.length > 2 ? `${l.codes.slice(0, 2).join(", ")} +${l.codes.length - 2}` : l.codes.join(", ");
+      L.marker(l.at, {
+        interactive: false,
+        icon: L.divIcon({ className: "", iconSize: [0, 0], html:
+          `<div class="ua-label ${l.mine ? "ua-label-mine" : ""}">${l.live ? '<span class="ua-pulse"></span>' : ""}${esc(text)}</div>` }),
+      }).addTo(g);
     }
     if (bounds.length > 1) map.fitBounds(L.latLngBounds(bounds).pad(0.25), { maxZoom: 18 });
     return () => { g.remove(); };
@@ -145,21 +180,45 @@ export function CampusMap({ venues, classes, institutionName, now }: { venues: M
         </section>
 
         <section className="rounded-2xl bg-surface p-4 shadow-card">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">Your classes today</p>
-          {classes.filter((c) => c.mine).length === 0 && <p className="text-sm text-muted">None today.</p>}
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">Up next for you</p>
+          {nextUp.length === 0 && <p className="text-sm text-muted">No more classes today or tomorrow.</p>}
           <ul className="space-y-2">
-            {classes.filter((c) => c.mine).sort((a, b) => a.starts_at.localeCompare(b.starts_at)).map((c, i) => {
-              const v = venues.find((x) => x.id === c.venue_id);
-              const done = c.ends_at.slice(0, 5) <= now;
+            {nextUp.map((c, i) => {
+              const v = c.venue_id ? venues.find((x) => x.id === c.venue_id) : undefined;
+              const startsIn = c.day === "today" ? mins(c.starts_at) - mins(now) : null;
+              const running = c.day === "today" && startsIn != null && startsIn <= 0;
               return (
                 <li key={i}>
-                  <button type="button" onClick={() => focus(v)} className={`flex w-full items-center gap-3 rounded-xl p-2 text-left hover:bg-bg ${done ? "opacity-60" : ""}`}>
-                    <span className="w-14 text-xs font-semibold tabular-nums">{c.starts_at.slice(0, 5)}</span>
+                  <button type="button" onClick={() => focus(v)} disabled={!v}
+                    className={`flex w-full items-center gap-3 rounded-xl p-2 text-left hover:bg-bg ${i === 0 ? "bg-accent/5 ring-1 ring-accent/30" : ""}`}>
+                    <span className="w-16 text-xs font-semibold tabular-nums">
+                      {running ? <span className="text-ok">Now</span> : c.day === "tomorrow" ? <>Tmrw<br />{c.starts_at.slice(0, 5)}</> : startsIn! < 60 ? <span className="text-accent">in {startsIn} min</span> : c.starts_at.slice(0, 5)}
+                    </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">{c.code} · {c.kind}</span>
-                      <span className="block truncate text-xs text-muted">{v?.name ?? "No venue"}{c.live ? " · attendance open" : ""}</span>
+                      <span className="block truncate text-xs text-muted">{v?.name ?? c.venue_name ?? "Online / no venue"}{c.lecturer ? ` · ${c.lecturer}` : ""}</span>
                     </span>
-                    <Icon name="arrowRight" size={16} className="text-muted" />
+                    {v && <Icon name="arrowRight" size={16} className="text-muted" />}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+
+        <section className="rounded-2xl bg-surface p-4 shadow-card">
+          <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted">
+            <span className="size-2 animate-pulse rounded-full bg-ok" />Happening now on campus
+          </p>
+          {activeNow.length === 0 && <p className="text-sm text-muted">No classes in session right now.</p>}
+          <ul className="max-h-56 space-y-1 overflow-y-auto">
+            {activeNow.map((c, i) => {
+              const v = c.venue_id ? venues.find((x) => x.id === c.venue_id) : undefined;
+              return (
+                <li key={i}>
+                  <button type="button" onClick={() => focus(v)} className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-bg">
+                    <span className="truncate"><b className={c.mine ? "text-ok" : ""}>{c.code}</b> <span className="text-muted">{v?.name ?? ""}</span></span>
+                    <span className="shrink-0 text-xs text-muted">{c.live ? <span className="font-medium text-ok">attendance open</span> : `until ${c.ends_at.slice(0, 5)}`}</span>
                   </button>
                 </li>
               );

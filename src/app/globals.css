@@ -58,3 +58,12 @@ body {
 .scan-line { position: absolute; left: 8%; right: 8%; height: 2px; background: var(--accent); box-shadow: 0 0 12px var(--accent); animation: scan 2.2s ease-in-out infinite; z-index: 2; }
 @keyframes scan { 0%, 100% { top: 12%; } 50% { top: 86%; } }
 @media (prefers-reduced-motion: reduce) { .scan-line { animation: none; top: 50%; } }
+
+/* Campus map: live class labels */
+.ua-label { transform: translate(-50%, -140%); white-space: nowrap; display: inline-flex; align-items: center; gap: 6px;
+  background: #fff; color: var(--ink); border: 2px solid var(--accent); border-radius: 999px; padding: 2px 8px;
+  font: 600 11px/1.4 ui-sans-serif, system-ui, sans-serif; box-shadow: 0 2px 6px rgb(0 0 0 / 0.25); }
+.ua-label-mine { border-color: var(--ok); }
+.ua-pulse { width: 8px; height: 8px; border-radius: 999px; background: var(--ok); box-shadow: 0 0 0 0 rgb(22 163 74 / 0.6); animation: ua-pulse 1.6s infinite; }
+@keyframes ua-pulse { 70% { box-shadow: 0 0 0 8px rgb(22 163 74 / 0); } 100% { box-shadow: 0 0 0 0 rgb(22 163 74 / 0); } }
+@media (prefers-reduced-motion: reduce) { .ua-pulse { animation: none; } }

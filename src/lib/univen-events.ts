@@ -33,6 +33,7 @@ export function eventToClass(e: UnivenEvent): ParsedClass | null {
     lecturer: e.staff?.[0]?.trim().replace(/\s+/g, " ") || null,
     group: groupLabel(e.groups ?? []),
     capacity: room?.capacity && room.capacity > 0 ? Math.min(room.capacity, 10000) : null,
+    students: (e.groups ?? []).reduce((a, g) => a + (g.studentCount && g.studentCount > 0 ? g.studentCount : 0), 0) || null,
     sourceId: e.eventId,
   };
 }

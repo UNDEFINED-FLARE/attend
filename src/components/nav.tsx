@@ -13,7 +13,7 @@ function useActive(items: NavItem[]) {
   return matches.sort((a, b) => b.href.length - a.href.length)[0]?.href;
 }
 
-export function SideNav({ items }: { items: NavItem[] }) {
+export function SideNav({ items, dark = false }: { items: NavItem[]; dark?: boolean }) {
   const active = useActive(items);
   return (
     <nav className="space-y-1" aria-label="Main">
@@ -21,7 +21,7 @@ export function SideNav({ items }: { items: NavItem[] }) {
         const on = i.href === active;
         return (
           <Link key={i.href} href={i.href} aria-current={on ? "page" : undefined}
-            className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${on ? "bg-accent/10 text-accent" : "text-muted hover:bg-bg hover:text-ink"}`}>
+            className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${on ? (dark ? "bg-white/15" : "bg-accent/10 text-accent") : dark ? "text-muted hover:bg-white/10" : "text-muted hover:bg-bg hover:text-ink"}`}>
             <Icon name={i.icon} size={19} />
             {i.label}
           </Link>

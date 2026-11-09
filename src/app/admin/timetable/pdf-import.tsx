@@ -87,7 +87,9 @@ export function ImportReview({ preview: p }: { preview: ImportPreview }) {
       <fieldset className="grid gap-2 text-sm sm:grid-cols-2">
         <Option name="create_modules" on label="Create missing modules" hint={p.newModules.length ? `${p.newModules.length}: ${p.newModules.slice(0, 8).join(", ")}${p.newModules.length > 8 ? "…" : ""}` : "None missing"} />
         <Option name="create_venues" on label="Create missing venues" hint={p.newVenues.length ? `${p.newVenues.length} venues; map them afterwards for GPS checks` : "None missing"} />
-        <Option name="assign_lecturers" on label="Link lecturers to their modules" hint={`Only lecturers already added under People (${lecturerKnown} of ${lecturerTotal})`} />
+        <Option name="create_lecturers" on label="Create missing lecturers" hint={lecturerTotal - lecturerKnown ? `${lecturerTotal - lecturerKnown} named in the timetable; add their staff numbers and emails later` : "None missing"} />
+        <Option name="assign_lecturers" on label="Link lecturers to their modules and classes" hint={`${lecturerTotal} lecturers in this timetable`} />
+        <Option name="module_sizes" on label="Update module class sizes" hint="From the timetable's group sizes, where it gives them" />
         <Option name="replace" label="Replace these modules' current timetable" hint="Removes their existing classes first. Leave off to only add new ones." />
       </fieldset>
       {result?.error && <Notice tone="bad">{result.error}</Notice>}

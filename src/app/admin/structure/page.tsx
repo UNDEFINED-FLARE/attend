@@ -4,6 +4,8 @@ import { Card, CardTitle, Field, Input, PageHeader, Select, Table, Td } from "@/
 import { requireRole } from "@/lib/auth";
 import type { LatLng } from "@/lib/campuses";
 import { addDepartment, addFaculty, addVenuesBulk, removeVenue, saveVenue } from "../actions";
+import { AutoMap } from "./auto-map";
+import { DeleteButton } from "@/components/row-actions";
 
 export const metadata = { title: "Faculties & venues" };
 
@@ -12,14 +14,20 @@ export default async function Structure() {
   const [{ data: faculties }, { data: departments }, { data: venueRows }] = await Promise.all([
     supabase.from("faculties").select("id, name, code").eq("institution_id", institutionId).is("deleted_at", null).order("name"),
     supabase.from("departments").select("id, name, code, faculties(code)").eq("institution_id", institutionId).is("deleted_at", null).order("name"),
-    supabase.from("venues").select("id, name, code, capacity, lat, lng, radius_m, polygon").eq("institution_id", institutionId).is("deleted_at", null).order("name"),
+    supabase.from("venues").select("*").eq("institution_id", institutionId).is("deleted_at", null).order("name"),
   ]);
-  const venues = (venueRows ?? []).map((v) => ({ ...v, polygon: (v.polygon as LatLng[] | null) ?? null }));
+  const venues = (venueRows ?? []).map((v) => ({ ...v, building: (v.building as string | null | undefined) ?? null, polygon: (v.polygon as LatLng[] | null) ?? null }));
 
   return (
     <>
       <PageHeader title="Faculties & venues" subtitle="Map each lecture venue so students' location can be checked against it." />
 
+      {venues.some((v) => v.lat == null && !v.polygon) && (
+        <Card className="mb-6">
+          <CardTitle>Auto-map venues</CardTitle>
+          <AutoMap venues={venues} institutionName={current.institution_name} />
+        </Card>
+      )}
       <Card className="mb-6">
         <CardTitle>Campus map & lecture venues</CardTitle>
         <VenueEditor venues={venues} institutionName={current.institution_name} save={saveVenue} remove={removeVenue} bulk={addVenuesBulk} />
@@ -41,7 +49,7 @@ export default async function Structure() {
         <Card>
           <CardTitle>Faculties</CardTitle>
           <ul className="mb-4 divide-y divide-line text-sm">
-            {(faculties ?? []).map((f) => <li key={f.id} className="py-2"><b>{f.code}</b> {f.name}</li>)}
+            {(faculties ?? []).map((f) => <li key={f.id} className="flex items-center justify-between py-1.5"><span><b>{f.code}</b> {f.name}</span><DeleteButton kind="faculty" id={f.id} label={f.name} /></li>)}
             {!faculties?.length && <li className="py-2 text-muted">None yet.</li>}
           </ul>
           <ActionForm action={addFaculty} submit="Add faculty">
@@ -54,7 +62,7 @@ export default async function Structure() {
         <Card>
           <CardTitle>Departments</CardTitle>
           <ul className="mb-4 divide-y divide-line text-sm">
-            {(departments ?? []).map((d) => <li key={d.id} className="py-2"><b>{d.code}</b> {d.name} <span className="text-muted">· {(d.faculties as unknown as { code: string })?.code}</span></li>)}
+            {(departments ?? []).map((d) => <li key={d.id} className="flex items-center justify-between py-1.5"><span><b>{d.code}</b> {d.name} <span className="text-muted">· {(d.faculties as unknown as { code: string })?.code}</span></span><DeleteButton kind="department" id={d.id} label={d.name} /></li>)}
             {!departments?.length && <li className="py-2 text-muted">None yet.</li>}
           </ul>
           {faculties?.length ? (

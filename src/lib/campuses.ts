@@ -103,3 +103,32 @@ export function coveringRadius(center: LatLng, polygon: LatLng[], margin = 15): 
   // capped at the database's 2 km limit; for an outline the radius is only a fallback
   return Math.min(2000, Math.round(Math.max(...polygon.map((p) => distanceM(center, p))) + margin));
 }
+
+const placeCache = new Map<string, Promise<import("@/lib/building-match").Place[]>>();
+const SKIP_PLACE = /^(highway|landuse|boundary|admin_level|barrier|leisure|natural|waterway|route|place)$/;
+
+/** Every named building and point of interest in a bounding box, from OpenStreetMap. Never throws. */
+export function loadPlaces(bbox: [number, number, number, number]): Promise<import("@/lib/building-match").Place[]> {
+  const key = bbox.join(",");
+  if (!placeCache.has(key)) {
+    const q = `[out:json][timeout:25];(way["name"](${key});node["name"](${key}););out tags geom;`;
+    placeCache.set(key, fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: new URLSearchParams({ data: q }) })
+      .then((r) => (r.ok ? r.json() : { elements: [] }))
+      .then((j: { elements: { type: string; id: number; lat?: number; lon?: number; tags?: Record<string, string>; geometry?: { lat: number; lon: number }[] }[] }) =>
+        j.elements.flatMap((e): import("@/lib/building-match").Place[] => {
+          const t = e.tags ?? {};
+          if (!t.name || Object.keys(t).some((k) => SKIP_PLACE.test(k))) return [];
+          if (e.type === "node" && e.lat != null && e.lon != null) {
+            return [{ id: `n${e.id}`, name: t.name, polygon: null, center: [e.lat, e.lon] as LatLng }];
+          }
+          if (e.type === "way" && e.geometry && e.geometry.length >= 4 && t.building) {
+            const ring = e.geometry.slice(0, -1).map((g) => [+g.lat.toFixed(6), +g.lon.toFixed(6)] as LatLng);
+            const center: LatLng = [ring.reduce((a, p) => a + p[0], 0) / ring.length, ring.reduce((a, p) => a + p[1], 0) / ring.length];
+            return [{ id: `w${e.id}`, name: t.name, polygon: ring, center }];
+          }
+          return [];
+        }))
+      .catch(() => { placeCache.delete(key); return []; }));
+  }
+  return placeCache.get(key)!;
+}
