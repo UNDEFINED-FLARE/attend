@@ -1,0 +1,474 @@
+<title>UniAttend 10k Readiness</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a register book — sticky tab strip over one readable column; findings set as ruled rows with a severity margin mark. */
+:root {
+  --paper: #f4f6f3;
+  --sheet: #ffffff;
+  --ink: #16202a;
+  --muted: #5a6670;
+  --rule: #d9dfdb;
+  --accent: #0e6a72;
+  --accent-soft: #e0efef;
+  --crit: #b4232c;
+  --crit-soft: #fbe7e8;
+  --high: #b5590b;
+  --high-soft: #fcefdf;
+  --med: #8a7300;
+  --med-soft: #f7f1d4;
+  --low: #3d6b45;
+  --low-soft: #e5f1e6;
+  --pend: #6b5ca8;
+  --pend-soft: #ece9f7;
+  --display: "Familjen Grotesk", "Arial Narrow", Arial, sans-serif;
+  --body: "Public Sans", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0f1519; --sheet: #161e23; --ink: #e5ebe8; --muted: #93a0a6; --rule: #27323a;
+    --accent: #5cc3c9; --accent-soft: #15353a;
+    --crit: #ff7a80; --crit-soft: #3a1a1d; --high: #f0a050; --high-soft: #3a2614;
+    --med: #e0c64a; --med-soft: #33300f; --low: #85c98f; --low-soft: #17301b;
+    --pend: #b3a6f0; --pend-soft: #26213f; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0f1519; --sheet: #161e23; --ink: #e5ebe8; --muted: #93a0a6; --rule: #27323a;
+  --accent: #5cc3c9; --accent-soft: #15353a;
+  --crit: #ff7a80; --crit-soft: #3a1a1d; --high: #f0a050; --high-soft: #3a2614;
+  --med: #e0c64a; --med-soft: #33300f; --low: #85c98f; --low-soft: #17301b;
+  --pend: #b3a6f0; --pend-soft: #26213f; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--paper); color: var(--ink); font: 15px/1.6 var(--body); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--sheet); }
+.wrap { max-width: 1040px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+header.top { background: var(--sheet); border-bottom: 1px solid var(--rule); }
+header.top .wrap { padding-block: 28px 18px; display: grid; gap: 14px; }
+.eyebrow { font: 600 12px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: -.01em; }
+h1 { font-size: clamp(26px, 4.4vw, 38px); line-height: 1.1; }
+h2 { font-size: 24px; line-height: 1.2; }
+h3 { font-size: 17px; line-height: 1.3; }
+p { margin: 0; }
+.lede { color: var(--muted); max-width: 68ch; }
+.verdict { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+.stamp { font: 700 15px/1 var(--display); letter-spacing: .06em; text-transform: uppercase; color: var(--crit); border: 2px solid var(--crit); padding: 8px 12px; border-radius: 4px; transform: rotate(-1.5deg); }
+nav.tabs { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--sheet); border-bottom: 1px solid var(--rule); }
+nav.tabs .wrap { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+nav.tabs a { flex: none; padding: 12px 12px 11px; color: var(--muted); text-decoration: none; font-weight: 600; font-size: 14px; border-bottom: 3px solid transparent; }
+nav.tabs a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); }
+nav.tabs a:hover { color: var(--ink); }
+a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+main .wrap { padding-block: 28px 64px; display: grid; gap: 28px; }
+section { display: grid; gap: 14px; min-width: 0; }
+.panel { background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; padding: 18px; min-width: 0; }
+.grid3 { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.blocker { display: grid; gap: 8px; align-content: start; border-top: 4px solid var(--crit); }
+.blocker .n { font: 700 13px/1 var(--mono); color: var(--crit); }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font: 600 11px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; padding: 5px 8px; border-radius: 999px; white-space: nowrap; }
+.sev-Critical { color: var(--crit); background: var(--crit-soft); }
+.sev-High { color: var(--high); background: var(--high-soft); }
+.sev-Medium { color: var(--med); background: var(--med-soft); }
+.sev-Low, .sev-Info, .sev-Positive { color: var(--low); background: var(--low-soft); }
+.kind { color: var(--accent); background: var(--accent-soft); }
+.pending { color: var(--pend); background: var(--pend-soft); }
+.legend { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.legend div { display: grid; gap: 4px; }
+.rows { display: grid; }
+.row { display: grid; grid-template-columns: 6px 1fr; gap: 14px; padding: 14px 0; border-top: 1px solid var(--rule); }
+.row:first-child { border-top: 0; }
+.mark { border-radius: 3px; }
+.mark.Critical { background: var(--crit); } .mark.High { background: var(--high); } .mark.Medium { background: var(--med); }
+.mark.Low, .mark.Info, .mark.Positive { background: var(--low); }
+.row-body { display: grid; gap: 6px; min-width: 0; }
+.row-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.id { font: 600 12px/1 var(--mono); color: var(--muted); }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.filters button { font: 600 13px/1 var(--body); padding: 8px 12px; border-radius: 999px; border: 1px solid var(--rule); background: var(--sheet); color: var(--ink); cursor: pointer; }
+.filters button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 600 12px/1.3 var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); }
+code, .mono { font-family: var(--mono); font-size: .9em; }
+pre { margin: 0; background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; padding: 12px; overflow-x: auto; font: 13px/1.5 var(--mono); }
+.targets { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.target { display: grid; gap: 2px; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--sheet); }
+.target b { font: 600 20px/1.2 var(--display); font-variant-numeric: tabular-nums; }
+.calc { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+@media (max-width: 760px) { .calc { grid-template-columns: 1fr; } }
+.field { display: grid; gap: 6px; }
+.field label { font-weight: 600; font-size: 14px; }
+select, input[type=range] { width: 100%; }
+select { font: inherit; padding: 8px; border-radius: 6px; border: 1px solid var(--rule); background: var(--sheet); color: var(--ink); }
+.toggle { display: flex; gap: 10px; align-items: center; font-weight: 600; font-size: 14px; }
+.total { display: grid; gap: 4px; }
+.total b { font: 700 34px/1.1 var(--display); font-variant-numeric: tabular-nums; }
+.bar { position: relative; height: 14px; border-radius: 7px; background: var(--paper); border: 1px solid var(--rule); overflow: hidden; }
+.bar span { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
+.bar span.over { background: var(--crit); }
+.bar i { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink); }
+.checklist { display: grid; gap: 4px; }
+.check { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start; padding: 10px 0; border-top: 1px solid var(--rule); }
+.check:first-child { border-top: 0; }
+.check input { width: 18px; height: 18px; margin-top: 3px; accent-color: var(--accent); }
+.check.done .text { color: var(--muted); text-decoration: line-through; }
+.progress { font: 600 13px/1 var(--mono); color: var(--muted); }
+.note { padding: 12px 14px; border-radius: 6px; background: var(--pend-soft); color: var(--ink); font-size: 14px; }
+.cols2 { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+ul.tight { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+footer { color: var(--muted); font-size: 13px; }
+@media (prefers-reduced-motion: no-preference) { .bar span { transition: width .3s ease; } }
+</style>
+
+<div id="root"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
+<script>
+const { useState, useEffect, useMemo } = React;
+const html = htm.bind(React.createElement);
+const ZAR = 16.53;
+const BUDGET_ZAR = 3000;
+
+// ------------------------------------------------------------------ data (from docs/capacity/10k-readiness-report.md)
+const TARGETS = [
+  ["10,000", "registered students"], ["10,000", "concurrent users"], ["1,000 / 5 min", "registration burst"],
+  ["5k–10k / min", "check-ins"], ["< 500 ms", "API p95"], ["< 1 s", "check-in p95"], ["≈ R3,000", "per month"],
+];
+
+const BLOCKERS = [
+  { t: "Students can't confirm their email", d: "Email confirmation is required, but Supabase's default mail service only delivers to the project team. A custom mail server starts at 30 emails an hour.", k: "Confirmed in Supabase docs and config.toml" },
+  { t: "Each check-in scans 30 days of the institution's attendance", d: "The device-reuse check filters on institution, device and date with no matching index. At 10k students that is roughly 400k rows per check-in.", k: "Confirmed by reading check_in()" },
+  { t: "Every Auth call leaves from Vercel's servers", d: "Sign-in and token refresh are limited to 1,800 an hour per IP, bursts of 30. If Supabase counts them against Vercel's IPs, all students share a few small allowances.", k: "Limit confirmed; IP attribution untested" },
+];
+
+const BOTTLENECKS = [
+  ["B-1", "Email confirmation cannot be delivered (default SMTP: team addresses only; custom SMTP: 30/h until raised)", "Critical", "Confirmed", "Registration burst"],
+  ["B-2", "check_in() device query scans the institution's last 30 days of records", "Critical", "Confirmed", "Check-ins, check-in p95"],
+  ["B-3", "Auth calls originate from Vercel: 2 getUser calls per page view, /auth/v1/token 1,800/h per IP", "Critical", "Assumption", "Everything"],
+  ["B-4", "Student home and history pages scan the institution's history under row-level security", "High", "Confirmed", "API p95"],
+  ["B-5", "Live register re-renders on every check-in (800 ms debounce) plus a 15 s poll", "High", "Verified design", "Check-in p95 under burst"],
+  ["B-6", "No app or edge rate limiting; one abuser can drain shared email and IP quotas", "High", "Verified", "Registration availability"],
+  ["B-7", "Vercel function region probably far from the Ireland database", "High", "Assumption", "API p95"],
+  ["B-8", "Row-level security calls definer functions once per row on every list query", "High", "Verified design", "API p95"],
+  ["B-9", "Realtime publication carries busy tables nobody subscribes to", "Medium", "Assumption", "Check-in burst"],
+  ["B-10", "Admin dashboards aggregate 30 days on every view", "Medium", "Verified design", "Admin p95"],
+  ["B-11", "check_in races: duplicate side effects, non-atomic rate limit, close-session race", "Medium", "Verified", "Correctness"],
+  ["B-12", "PostgREST 1,000-row cap silently truncates admin counts", "Medium", "Verified", "Correctness"],
+  ["B-13", "Backups, point-in-time recovery and monitoring not verified", "Medium", "Not verifiable here", "Recovery"],
+  ["B-14", "Unbounded data growth; retention promised but not implemented", "Medium", "Verified", "Cost, POPIA"],
+  ["B-15", "link_my_accounts does sequential scans on every login", "Low", "Verified", "Login bursts"],
+].map(([id, t, sev, kind, hits]) => ({ id, t, sev, kind, hits }));
+
+const SECURITY = [
+  ["S-1", "High", "Any signed-in user can create a pending institution and act as its admin at once. grant_role then tells them whether any email has an account and lets them read that person's name, email and phone."],
+  ["S-2", "High", "No rate limiting or CAPTCHA on sign-up, sign-in or password reset. Supabase's email quota is project-wide and its token limit is per IP, so one script can block real students."],
+  ["S-3", "Medium", "Retention days are configurable and the privacy notice promises deletion, but nothing deletes anything."],
+  ["S-4", "Medium", "Admins can read every member's phone number; every student can read every lecturer's email and staff number."],
+  ["S-5", "Medium", "A relayed join code plus a GPS-spoofing app scores 75, which passes the accept threshold of 70."],
+  ["S-6", "Low", "Three helper functions callable directly reveal small facts across institutions when given a UUID."],
+  ["S-7", "Low", "The device hash is not salted per institution, so one phone is linkable across institutions."],
+  ["S-8", "Low", "No Content-Security-Policy header. Other security headers are in place."],
+].map(([id, sev, t]) => ({ id, sev, t }));
+
+const STRENGTHS = [
+  "Attendance status is decided only by the database; students can't write records.",
+  "A unique constraint on session and student makes a second attendance record impossible.",
+  "QR tokens are HMAC-signed per session and live 20–40 seconds; the secret never reaches a client.",
+  "Tenant rows use composite foreign keys, so a row can't point at another institution's data.",
+  "The app opens no Postgres connections; everything goes through PostgREST over HTTP.",
+  "The existing database tests pass: 48 of 48.",
+];
+
+const DB = [
+  ["D-1", "Critical", "Device-reuse query has no index for its filter; reads every institution record from the last 30 days on each check-in."],
+  ["D-2", "Medium", "Two simultaneous submissions from one student both log 'accepted', duplicate evidence and send two notifications (no second record)."],
+  ["D-3", "Low", "The 5-per-minute rate limit is count-then-insert, so parallel requests can exceed it."],
+  ["D-4", "Medium", "A check-in racing close_session can leave a late_pending row nobody resolves, or tell a student 'accepted' while the record says absent."],
+  ["D-6", "Positive", "Check-ins never update the session row, so 500 students checking in at once don't queue on a lock."],
+  ["D-7", "High", "Policies call definer functions with a per-row argument: 1,500–2,000 extra calls to render one 500-student register."],
+  ["D-8", "High", "Student pages filter attendance by institution only, then apply row security row by row until they find the student's own records."],
+  ["D-9", "Medium", "The lecturer review list filters institution and status with no index on that pair."],
+  ["D-11", "Medium", "Roughly 30–45 million rows a year at 10k students, with no purge."],
+  ["D-12", "Medium", "Admin module page loads all enrolments (about 60k) but receives 1,000, so counts are wrong."],
+  ["D-13", "Medium", "Realtime decodes notifications and session rows that have no subscriber."],
+].map(([id, sev, t]) => ({ id, sev, t }));
+
+const TESTS = [
+  ["T-REG", "ramp", "registration.js"], ["T-REG", "burst1k", "registration.js"], ["T-AUTH", "auth_ip", "registration.js"],
+  ["T-CHK (rest)", "ramp", "checkin.js"], ["T-CHK (rest)", "burst5k", "checkin.js"], ["T-CHK (rest)", "burst10k", "checkin.js"],
+  ["T-CHK-E2E", "burst5k", "checkin.js"], ["T-CHK-E2E", "burst10k", "checkin.js"],
+];
+
+const PLAN = {
+  P0: { label: "Before any 10k test or launch", items: [
+    "Custom SMTP on production and staging (mail sink on staging); raise the auth email limit; CAPTCHA on sign-up and reset",
+    "Migration 0011: device-hash index, unresolved-status index, verification-events session index, lecturer and venue indexes, lower(email) indexes",
+    "Filter the student home and history queries by the student's own id",
+    "Run T-AUTH; switch middleware to getClaims() with asymmetric keys; sign in from the browser if Vercel IPs are counted",
+    "Verify the Vercel function region and set Dublin; add WAF rate limits; staging protection bypass",
+    "Fix S-1: require an active institution for grant_role and imports; make grant_role non-enumerating",
+    "Set up a staging project, seed it, run the load tests",
+  ]},
+  P1: { label: "Before or at launch", items: [
+    "Rewrite row-level security predicates in set form and test equivalence",
+    "Live register: drop the 15 s poll while subscribed; refresh at most every 3–5 s, or update from Broadcast",
+    "Remove notifications and class_sessions from the Realtime publication",
+    "Harden check_in: re-check open status at insert, resolve late arrivals after close, log duplicates correctly, atomic rate limit",
+    "Serve dashboards from a rollup table; compute counts in SQL",
+    "POPIA: hide phone numbers from admins, limit lecturer details, revoke helper RPCs, salt the device hash",
+  ]},
+  P2: { label: "Within the first term", items: [
+    "Retention job honouring retention_days; 90-day cap on notifications; audit-log policy",
+    "Turn on point-in-time recovery and run a restore drill",
+    "Monitoring: Supabase CPU, disk and connections; Auth 429s; Sentry; uptime checks; weekly pg_stat_statements review",
+    "Partition verification events and notifications by month if growth follows the estimate",
+  ]},
+};
+
+const TIERS = { Large: 110, XL: 210, "2XL": 410 };
+const SEVERITIES = ["Critical", "High", "Medium", "Low"];
+const VIEWS = [["overview", "Overview"], ["bottlenecks", "Bottlenecks"], ["security", "Security"], ["database", "Database"], ["costs", "Costs"], ["load-tests", "Load tests"], ["plan", "Fix plan"]];
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage unavailable */ } },
+};
+
+// ------------------------------------------------------------------ components
+const Chip = ({ sev }) => html`<span class=${"chip sev-" + sev}>${sev}</span>`;
+
+function Row({ item }) {
+  return html`<div class="row">
+    <span class=${"mark " + item.sev} aria-hidden="true"></span>
+    <div class="row-body">
+      <div class="row-head"><span class="id">${item.id}</span><${Chip} sev=${item.sev} />
+        ${item.kind && html`<span class="chip kind">${item.kind}</span>`}</div>
+      <p>${item.t}</p>
+      ${item.hits && html`<p class="small muted">Affects: ${item.hits}</p>`}
+    </div>
+  </div>`;
+}
+
+function Overview() {
+  return html`
+    <section>
+      <h2>Three certain blockers</h2>
+      <div class="grid3">${BLOCKERS.map((b, i) => html`
+        <div class="panel blocker" key=${i}>
+          <span class="n">BLOCKER ${i + 1}</span>
+          <h3>${b.t}</h3>
+          <p class="small">${b.d}</p>
+          <p class="small muted">${b.k}</p>
+        </div>`)}</div>
+    </section>
+    <section>
+      <h2>Planning targets</h2>
+      <div class="targets">${TARGETS.map(([v, l]) => html`<div class="target" key=${l}><b>${v}</b><span class="small muted">${l}</span></div>`)}</div>
+      <p class="note">No capacity figure has been measured. Every number on this page is a target, a vendor limit or an estimate from reading the code. Load-test results are pending.</p>
+    </section>
+    <section>
+      <h2>How to read the labels</h2>
+      <div class="panel legend">
+        <div><span class="chip kind">Verified</span><p class="small">Confirmed by code, a passing test, a vendor document or an API response.</p></div>
+        <div><span class="chip kind">Assumption</span><p class="small">Plausible but untested; needs a staging test or a dashboard check.</p></div>
+        <div><span class="chip kind">Confirmed</span><p class="small">Certain at this scale; only the exact threshold is unmeasured.</p></div>
+        <div><span class="chip pending">Pending</span><p class="small">A load-test result that hasn't been produced yet.</p></div>
+      </div>
+    </section>
+    <section>
+      <h2>What's already solid</h2>
+      <div class="panel"><ul class="tight">${STRENGTHS.map((s) => html`<li key=${s}>${s}</li>`)}</ul></div>
+    </section>
+    <section>
+      <h2>Where it runs</h2>
+      <div class="panel tablewrap"><table>
+        <tbody>
+          <tr><th>Database</th><td>Supabase project <span class="mono">uniattend</span>, Ireland (eu-west-1), Postgres 17</td></tr>
+          <tr><th>App</th><td>Next.js 15 on Vercel, project <span class="mono">attend</span>, no custom domain yet</td></tr>
+          <tr><th>Function region</th><td>Not returned by the Vercel API; probably the Washington default. Dublin recommended.</td></tr>
+          <tr><th>Connections</th><td>No direct Postgres connections from the app; PostgREST's pool is the limit.</td></tr>
+        </tbody>
+      </table></div>
+    </section>`;
+}
+
+function Bottlenecks() {
+  const [sev, setSev] = useState("All");
+  const shown = BOTTLENECKS.filter((b) => sev === "All" || b.sev === sev);
+  return html`<section>
+    <h2>Ranked bottlenecks</h2>
+    <div class="filters" role="group" aria-label="Filter by severity">
+      ${["All", ...SEVERITIES].map((s) => html`<button key=${s} aria-pressed=${sev === s} onClick=${() => setSev(s)}>
+        ${s} ${s !== "All" ? "(" + BOTTLENECKS.filter((b) => b.sev === s).length + ")" : ""}</button>`)}
+    </div>
+    <div class="panel rows">${shown.map((b) => html`<${Row} key=${b.id} item=${b} />`)}</div>
+  </section>`;
+}
+
+function Security() {
+  return html`<section>
+    <h2>Security and POPIA</h2>
+    <p class="lede">Tenant isolation is well built and well tested. S-1 is the gap: it works through shared accounts and profiles, not through tenant tables.</p>
+    <div class="panel rows">${SECURITY.map((s) => html`<${Row} key=${s.id} item=${s} />`)}</div>
+  </section>`;
+}
+
+function Database() {
+  return html`<section>
+    <h2>Database performance</h2>
+    <p class="lede">Per accepted check-in the database does about 6 inserts across 4 tables. At 10,000 check-ins a minute that is about 1,000 inserts a second, which a Large instance should handle once D-1 is fixed. That is an estimate, not a measurement.</p>
+    <div class="panel rows">${DB.map((d) => html`<${Row} key=${d.id} item=${d} />`)}</div>
+    <div class="panel">
+      <h3>Indexes to add (migration 0011)</h3>
+      <pre>${`attendance_records (institution_id, device_hash, created_at) where device_hash is not null
+attendance_records (institution_id, status) where status in ('pending_verification','late_pending','disputed')
+attendance_verification_events (session_id)
+class_sessions (lecturer_id), class_sessions (venue_id)
+students (lower(email)), students (lower(student_number)), lecturers (lower(email))`}</pre>
+    </div>
+  </section>`;
+}
+
+function Costs() {
+  const [tier, setTier] = useState(() => store.get("ua-tier", "Large"));
+  const [pitr, setPitr] = useState(() => store.get("ua-pitr", false));
+  const [vercel, setVercel] = useState(() => store.get("ua-vercel", 20));
+  const [email, setEmail] = useState(() => store.get("ua-email", 5));
+  const [monitor, setMonitor] = useState(() => store.get("ua-monitor", false));
+  useEffect(() => { store.set("ua-tier", tier); store.set("ua-pitr", pitr); store.set("ua-vercel", vercel); store.set("ua-email", email); store.set("ua-monitor", monitor); }, [tier, pitr, vercel, email, monitor]);
+
+  const lines = [
+    ["Supabase Pro base", 25],
+    [`Compute ${tier} minus $10 credit`, TIERS[tier] - 10],
+    ["Point-in-time recovery, 7 days", pitr ? 100 : 0],
+    ["Supabase usage overage (est.)", 5],
+    ["Vercel Pro, 1 seat", 20],
+    ["Vercel usage over the credit", vercel],
+    ["Transactional email", email],
+    ["Error tracking and uptime", monitor ? 26 : 0],
+  ];
+  const usd = lines.reduce((a, [, v]) => a + v, 0);
+  const zar = usd * ZAR;
+  const pct = Math.min(100, (zar / (BUDGET_ZAR * 2)) * 100);
+  const fmt = (n) => n.toLocaleString("en-ZA", { maximumFractionDigits: 0 });
+  return html`<section>
+    <h2>Monthly cost estimate</h2>
+    <p class="lede">List-price estimates at R${ZAR}/USD. Check each line on the vendor's pricing page before budgeting.</p>
+    <div class="calc">
+      <div class="panel" style=${{ display: "grid", gap: "16px" }}>
+        <div class="field"><label for="tier">Supabase compute</label>
+          <select id="tier" value=${tier} onChange=${(e) => setTier(e.target.value)}>
+            ${Object.entries(TIERS).map(([k, v]) => html`<option key=${k} value=${k}>${k} ($${v}/month)</option>`)}
+          </select></div>
+        <label class="toggle" for="pitr"><input id="pitr" type="checkbox" checked=${pitr} onChange=${(e) => setPitr(e.target.checked)} />Point-in-time recovery (+$100)</label>
+        <label class="toggle" for="mon"><input id="mon" type="checkbox" checked=${monitor} onChange=${(e) => setMonitor(e.target.checked)} />Paid error tracking (+$26)</label>
+        <div class="field"><label for="vercel">Vercel usage over credit: $${vercel}</label>
+          <input id="vercel" type="range" min="0" max="100" step="5" value=${vercel} onChange=${(e) => setVercel(+e.target.value)} /></div>
+        <div class="field"><label for="email">Email service: $${email}</label>
+          <input id="email" type="range" min="0" max="20" step="1" value=${email} onChange=${(e) => setEmail(+e.target.value)} /></div>
+      </div>
+      <div class="panel" style=${{ display: "grid", gap: "14px", alignContent: "start" }}>
+        <div class="total"><span class="eyebrow">Estimated total</span><b>R${fmt(zar)}</b><span class="muted mono">$${fmt(usd)} / month</span></div>
+        <div class="bar" role="img" aria-label=${`R${fmt(zar)} against a budget of R${fmt(BUDGET_ZAR)}`}>
+          <span class=${zar > BUDGET_ZAR ? "over" : ""} style=${{ width: pct + "%" }}></span><i style=${{ left: "50%" }}></i></div>
+        <p class="small ${zar > BUDGET_ZAR ? "" : "muted"}" style=${{ color: zar > BUDGET_ZAR ? "var(--crit)" : undefined }}>
+          ${zar > BUDGET_ZAR ? `R${fmt(zar - BUDGET_ZAR)} over the R3,000 budget (marker)` : `R${fmt(BUDGET_ZAR - zar)} under the R3,000 budget (marker)`}</p>
+        <div class="tablewrap"><table><tbody>
+          ${lines.map(([k, v]) => html`<tr key=${k}><td>${k}</td><td class="num">$${v}</td><td class="num">R${fmt(v * ZAR)}</td></tr>`)}
+        </tbody></table></div>
+      </div>
+    </div>
+    <p class="small muted">Recommendation: Large plus point-in-time recovery for production (about R4,000–6,000). Move to XL only if staging tests show Large is CPU-bound after the fixes.</p>
+  </section>`;
+}
+
+function LoadTests() {
+  return html`<section>
+    <h2>Load tests</h2>
+    <p class="note">Nothing has been run. The k6 scripts were syntax-checked; the seed, reset, validation and cleanup SQL ran on a local test database, and the QR token they compute matched the database's own signing function.</p>
+    <div class="panel tablewrap"><table>
+      <thead><tr><th>Test</th><th>Scenario</th><th>Script</th><th class="num">RPS</th><th class="num">p50</th><th class="num">p95</th><th class="num">p99</th><th class="num">Errors</th><th>Result</th></tr></thead>
+      <tbody>${TESTS.map(([t, s, f]) => html`<tr key=${t + s}>
+        <td>${t}</td><td class="mono">${s}</td><td class="mono">${f}</td>
+        ${[0, 1, 2, 3, 4].map((n) => html`<td class="num muted" key=${n}>—</td>`)}
+        <td><span class="chip pending">Pending</span></td></tr>`)}</tbody>
+    </table></div>
+    <div class="cols2">
+      <div class="panel" style=${{ display: "grid", gap: "10px" }}>
+        <h3>Run order</h3>
+        <ol class="tight">
+          <li>T-AUTH, which decides blocker 3</li>
+          <li>Check-in burst5k on unmodified staging, to confirm D-1</li>
+          <li>Apply the P0 fixes to staging and rerun</li>
+          <li>Ramp, then burst10k, then end-to-end through Vercel</li>
+          <li>Registration with a mail sink as SMTP</li>
+        </ol>
+      </div>
+      <div class="panel" style=${{ display: "grid", gap: "10px" }}>
+        <h3>Example command</h3>
+        <pre>${`LOADTEST_CONFIRM=staging \\
+SUPABASE_URL=https://<staging-ref>.supabase.co \\
+k6 run -e TARGET=rest -e SCENARIO=burst5k \\
+  loadtest/checkin.js`}</pre>
+        <p class="small muted">Scripts refuse to start against the production project or domains.</p>
+      </div>
+    </div>
+  </section>`;
+}
+
+function Plan() {
+  const [done, setDone] = useState(() => store.get("ua-plan-done", {}));
+  useEffect(() => store.set("ua-plan-done", done), [done]);
+  const all = Object.entries(PLAN).flatMap(([p, g]) => g.items.map((_, i) => p + i));
+  const count = all.filter((k) => done[k]).length;
+  return html`<section>
+    <div class="row-head" style=${{ justifyContent: "space-between" }}>
+      <h2>Fix plan</h2><span class="progress">${count} of ${all.length} ticked</span></div>
+    <p class="small muted">Ticks are saved in this browser only.</p>
+    ${Object.entries(PLAN).map(([p, g]) => html`<div class="panel" key=${p} style=${{ display: "grid", gap: "8px" }}>
+      <h3>${p} · ${g.label}</h3>
+      <div class="checklist">${g.items.map((t, i) => {
+        const k = p + i;
+        return html`<label class=${"check" + (done[k] ? " done" : "")} key=${k} for=${"c-" + k}>
+          <input id=${"c-" + k} type="checkbox" checked=${!!done[k]} onChange=${(e) => setDone({ ...done, [k]: e.target.checked })} />
+          <span class="text">${t}</span></label>`;
+      })}</div>
+    </div>`)}
+  </section>`;
+}
+
+const PAGES = { overview: Overview, bottlenecks: Bottlenecks, security: Security, database: Database, costs: Costs, "load-tests": LoadTests, plan: Plan };
+
+function App() {
+  const read = () => { const h = location.hash.slice(1); return PAGES[h] ? h : "overview"; };
+  const [view, setView] = useState(read);
+  useEffect(() => { const on = () => setView(read()); addEventListener("hashchange", on); return () => removeEventListener("hashchange", on); }, []);
+  const Page = PAGES[view];
+  return html`
+    <header class="top"><div class="wrap">
+      <span class="eyebrow">Capacity audit · 9 Nov 2026 · read-only</span>
+      <h1>Is UniAttend ready for 10,000 students?</h1>
+      <div class="verdict"><span class="stamp">No-go</span>
+        <p class="lede">Not yet. Three blockers are certain from the code and config. The path to a go decision is the P0 fixes, then load tests on staging, then a decision on measured p95 and error rates.</p></div>
+    </div></header>
+    <nav class="tabs" aria-label="Sections"><div class="wrap">
+      ${VIEWS.map(([id, label]) => html`<a key=${id} href=${"#" + id} aria-current=${view === id ? "page" : undefined}>${label}</a>`)}
+    </div></nav>
+    <main><div class="wrap">
+      <${Page} />
+      <footer>Source: docs/capacity/10k-readiness-report.md and loadtest/ in the attend repository. Estimates, not measurements.</footer>
+    </div></main>`;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(html`<${App} />`);
+</script>
