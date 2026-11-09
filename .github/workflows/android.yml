@@ -1,0 +1,45 @@
+name: Android app
+
+# Builds the UniAttend Android app (a native shell around the deployed web app).
+# Download the APK from the run's "Artifacts" section and install it on a phone.
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "UniAttend web address the app opens (blank = mobile/app.json or the UNIATTEND_URL repository variable)"
+        required: false
+  push:
+    branches: [main]
+    paths: ["android/**", "mobile/**", "capacitor.config.ts", "scripts/mobile*.mjs", ".github/workflows/android.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      - run: npm ci --ignore-scripts
+      - name: Build debug APK
+        env:
+          URL_INPUT: ${{ github.event.inputs.url }}
+          URL_VAR: ${{ vars.UNIATTEND_URL }}
+        run: |
+          URL="${URL_INPUT:-$URL_VAR}"
+          if [ -n "$URL" ]; then node scripts/mobile.mjs build --url "$URL"; else node scripts/mobile.mjs build; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uniattend-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14

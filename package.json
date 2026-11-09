@@ -10,7 +10,12 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:db": "vitest run tests/db",
-    "bundle:sql": "node scripts/bundle-sql.mjs"
+    "bundle:sql": "node scripts/bundle-sql.mjs",
+    "android:sync": "node scripts/mobile.mjs sync",
+    "android:build": "node scripts/mobile.mjs build",
+    "android:release": "node scripts/mobile.mjs build --release",
+    "android:assets": "node scripts/mobile-assets.mjs",
+    "android:open": "cap open android"
   },
   "dependencies": {
     "@supabase/ssr": "^0.7.0",
@@ -26,6 +31,9 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/cli": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
     "@electric-sql/pglite": "^0.5.10",
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",

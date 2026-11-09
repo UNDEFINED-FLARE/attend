@@ -56,6 +56,12 @@ Import the GitHub repo in Vercel, set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_S
 `NEXT_PUBLIC_SITE_URL`, and deploy. **The service-role key is never set in Vercel.** The app does all privileged
 work through `SECURITY DEFINER` functions that check `auth.uid()`.
 
+## Android app
+
+`android/` is a Capacitor shell around the deployed site: camera for QR, GPS for check-in, offline screen.
+Set the site address in `mobile/app.json`, then `npm run android:build` (or run the *Android app* GitHub Action and
+download the APK). Publishing to Google Play: see [docs/android-app.md](docs/android-app.md).
+
 ## Tests
 
 ```bash

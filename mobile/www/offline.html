@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>UniAttend · offline</title>
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <main>
+    <div class="logo" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#0b2545"/><path d="M18 33l9 9 19-20" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <h1>You're offline</h1>
+    <p>UniAttend needs a connection to check you in. Turn on mobile data or Wi-Fi, then try again.</p>
+    <button type="button" onclick="retry()">Try again</button>
+    <p class="hint">Checking in uses the live QR code, so it can't be done offline.</p>
+  </main>
+  <script>
+    function retry() {
+      var server = window.Capacitor && window.Capacitor.getServerUrl ? window.Capacitor.getServerUrl() : null;
+      if (server) location.href = server; else history.back();
+    }
+    window.addEventListener("online", retry);
+  </script>
+</body>
+</html>
