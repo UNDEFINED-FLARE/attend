@@ -9,12 +9,21 @@ import { DB_SCHEMA, env } from "@/lib/env";
 // Needs NEXT_PUBLIC_VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT and
 // PUSH_DISPATCH_SECRET (the same secret given to set_push_secret()).
 
-export const pushConfigured = () =>
-  !!(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.PUSH_DISPATCH_SECRET);
+/** An environment value as pasted into a dashboard: stray spaces, newlines and quotes removed. */
+const clean = (v: string | undefined) => (v ?? "").trim().replace(/^(["'])(.*)\1$/, "$2").trim();
+const VAPID_PUBLIC = () => clean(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY);
+const VAPID_PRIVATE = () => clean(process.env.VAPID_PRIVATE_KEY);
+const DISPATCH_SECRET = () => clean(process.env.PUSH_DISPATCH_SECRET);
+
+export const pushConfigured = () => !!(VAPID_PUBLIC() && VAPID_PRIVATE() && DISPATCH_SECRET());
+/** Which settings the server is missing, by name only (never values). */
+export const missingPushSettings = () => [
+  !VAPID_PUBLIC() && "NEXT_PUBLIC_VAPID_PUBLIC_KEY", !VAPID_PRIVATE() && "VAPID_PRIVATE_KEY", !DISPATCH_SECRET() && "PUSH_DISPATCH_SECRET",
+].filter(Boolean) as string[];
 
 export function secretMatches(given: string | null | undefined) {
-  const want = process.env.PUSH_DISPATCH_SECRET ?? "";
-  const a = Buffer.from(given ?? ""), b = Buffer.from(want);
+  const want = DISPATCH_SECRET();
+  const a = Buffer.from(clean(given ?? "")), b = Buffer.from(want);
   return want.length >= 32 && a.length === b.length && timingSafeEqual(a, b);
 }
 
@@ -29,9 +38,9 @@ const URGENT = new Set(["class_reminder", "session_open"]);
 
 export async function dispatchPush(): Promise<{ sent: number; gone: number; failed: number }> {
   if (!pushConfigured()) return { sent: 0, gone: 0, failed: 0 };
-  setVapidDetails(process.env.VAPID_SUBJECT || `mailto:support@${new URL(env.siteUrl).hostname}`,
-    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!, process.env.VAPID_PRIVATE_KEY!);
-  const secret = process.env.PUSH_DISPATCH_SECRET!;
+  setVapidDetails(clean(process.env.VAPID_SUBJECT) || `mailto:support@${new URL(env.siteUrl).hostname}`,
+    VAPID_PUBLIC(), VAPID_PRIVATE());
+  const secret = DISPATCH_SECRET();
   const db = createClient(env.url, env.anonKey, { db: { schema: DB_SCHEMA }, auth: { persistSession: false, autoRefreshToken: false } });
 
   const { data, error } = await db.rpc("push_claim", { p_secret: secret, p_limit: 500 });

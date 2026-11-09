@@ -14,7 +14,7 @@ const cap = () => (window as unknown as { Capacitor?: Cap }).Capacitor;
 const inApp = () => !!cap()?.isNativePlatform?.() || /; wv\)/.test(navigator.userAgent);
 const nativeNotifications = async () => (await import("@capacitor/local-notifications")).LocalNotifications;
 const PREFS_KEY = "ua_push_prefs";
-const KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? "";
+const KEY = (process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? "").trim().replace(/^["']|["']$/g, "");
 
 function urlB64(b64: string) {
   const pad = "=".repeat((4 - (b64.length % 4)) % 4);

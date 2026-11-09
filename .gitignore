@@ -52,3 +52,6 @@ android/keystore.properties
 
 # Built Android app copies
 /UniAttend*.apk
+
+# Filled-in SQL with secrets
+supabase/*.local.sql
