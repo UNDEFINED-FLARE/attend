@@ -7,6 +7,8 @@ export default async function StudentLayout({ children }: { children: React.Reac
     <Shell area="Student" current={current} choices={choices} nav={[
       { href: "/student", label: "Overview" },
       { href: "/student/check-in", label: "Check in" },
+      { href: "/student/navigate", label: "Find my class" },
+      { href: "/student/location", label: "Location sharing" },
       { href: "/student/history", label: "History & disputes" },
     ]}>{children}</Shell>
   );

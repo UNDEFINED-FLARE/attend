@@ -171,3 +171,46 @@ export async function saveBranding(_: S, f: FormData): Promise<S> {
   revalidatePath("/admin", "layout");
   return fail(error) ?? { ok: "Saved." };
 }
+
+// ------------------------------------------------- campus location (0007)
+
+const Ring = z.array(z.tuple([z.number().min(-90).max(90), z.number().min(-180).max(180)])).min(3).max(500);
+
+export async function saveLocationSettings(_: S, f: FormData): Promise<S> {
+  const p = z.object({
+    location_sharing_enabled: z.preprocess((v) => v === "on", z.boolean()),
+    location_interval_s: z.coerce.number().int().min(15).max(900),
+  }).safeParse({ ...Object.fromEntries(f), location_sharing_enabled: f.get("location_sharing_enabled") });
+  if (!p.success) return { error: `${p.error.issues[0].path.join(".")}: ${p.error.issues[0].message}` };
+  const { supabase, institutionId } = await ctx();
+  const { error } = await supabase.from("institution_settings").update(p.data).eq("institution_id", institutionId);
+  revalidatePath("/admin/map");
+  return fail(error) ?? { ok: p.data.location_sharing_enabled ? "Campus location sharing is on." : "Campus location sharing is off." };
+}
+
+export async function addCampus(_: S, f: FormData): Promise<S> {
+  const p = z.object({
+    name: z.string().trim().min(2).max(120),
+    lat: z.coerce.number().min(-90).max(90),
+    lng: z.coerce.number().min(-180).max(180),
+  }).safeParse(Object.fromEntries(f));
+  if (!p.success) return { error: "Give the campus a name (centre the map on it first)." };
+  const { supabase, institutionId } = await ctx();
+  const { error } = await supabase.from("campuses").insert({ institution_id: institutionId, ...p.data });
+  revalidatePath("/admin/map");
+  return fail(error) ?? { ok: "Campus added. Now draw its boundary." };
+}
+
+/** Saves the campus outline drawn on the live map. `boundary` is JSON [[lat,lng],...]. */
+export async function saveCampusBoundary(_: S, f: FormData): Promise<S> {
+  const campus = uuid.safeParse(f.get("campus_id"));
+  const ring = Ring.safeParse((() => { try { return JSON.parse(String(f.get("boundary") ?? "")); } catch { return null; } })());
+  if (!campus.success) return { error: "Choose a campus." };
+  if (!ring.success) return { error: "A boundary needs at least 3 points (at most 500)." };
+  const { supabase, institutionId } = await ctx();
+  const { data, error } = await supabase.from("campuses").update({ boundary: ring.data })
+    .eq("id", campus.data).eq("institution_id", institutionId).select("id");
+  revalidatePath("/admin/map");
+  if (!error && !data?.length) return { error: "That campus was not found." };
+  return fail(error) ?? { ok: "Boundary saved." };
+}
