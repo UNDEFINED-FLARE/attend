@@ -153,8 +153,9 @@ describe("tenant isolation (Institution A vs Institution B)", () => {
   });
 
   it("anon can read nothing and call nothing", async () => {
-    expect(await db.as(null, "select * from public.students")).toHaveLength(0);
-    expect(await db.as(null, "select * from public.institutions")).toHaveLength(0);
+    // No table is granted to anon at all, so this fails before RLS is even consulted.
+    await expect(db.as(null, "select * from public.students")).rejects.toThrow(/permission denied/);
+    await expect(db.as(null, "select * from public.institutions")).rejects.toThrow(/permission denied/);
     await expect(db.as(null, "select public.check_in(null, 'ABCDEF', null, null, null)")).rejects.toThrow(/permission denied/);
   });
 });
@@ -169,7 +170,8 @@ describe("attendance engine", () => {
   });
 
   it("students cannot read the QR signing secret or mint tokens", async () => {
-    expect(await db.as(u.sA1, "select * from public.session_secrets")).toHaveLength(0);
+    // Not even granted (migration 0006), so this fails before RLS is consulted.
+    await expect(db.as(u.sA1, "select * from public.session_secrets")).rejects.toThrow(/permission denied/);
     await expect(db.as(u.sA1, "select public.session_qr_token($1)", [S.id])).rejects.toThrow(/not your session/);
     await expect(db.as(u.sA1, "select public.qr_sign($1, 1)", [S.id])).rejects.toThrow(/permission denied/);
   });
