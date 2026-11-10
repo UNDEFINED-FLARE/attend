@@ -43,7 +43,12 @@ Deno.serve(async (req) => {
     return new Response("bad signature", { status: 401 });
   }
 
-  const event = JSON.parse(raw) as { event: string; data: { reference: string } };
+  let event: { event: string; data: { reference: string } };
+  try {
+    event = JSON.parse(raw);
+  } catch {
+    return new Response("bad json", { status: 400 });
+  }
   if (event.event !== "charge.success") return new Response("ignored", { status: 200 });
 
   // Re-verify with Paystack rather than trusting the webhook body alone.
@@ -57,40 +62,17 @@ Deno.serve(async (req) => {
   const planCode: string | undefined = tx.metadata?.plan_code;
   if (!institutionId || !planCode) return new Response("missing metadata", { status: 200 });
 
-  const { data: plan } = await db.from("subscription_plans").select("id, price_cents, currency, billing_interval").eq("code", planCode).single();
-  if (!plan || plan.price_cents == null || tx.amount !== plan.price_cents || tx.currency !== plan.currency) {
-    // Record it for a human to look at, but do not grant anything.
-    await db.from("payments").upsert({
-      institution_id: institutionId, provider: "paystack", provider_ref: tx.reference,
-      amount_cents: tx.amount, currency: tx.currency, status: "failed",
-    }, { onConflict: "provider,provider_ref" });
-    return new Response("amount mismatch recorded", { status: 200 });
+  // Amount check, claiming the payment and extending the subscription all happen
+  // in ONE database transaction (migration 0012), so two simultaneous deliveries
+  // of the same webhook can never extend the subscription twice.
+  const { data: result, error } = await db.rpc("apply_paystack_payment", {
+    p_institution: institutionId, p_plan_code: planCode, p_reference: tx.reference,
+    p_amount: tx.amount, p_currency: tx.currency,
+  });
+  if (error) {
+    // 500 makes Paystack retry later; the function is idempotent, so retries are safe.
+    console.error("apply_paystack_payment failed", error.message);
+    return new Response("temporary error", { status: 500 });
   }
-
-  // Idempotent: a replayed webhook finds the existing payment and stops.
-  const { data: existing } = await db.from("payments").select("id, status").eq("provider", "paystack").eq("provider_ref", tx.reference).maybeSingle();
-  if (existing?.status === "succeeded") return new Response("already processed", { status: 200 });
-
-  const { data: sub } = await db.from("institution_subscriptions").select("id, current_period_end")
-    .eq("institution_id", institutionId).in("status", ["trialing", "active", "past_due", "suspended"]).maybeSingle();
-  const from = sub && new Date(sub.current_period_end) > new Date() ? new Date(sub.current_period_end) : new Date();
-  const until = new Date(from);
-  if (plan.billing_interval === "year") until.setFullYear(until.getFullYear() + 1);
-  else until.setMonth(until.getMonth() + 1);
-
-  let subscriptionId = sub?.id;
-  if (sub) {
-    await db.from("institution_subscriptions").update({ plan_id: plan.id, status: "active", current_period_end: until.toISOString() }).eq("id", sub.id);
-  } else {
-    const { data: created } = await db.from("institution_subscriptions")
-      .insert({ institution_id: institutionId, plan_id: plan.id, status: "active", current_period_end: until.toISOString() })
-      .select("id").single();
-    subscriptionId = created?.id;
-  }
-  await db.from("payments").upsert({
-    institution_id: institutionId, subscription_id: subscriptionId, provider: "paystack", provider_ref: tx.reference,
-    amount_cents: tx.amount, currency: tx.currency, status: "succeeded", verified_at: new Date().toISOString(),
-  }, { onConflict: "provider,provider_ref" });
-
-  return new Response("ok", { status: 200 });
+  return new Response(String(result), { status: 200 });
 });

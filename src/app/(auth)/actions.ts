@@ -2,6 +2,7 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { env } from "@/lib/env";
+import { safeNextPath } from "@/lib/safe-redirect";
 import { supabaseServer } from "@/lib/supabase/server";
 
 export type FormState = { error?: string; ok?: string } | undefined;
@@ -9,10 +10,7 @@ export type FormState = { error?: string; ok?: string } | undefined;
 const email = z.string().trim().toLowerCase().email("Enter a valid email address.");
 const password = z.string().min(10, "Use at least 10 characters.").max(128);
 
-function safeNext(v: FormDataEntryValue | null) {
-  const s = String(v ?? "");
-  return s.startsWith("/") && !s.startsWith("//") ? s : "/dashboard";
-}
+const safeNext = (v: FormDataEntryValue | null) => safeNextPath(v);
 
 export async function signIn(_: FormState, form: FormData): Promise<FormState> {
   const parsed = z.object({ email, password: z.string().min(1) }).safeParse(Object.fromEntries(form));

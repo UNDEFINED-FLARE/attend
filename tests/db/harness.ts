@@ -31,6 +31,7 @@ export type Db = PGlite & {
   as<T = Record<string, unknown>>(user: string | null, sql: string, params?: unknown[]): Promise<T[]>;
   asOne<T = Record<string, unknown>>(user: string | null, sql: string, params?: unknown[]): Promise<T>;
   admin<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
+  asService<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
   newUser(email: string, opts?: { confirmed?: boolean; meta?: object }): Promise<string>;
 };
 
@@ -63,6 +64,17 @@ export async function createDb(): Promise<Db> {
     }
   };
   db.asOne = async (user, sql, params) => (await db.as(user, sql, params))[0] as never;
+
+  // Server-side code (Edge Functions) uses the service_role key: no JWT subject, bypasses RLS,
+  // but still needs table/function privileges.
+  db.asService = async (sql, params = []) => {
+    await db.exec("reset role; select set_config('request.jwt.claim.sub', '', false); set role service_role");
+    try {
+      return (await db.query(sql, params)).rows as never;
+    } finally {
+      await db.exec("reset role");
+    }
+  };
 
   db.newUser = async (email, opts = {}) => {
     const [r] = await db.admin<{ id: string }>(
