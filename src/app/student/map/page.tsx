@@ -1,4 +1,5 @@
 import { AppTitle } from "@/components/app-chrome";
+import { LinkButton } from "@/components/ui";
 import { CampusMap, type MapClass, type MapVenue } from "@/components/map/campus-map";
 import { todayWeekday } from "@/components/week-grid";
 import { requireRole } from "@/lib/auth";
@@ -57,6 +58,10 @@ export default async function StudentMap() {
   return (
     <div className="mx-auto max-w-7xl space-y-4">
       <AppTitle title="Campus map" eyebrow="What's on now" sub="Every venue's classes today, and where your next class is. Tap a venue for details." />
+      <div className="flex flex-wrap gap-2">
+        <LinkButton href="/student/navigate">Directions to my next class</LinkButton>
+        <LinkButton href="/student/location" variant="secondary">Location sharing</LinkButton>
+      </div>
       {venues.length === 0
         ? <p className="rounded-[28px] bg-surface p-8 text-center text-sm text-muted shadow-card">Your institution hasn&apos;t mapped its venues yet.</p>
         : <CampusMap venues={venues} classes={classes} upcoming={upcoming} campuses={campuses} now={nowHHMM()} />}
