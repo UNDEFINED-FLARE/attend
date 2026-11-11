@@ -7,6 +7,7 @@ export default async function LecturerLayout({ children }: { children: React.Rea
   return (
     <Shell area="Lecturer" current={s.current} choices={s.choices} {...await shellData(s)} nav={[
       { href: "/lecturer", label: "Home", icon: "dashboard" },
+      { href: "/lecturer/timetable", label: "Timetable", icon: "calendar" },
       { href: "/lecturer/disputes", label: "Reviews", icon: "flag" },
       { href: "/lecturer/early-warning", label: "Early warning", icon: "alert" },
       { href: "/notifications", label: "Alerts", icon: "bell" },

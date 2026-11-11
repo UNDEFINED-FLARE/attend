@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Input, Notice } from "@/components/ui";
 import { Icon } from "@/components/icons";
@@ -73,6 +74,14 @@ export function CheckIn({ initialSession, initialToken }: { initialSession: stri
 
   const busy = phase === "locating" || phase === "sending";
   const late = result?.status === "late_pending";
+  const router = useRouter();
+  const liveUrl = result?.session_id && result.outcome !== "rejected" ? `/student/class/${result.session_id}` : null;
+  // After a successful check-in, go to the live class screen.
+  useEffect(() => {
+    if (!liveUrl || result?.outcome !== "accepted") return;
+    const t = setTimeout(() => router.push(liveUrl), 2500);
+    return () => clearTimeout(t);
+  }, [liveUrl, result?.outcome, router]);
 
   // First visit: explain the camera and location before asking for them.
   const [intro, setIntro] = useState(false);
@@ -138,6 +147,11 @@ export function CheckIn({ initialSession, initialToken }: { initialSession: stri
               )}
               {result.reasons.length > 0 && (
                 <ul className="list-disc space-y-1 pl-5 text-muted">{result.reasons.map((r) => <li key={r}>{r}</li>)}</ul>
+              )}
+              {liveUrl && (
+                <Link href={liveUrl} className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-accent font-semibold text-white">
+                  <span className="size-2 animate-pulse rounded-full bg-white" />Open live class{result.outcome === "accepted" ? " …" : ""}
+                </Link>
               )}
               <div className="grid grid-cols-2 gap-2 pt-1">
                 <Link href="/student" className="grid h-12 place-items-center rounded-2xl bg-bg font-semibold">Dashboard</Link>

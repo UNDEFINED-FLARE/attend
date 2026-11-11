@@ -226,10 +226,10 @@ export function DashboardView({ d }: { d: DashboardData }) {
         {(d.inClass ?? []).map((c) => (
           <section key={c.session} className="flex items-center gap-3 rounded-[28px] bg-surface p-4 shadow-card ring-2 ring-ok/30">
             <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-ok/10 text-ok"><Icon name="userCheck" size={22} /></span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate font-bold">In {c.code} · {c.title}</span>
-              <span className="block text-xs text-muted">Checked in{c.since ? ` at ${timeOf(c.since)}` : ""}. Leaving before the end? Check out so your time is right.</span>
-            </span>
+            <Link href={`/student/class/${c.session}`} className="min-w-0 flex-1">
+              <span className="flex items-center gap-2 truncate font-bold"><span className="size-2 shrink-0 animate-pulse rounded-full bg-ok" />In {c.code} · {c.title}</span>
+              <span className="block text-xs text-muted">Checked in{c.since ? ` at ${timeOf(c.since)}` : ""} · tap to open the live class</span>
+            </Link>
             <LeaveButton session={c.session} />
           </section>
         ))}
