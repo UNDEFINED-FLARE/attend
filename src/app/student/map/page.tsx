@@ -59,14 +59,9 @@ export default async function StudentMap() {
   return (
     <div className="mx-auto max-w-7xl space-y-4">
       <AppTitle title="Campus map" eyebrow="What's on now" sub="Every venue's classes today, and where your next class is. Tap a venue for details." />
-      <div className="grid grid-cols-2 gap-3 sm:flex">
-        <Link href="/student/navigate" className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-accent px-5 text-sm font-semibold text-white shadow-[0_8px_20px_color-mix(in_srgb,var(--accent)_35%,transparent)]">
-          <Icon name="pin" size={18} />Find my class
-        </Link>
-        <Link href="/student/location" className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-surface px-5 text-sm font-semibold shadow-card">
-          <Icon name="shield" size={18} />Location sharing
-        </Link>
-      </div>
+      <Link href="/student/navigate" className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-accent px-5 text-sm font-semibold text-white shadow-[0_8px_20px_color-mix(in_srgb,var(--accent)_35%,transparent)] sm:inline-flex">
+        <Icon name="pin" size={18} />Find my class
+      </Link>
       {venues.length === 0
         ? <p className="rounded-[28px] bg-surface p-8 text-center text-sm text-muted shadow-card">Your institution hasn&apos;t mapped its venues yet.</p>
         : <CampusMap venues={venues} classes={classes} upcoming={upcoming} campuses={campuses} now={nowHHMM()} />}

@@ -17,12 +17,6 @@ export default function Privacy() {
         <li><b>Attendance records</b>: which sessions you attended, when, and the verification result.</li>
         <li><b>Location at check-in</b>: your phone&apos;s position is used once to estimate whether you are at the venue.
           We store the <i>distance</i> from the venue and the accuracy of the reading, <b>not your coordinates</b>.</li>
-        <li><b>Campus location sharing (only if your institution enables it and you agree)</b>: while UniAttend is open and you
-          are on campus, your phone sends its position at a set interval so your institution&apos;s administrators can see it on
-          a live campus map for safety. Only your <b>latest</b> position is kept, never a history. It is deleted as soon as you
-          leave campus, pause, or withdraw consent, and any position not refreshed for 12 hours is deleted automatically.
-          Off campus nothing is shared unless you turn on <i>safety sharing</i> yourself. Lecturers and other students cannot
-          see it, and saying no has no effect on your attendance.</li>
         <li><b>Walking directions (&ldquo;Find my class&rdquo;)</b>: your position is used on your phone to guide you. To draw the
           route, only the start and end points (no name or account) are sent through our server to OpenRouteService
           (HeiGIT, Germany). Nothing is stored. Map images are loaded from OpenStreetMap.</li>

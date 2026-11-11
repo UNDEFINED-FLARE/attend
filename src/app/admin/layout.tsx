@@ -13,7 +13,6 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       { href: "/admin/modules", label: "Modules", icon: "book" },
       { href: "/admin/timetable", label: "Timetable", icon: "calendar" },
       { href: "/admin/people", label: "People", icon: "users" },
-      { href: "/admin/live", label: "Live map", icon: "pin" },
       { href: "/admin/early-warning", label: "Early warning", icon: "alert" },
       { href: "/admin/design", label: "Design", icon: "dashboard", mobile: false },
       { href: "/admin/settings", label: "Policy", icon: "settings", mobile: false },
