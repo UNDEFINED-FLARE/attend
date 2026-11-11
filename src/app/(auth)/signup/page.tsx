@@ -17,7 +17,7 @@ export default function Signup() {
       </div>
       <ActionForm action={signUp} submit="Create account" pending="Creating…">
         <Field label="Full name"><Input name="full_name" autoComplete="name" required /></Field>
-        <Field label="Email"><Input name="email" type="email" autoComplete="email" required /></Field>
+        <Field label="Email"><Input name="email" type="email" inputMode="email" autoComplete="username" autoCapitalize="none" spellCheck={false} required /></Field>
         <Field label="Password" hint="At least 10 characters.">
           <Input name="password" type="password" autoComplete="new-password" minLength={10} required />
         </Field>

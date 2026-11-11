@@ -2,11 +2,13 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { INST_COOKIE } from "@/lib/auth";
+import { SESSION_ONLY_COOKIE } from "@/lib/supabase/cookies";
 import { supabaseServer } from "@/lib/supabase/server";
 
 export async function signOut() {
   const supabase = await supabaseServer();
   await supabase.auth.signOut();
+  (await cookies()).delete(SESSION_ONLY_COOKIE);
   redirect("/login");
 }
 

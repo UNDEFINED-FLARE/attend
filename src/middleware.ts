@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { authCookieOptions, SESSION_ONLY_COOKIE } from "@/lib/supabase/cookies";
 import { getUserWithRetry } from "@/lib/supabase/resilient";
 
 const PUBLIC = ["/", "/login", "/signup", "/forgot-password", "/auth/callback", "/privacy"];
@@ -11,6 +12,8 @@ const PUBLIC_PREFIX = ["/api/push/"];
 // and by the role checks in each area's server layout.
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
+  // Refreshing the session here also renews the cookie, so regular users stay signed in.
+  const sessionOnly = request.cookies.get(SESSION_ONLY_COOKIE)?.value === "1";
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -20,7 +23,7 @@ export async function middleware(request: NextRequest) {
         setAll: (list) => {
           list.forEach(({ name, value }) => request.cookies.set(name, value));
           response = NextResponse.next({ request });
-          list.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
+          list.forEach(({ name, value, options }) => response.cookies.set(name, value, authCookieOptions(options, sessionOnly)));
         },
       },
     },
