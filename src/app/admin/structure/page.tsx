@@ -4,7 +4,7 @@ import { Card, CardTitle, Field, Input, PageHeader, Select, Table, Td } from "@/
 import { requireRole } from "@/lib/auth";
 import type { LatLng } from "@/lib/campuses";
 import { addDepartment, addFaculty, addVenuesBulk, removeVenue, saveVenue } from "../actions";
-import { AutoMap } from "./auto-map";
+import { OutlineAll } from "./outline-all";
 import { loadCampuses } from "@/lib/shell-data";
 import { DeleteButton } from "@/components/row-actions";
 
@@ -24,10 +24,11 @@ export default async function Structure() {
     <>
       <PageHeader title="Faculties & venues" subtitle="Map each lecture venue so students' location can be checked against it." />
 
-      {venues.some((v) => v.lat == null && !v.polygon) && (
+      {venues.some((v) => !(v.polygon && v.polygon.length >= 3)) && (
         <Card className="mb-6">
-          <CardTitle>Auto-map venues</CardTitle>
-          <AutoMap venues={venues} campuses={campuses} />
+          <CardTitle>Outline every venue automatically</CardTitle>
+          <OutlineAll campuses={campuses} venues={venues.map((v) => ({ id: v.id, name: v.name, building: v.building,
+            lat: v.lat, lng: v.lng, radius_m: v.radius_m, polygon: v.polygon }))} />
         </Card>
       )}
       <Card className="mb-6">
