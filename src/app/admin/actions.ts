@@ -313,3 +313,27 @@ export async function saveLocationSettings(_: S, f: FormData): Promise<S> {
   revalidatePath("/admin/live");
   return fail(error) ?? { ok: p.data.location_sharing_enabled ? "Campus location sharing is on." : "Campus location sharing is off." };
 }
+
+// ---------------------------------------------- attendance statuses (0014)
+
+export async function addAttendanceStatus(_: S, f: FormData): Promise<S> {
+  const p = z.object({
+    name: z.string().trim().min(2, "Name it (2–40 characters).").max(40),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    category: z.enum(["present", "late", "absent", "excused"]),
+    description: z.string().trim().max(200).optional(),
+  }).safeParse(Object.fromEntries(f));
+  if (!p.success) return { error: p.error.issues[0].message };
+  const { supabase, institutionId } = await ctx();
+  const { error } = await supabase.from("attendance_statuses").insert({ institution_id: institutionId, ...p.data, description: p.data.description || null });
+  revalidatePath("/admin/settings");
+  if (error?.code === "23505") return { error: "There is already a status with that name." };
+  return fail(error) ?? { ok: `"${p.data.name}" added. Lecturers can pick it in the register now.` };
+}
+
+export async function toggleAttendanceStatus(f: FormData) {
+  const p = z.object({ id: uuid, active: z.enum(["true", "false"]) }).parse(Object.fromEntries(f));
+  const { supabase, institutionId } = await ctx();
+  await supabase.from("attendance_statuses").update({ active: p.active === "true" }).eq("id", p.id).eq("institution_id", institutionId);
+  revalidatePath("/admin/settings");
+}

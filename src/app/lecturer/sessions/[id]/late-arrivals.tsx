@@ -40,7 +40,7 @@ export function LateArrivals({ session, rows }: { session: string; rows: LateRow
   const decided = rows.filter((r) => r.status !== "late_pending").sort((a, b) => a.student_number.localeCompare(b.student_number));
 
   return (
-    <Card className="mb-6 overflow-hidden p-0">
+    <Card className="overflow-hidden p-0">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
         <div>
           <h2 className="text-base font-semibold">Late arrivals{waiting.length > 0 && <span className="ml-2 rounded-full bg-muted/15 px-2 py-0.5 text-xs text-muted">{waiting.length} waiting</span>}</h2>

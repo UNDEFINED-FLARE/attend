@@ -96,3 +96,47 @@ export async function resolveDispute(_: S, form: FormData): Promise<S> {
   revalidatePath("/lecturer/disputes");
   return { ok: "Resolved. The student has been notified." };
 }
+
+// ------------------------------------------------------------ the register (0014)
+
+const Entry = z.object({
+  student: uuid,
+  status: z.enum(["present", "late", "absent", "excused"]),
+  custom: uuid.nullable().optional(),
+  note: z.string().trim().max(300).nullable().optional(),
+});
+
+/** Save many register changes at once. The database checks permissions and records the history. */
+export async function saveRegister(session: string, entries: unknown, note: string): Promise<{ error?: string; ok?: string }> {
+  const p = z.object({ session: uuid, entries: z.array(Entry).min(1).max(3000), note: z.string().trim().max(300) })
+    .safeParse({ session, entries, note });
+  if (!p.success) return { error: "Some of the changes could not be read. Reload the page and try again." };
+  const supabase = await supabaseServer();
+  const { data, error } = await supabase.rpc("save_register", {
+    p_session: p.data.session, p_entries: p.data.entries, p_note: p.data.note || null,
+  });
+  if (error) return { error: error.code === "PGRST202" ? "The register needs the latest database update (migration 0014)." : error.message };
+  after(kickPush);
+  revalidatePath(`/lecturer/sessions/${p.data.session}`);
+  const r = data as { changed: number; unchanged: number };
+  return { ok: `${r.changed} saved${r.unchanged ? `, ${r.unchanged} unchanged` : ""}.` };
+}
+
+/** Close the session: everyone not marked becomes absent. */
+export async function finaliseSession(session: string): Promise<{ error?: string; ok?: string }> {
+  if (!uuid.safeParse(session).success) return { error: "Unknown session." };
+  const supabase = await supabaseServer();
+  const { data, error } = await supabase.rpc("close_session", { p_session: session });
+  if (error) return { error: error.message };
+  revalidatePath(`/lecturer/sessions/${session}`);
+  const r = data as { absent: number; present: number; late: number };
+  return { ok: `Session finalised: ${r.present} present, ${r.late} late, ${r.absent} absent.` };
+}
+
+export type HistoryItem = { at: string; kind: string; summary: string; by_name: string | null; note: string | null };
+export async function recordHistory(record: string): Promise<HistoryItem[] | { error: string }> {
+  if (!uuid.safeParse(record).success) return { error: "Unknown record." };
+  const supabase = await supabaseServer();
+  const { data, error } = await supabase.rpc("record_history", { p_record: record });
+  return error ? { error: error.message } : ((data ?? []) as HistoryItem[]);
+}

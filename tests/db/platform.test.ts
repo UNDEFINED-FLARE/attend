@@ -507,3 +507,56 @@ describe("phone notifications", () => {
     expect(await db.as(u.sA2, "select * from uniattend.push_subscriptions")).toHaveLength(0);
   });
 });
+
+describe("the lecturer's register: statuses, bulk save, history", () => {
+  let S: Awaited<ReturnType<typeof openSession>>;
+  const studentId = async (no: string) => (await db.as<{ id: string }>(u.lectB, "select id from uniattend.students where student_number = $1", [no]))[0].id;
+  const statusOf = async (no: string) => (await db.as<{ status: string; custom_status_id: string | null }>(u.lectB,
+    "select a.status, a.custom_status_id from uniattend.attendance_records a join uniattend.students s on s.id = a.student_id where a.session_id = $1 and s.student_number = $2", [S.id, no]))[0];
+  beforeAll(async () => { S = await openSession("B"); });
+
+  it("every institution starts with a 'Left early' status; only admins can add more", async () => {
+    const rows = await db.as<{ name: string; category: string }>(u.lectB, "select name, category from uniattend.attendance_statuses where institution_id = $1", [id.instB]);
+    expect(rows).toEqual([{ name: "Left early", category: "present" }]);
+    await expect(db.as(u.lectB, "insert into uniattend.attendance_statuses (institution_id, name, category) values ($1, 'Field trip', 'excused') returning id", [id.instB]))
+      .rejects.toThrow(/row-level security/);
+    await db.as(u.adminB, "insert into uniattend.attendance_statuses (institution_id, name, color, category) values ($1, 'Field trip', '#0891b2', 'excused')", [id.instB]);
+    expect(await db.as(u.adminA, "select * from uniattend.attendance_statuses where institution_id = $1", [id.instB])).toHaveLength(0);
+  });
+
+  it("saves many students in one go and skips unchanged ones", async () => {
+    const [b1, b2, b3] = [await studentId("B001"), await studentId("B002"), await studentId("B003")];
+    const [{ id: trip }] = await db.as<{ id: string }>(u.lectB, "select id from uniattend.attendance_statuses where name = 'Field trip'");
+    const entries = [{ student: b1, status: "present" }, { student: b2, status: "absent" }, { student: b3, status: "present", custom: trip }];
+    const r = await db.asOne<{ save_register: { changed: number; unchanged: number } }>(u.lectB, "select uniattend.save_register($1, $2)", [S.id, JSON.stringify(entries)]);
+    expect(r.save_register).toEqual({ changed: 3, unchanged: 0 });
+    expect((await statusOf("B003"))).toEqual({ status: "excused", custom_status_id: trip }); // the custom status decides the category
+    const again = await db.asOne<{ save_register: { changed: number; unchanged: number } }>(u.lectB, "select uniattend.save_register($1, $2)", [S.id, JSON.stringify(entries)]);
+    expect(again.save_register).toEqual({ changed: 0, unchanged: 3 });
+  });
+
+  it("refuses students, other institutions' statuses and non-members", async () => {
+    const b1 = await studentId("B001");
+    await expect(db.as(u.sB1, "select uniattend.save_register($1, $2)", [S.id, JSON.stringify([{ student: b1, status: "present" }])]))
+      .rejects.toThrow(/only the module lecturer/);
+    await db.as(u.adminA, "insert into uniattend.attendance_statuses (institution_id, name, category) values ($1, 'Sports', 'excused')", [id.instA]);
+    const [{ id: other }] = await db.admin<{ id: string }>("select id from uniattend.attendance_statuses where name = 'Sports'");
+    await expect(db.as(u.lectB, "select uniattend.save_register($1, $2)", [S.id, JSON.stringify([{ student: b1, status: "present", custom: other }])]))
+      .rejects.toThrow(/unknown attendance status/);
+  });
+
+  it("after closing, a correction needs a reason, and the history shows every step", async () => {
+    await db.as(u.lectB, "select uniattend.close_session($1)", [S.id]);
+    const b2 = await studentId("B002");
+    await expect(db.as(u.lectB, "select uniattend.save_register($1, $2)", [S.id, JSON.stringify([{ student: b2, status: "present" }])]))
+      .rejects.toThrow(/give a reason/);
+    await db.as(u.lectB, "select uniattend.save_register($1, $2, 'Signed the paper register')", [S.id, JSON.stringify([{ student: b2, status: "present" }])]);
+    const [rec] = await db.as<{ id: string }>(u.lectB, "select id from uniattend.attendance_records where session_id = $1 and student_id = $2", [S.id, b2]);
+    const hist = await db.as<{ kind: string; summary: string; note: string | null }>(u.sB2, "select kind, summary, note from uniattend.record_history($1)", [rec.id]);
+    expect(hist.map((h) => h.summary)).toEqual(["none → absent", "absent → present"]);
+    expect(hist[1].note).toBe("Signed the paper register");
+    await expect(db.as(u.sB1, "select * from uniattend.record_history($1)", [rec.id])).rejects.toThrow(/not allowed/);
+    const notes = await db.as<{ title: string }>(u.sB2, "select title from uniattend.notifications where kind = 'attendance_corrected'");
+    expect(notes.length).toBeGreaterThan(0);
+  });
+});
