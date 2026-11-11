@@ -20,6 +20,7 @@ const eslintConfig = [
       "build/**",
       "next-env.d.ts",
       "supabase/functions/**",
+      "tools/device-check/**",
     ],
   },
 ];
