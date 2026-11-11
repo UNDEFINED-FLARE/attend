@@ -1,11 +1,8 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { createDb, type Db } from "./harness";
 
-// Campus location sharing + class navigation (migration 0013).
-// Privacy rules under test: off until the institution enables it AND the student
-// consents; only the latest position is kept; it disappears when the student
-// leaves campus (unless they chose safety sharing), stops, or withdraws; only
-// their own institution's admins can see it.
+// Campus boundaries and class navigation (migration 0013). Live location sharing
+// from the same migration was removed in 0017.
 
 // UNIVEN-ish. A ~400 m square campus around the hall; 0.01° lat ≈ 1.1 km.
 const HALL = { lat: -22.9761, lng: 30.4445 };
@@ -14,19 +11,11 @@ const CAMPUS = [
   [HALL.lat - D, HALL.lng - D], [HALL.lat - D, HALL.lng + D],
   [HALL.lat + D, HALL.lng + D], [HALL.lat + D, HALL.lng - D],
 ];
-const OUTSIDE = { lat: HALL.lat + 0.01, lng: HALL.lng };
 
 let db: Db;
 const u: Record<string, string> = {};
 const id: Record<string, string> = {};
 
-type Report = { stored: boolean; on_campus?: boolean; reason?: string; mode?: string; campus?: string };
-const report = async (user: string, at: { lat: number; lng: number }, safety = false, inst = id.inst) =>
-  (await db.asOne<{ report_location: Report }>(user,
-    "select uniattend.report_location($1, $2, $3, 15, $4)", [inst, at.lat, at.lng, safety])).report_location;
-const liveFor = (user: string, inst = id.inst) =>
-  db.as<{ full_name: string; student_number: string; on_campus: boolean; mode: string; campus_name: string }>(
-    user, "select * from uniattend.campus_live_locations($1)", [inst]);
 
 async function institution(tag: string) {
   const admin = await db.newUser(`admin@${tag}.ac.za`);
@@ -70,90 +59,15 @@ beforeAll(async () => {
   }
 }, 120_000);
 
-describe("switched off until the institution and the student both agree", () => {
-  it("does nothing while the institution has not enabled it", async () => {
-    await db.as(u.s1, "select uniattend.set_location_consent($1, true)", [id.inst]);
-    expect(await report(u.s1, HALL)).toMatchObject({ stored: false, reason: "disabled" });
-  });
-
-  it("requires the student's own consent", async () => {
-    await db.as(u.admin, "update uniattend.institution_settings set location_sharing_enabled = true where institution_id = $1", [id.inst]);
-    await expect(report(u.s2, HALL)).rejects.toThrow(/agree/i);
-  });
-
-  it("only students can share (not admins or strangers)", async () => {
-    await expect(db.as(u.admin, "select uniattend.set_location_consent($1, true)", [id.inst])).rejects.toThrow(/students only/);
-    await expect(db.as(u.otherAdmin, "select uniattend.report_location($1, 0, 0, 10, false)", [id.inst])).rejects.toThrow(/students only/);
-  });
-});
-
-describe("on campus vs off campus", () => {
-  it("on campus: stored and visible to this institution's admin with the student's name", async () => {
-    expect(await report(u.s1, HALL)).toMatchObject({ stored: true, on_campus: true, mode: "campus", campus: "Main campus" });
-    const rows = await liveFor(u.admin);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ full_name: "Loc Student 1", student_number: "L001", on_campus: true });
-  });
-
-  it("only the latest position is kept (no history)", async () => {
-    await report(u.s1, { lat: HALL.lat + 0.0005, lng: HALL.lng });
-    const n = await db.admin<{ n: number }>("select count(*)::int as n from uniattend.live_locations where user_id = $1", [u.s1]);
-    expect(n[0].n).toBe(1);
-  });
-
-  it("leaving campus switches sharing off automatically and removes the position", async () => {
-    expect(await report(u.s1, OUTSIDE)).toMatchObject({ stored: false, on_campus: false, reason: "off_campus" });
-    expect(await liveFor(u.admin)).toHaveLength(0);
-  });
-
-  it("off campus with safety sharing turned on by the student: stored as 'safety'", async () => {
-    expect(await report(u.s1, OUTSIDE, true)).toMatchObject({ stored: true, on_campus: false, mode: "safety" });
-    expect((await liveFor(u.admin))[0]).toMatchObject({ mode: "safety", on_campus: false });
-  });
-
-  it("stop sharing removes the position immediately", async () => {
-    await db.as(u.s1, "select uniattend.stop_location_sharing($1)", [id.inst]);
-    expect(await liveFor(u.admin)).toHaveLength(0);
-  });
-});
-
-describe("who can see what", () => {
-  beforeAll(async () => { await report(u.s1, HALL); });
-
-  it("another institution's admin sees nothing", async () => {
-    expect(await liveFor(u.otherAdmin)).toHaveLength(0);
-    expect(await db.as(u.otherAdmin, "select * from uniattend.live_locations")).toHaveLength(0);
-  });
-
-  it("a student sees only their own position, not classmates'", async () => {
-    await db.as(u.s2, "select uniattend.set_location_consent($1, true)", [id.inst]);
-    await report(u.s2, HALL);
-    const mine = await db.as<{ user_id: string }>(u.s2, "select user_id from uniattend.live_locations");
-    expect(mine.map((r) => r.user_id)).toEqual([u.s2]);
-  });
-
-  it("nobody can write positions directly, only through report_location", async () => {
-    await expect(db.as(u.s1, "update uniattend.live_locations set lat = 0 where user_id = $1", [u.s1])).rejects.toThrow(/permission denied/);
-    await expect(db.as(u.s1, "insert into uniattend.live_locations (institution_id, user_id, lat, lng, accuracy_m, on_campus, mode) values ($1, $2, 0, 0, 5, true, 'campus')", [id.inst, u.s1]))
-      .rejects.toThrow(/permission denied/);
-  });
-
-  it("anonymous visitors get nothing", async () => {
-    await expect(db.as(null, "select * from uniattend.live_locations")).rejects.toThrow(/permission denied/);
-    await expect(db.as(null, "select uniattend.campus_live_locations($1)", [id.inst])).rejects.toThrow(/permission denied/);
-  });
-
-  it("withdrawing consent deletes the position and blocks further reports", async () => {
-    await db.as(u.s2, "select uniattend.set_location_consent($1, false)", [id.inst]);
-    expect((await liveFor(u.admin)).map((r) => r.full_name)).not.toContain("Loc Student 2");
-    await expect(report(u.s2, HALL)).rejects.toThrow(/agree/i);
-  });
-
-  it("turning the feature off institution-wide removes positions on the next report", async () => {
-    await db.as(u.admin, "update uniattend.institution_settings set location_sharing_enabled = false where institution_id = $1", [id.inst]);
-    expect(await report(u.s1, HALL)).toMatchObject({ stored: false, reason: "disabled" });
-    expect(await liveFor(u.admin)).toHaveLength(0);
-    await db.as(u.admin, "update uniattend.institution_settings set location_sharing_enabled = true where institution_id = $1", [id.inst]);
+describe("live location sharing was removed (migration 0017)", () => {
+  it("leaves no tables, settings or functions behind", async () => {
+    const left = await db.admin<{ n: string }>(`
+      select table_name as n from information_schema.tables where table_schema = 'uniattend' and table_name in ('live_locations','location_consents')
+      union all select column_name from information_schema.columns where table_schema = 'uniattend' and table_name = 'institution_settings'
+        and column_name in ('location_sharing_enabled','location_interval_s')
+      union all select p.proname from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace where ns.nspname = 'uniattend'
+        and p.proname in ('report_location','set_location_consent','stop_location_sharing','campus_live_locations')`);
+    expect(left).toEqual([]);
   });
 });
 

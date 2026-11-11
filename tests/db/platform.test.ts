@@ -560,3 +560,51 @@ describe("the lecturer's register: statuses, bulk save, history", () => {
     expect(notes.length).toBeGreaterThan(0);
   });
 });
+
+describe("check-in controls, printed QR, card scans and check-out", () => {
+  let S: Awaited<ReturnType<typeof openSession>>;
+  const ctl = (action: string, closes?: number, late?: number) =>
+    db.asOne<{ session_control: Record<string, unknown> }>(u.lectA, "select uniattend.session_control($1, $2, $3, $4)", [S.id, action, closes ?? null, late ?? null]);
+  const scan = async (code: string, dir = "in") =>
+    (await db.asOne<{ scan_student: Record<string, unknown> }>(u.lectA, "select uniattend.scan_student($1, $2, $3)", [S.id, code, dir])).scan_student;
+  beforeAll(async () => { S = await openSession("A"); });
+
+  it("a printed QR works only once allowed, and regenerating cancels it", async () => {
+    expect((await db.asOne<{ printed_qr_token: string | null }>(u.lectA, "select uniattend.printed_qr_token($1)", [S.id])).printed_qr_token).toBeNull();
+    await ctl("printed_on");
+    const { printed_qr_token: t } = await db.asOne<{ printed_qr_token: string }>(u.lectA, "select uniattend.printed_qr_token($1)", [S.id]);
+    expect(t).toMatch(/^P\./);
+    const v = await checkIn(u.sA1, S.id, null, t, gpsAt(0), hex("1"));
+    expect(v.outcome).toBe("accepted");
+    await ctl("regenerate");
+    expect((await checkIn(u.sA2, S.id, null, t, gpsAt(0), hex("2"))).outcome).toBe("rejected");
+    await expect(db.as(u.sA1, "select uniattend.printed_qr_token($1)", [S.id])).rejects.toThrow(/not your session/);
+  });
+
+  it("pausing stops check-ins and resuming restarts them", async () => {
+    await ctl("pause");
+    await expect(checkIn(u.sA2, null, S.join_code, null, gpsAt(0), hex("2"))).rejects.toThrow(/No open session|not accepting/);
+    const r = await ctl("resume");
+    expect(r.session_control.status).toBe("open");
+  });
+
+  it("a scanned student card checks the student in, once", async () => {
+    expect(await scan(" a002 ")).toMatchObject({ outcome: "checked_in", status: "present", full_name: "Student A2" });
+    expect(await scan("A002")).toMatchObject({ outcome: "duplicate" });
+    expect(await scan("B001")).toMatchObject({ outcome: "unknown" }); // another institution's student
+    expect(await scan("ZZZ999")).toMatchObject({ outcome: "unknown" });
+    await expect(db.as(u.sA1, "select uniattend.scan_student($1, 'A003')", [S.id])).rejects.toThrow(/not your session/);
+  });
+
+  it("checking out early marks 'Left early' and keeps the time", async () => {
+    const out = (await db.asOne<{ check_out: Record<string, unknown> }>(u.sA1, "select uniattend.check_out($1)", [S.id])).check_out;
+    expect(out).toMatchObject({ outcome: "checked_out", left_early: true });
+    const [rec] = await db.as<{ checked_out_at: string | null; name: string | null }>(u.lectA,
+      `select a.checked_out_at, st.name from uniattend.attendance_records a left join uniattend.attendance_statuses st on st.id = a.custom_status_id
+       join uniattend.students s on s.id = a.student_id where a.session_id = $1 and s.student_number = 'A001'`, [S.id]);
+    expect(rec.checked_out_at).not.toBeNull();
+    expect(rec.name).toBe("Left early");
+    expect((await db.asOne<{ check_out: Record<string, unknown> }>(u.sA1, "select uniattend.check_out($1)", [S.id])).check_out.outcome).toBe("duplicate");
+    expect(await scan("A002", "out")).toMatchObject({ outcome: "checked_out" });
+  });
+});

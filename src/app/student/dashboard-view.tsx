@@ -5,6 +5,7 @@ import { Ring } from "@/components/charts";
 import { Icon, type IconName } from "@/components/icons";
 import { LateChip } from "@/components/late";
 import { PushToggle } from "@/components/push-toggle";
+import { LeaveButton } from "./leave-button";
 import { pct } from "@/components/ui";
 import { hhmm, type Slot } from "@/components/week-grid";
 import { timeOf } from "@/lib/stats";
@@ -16,11 +17,13 @@ import { TrendCard, type TrendSeries } from "./trend-card";
 export type DashRow = { module_id: string; code: string; title: string; attended: number; absent: number;
   excused: number; unresolved: number; percent: number | null; min_pct: number; institution_id: string };
 export type DashRec = { id: string; status: string; session_id: string; checked_in_at: string | null; created_at: string; module_id: string;
-  minutes_late?: number | null; modules: { code: string; title: string } | null; class_sessions: { title: string; opens_at: string } | null };
+  minutes_late?: number | null; checked_out_at?: string | null; modules: { code: string; title: string } | null; class_sessions: { title: string; opens_at: string } | null };
 export type DashLive = { id: string; title: string; late_after: string; modules: unknown; venues: unknown };
 export type DashSlot = Slot & { id: string };
 
+export type InClass = { session: string; code: string; title: string; since: string | null };
 export type DashboardData = {
+  inClass?: InClass[];
   theme: Theme; hello: string; first: string; studentNumber: string | null;
   rows: DashRow[]; recs: DashRec[]; live: DashLive[]; series: TrendSeries[];
   todaySlots: DashSlot[]; nextSlot: DashSlot | undefined; now: string; day: number;
@@ -220,6 +223,16 @@ export function DashboardView({ d }: { d: DashboardData }) {
       <AppTitle eyebrow={`${hello}${first ? `, ${first}` : ""} 👋`} title="Dashboard"
         sub={d.studentNumber ? <span className="font-mono text-xs">{d.studentNumber}</span> : undefined} />
       <div className="space-y-6">
+        {(d.inClass ?? []).map((c) => (
+          <section key={c.session} className="flex items-center gap-3 rounded-[28px] bg-surface p-4 shadow-card ring-2 ring-ok/30">
+            <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-ok/10 text-ok"><Icon name="userCheck" size={22} /></span>
+            <Link href={`/student/class/${c.session}`} className="min-w-0 flex-1">
+              <span className="flex items-center gap-2 truncate font-bold"><span className="size-2 shrink-0 animate-pulse rounded-full bg-ok" />In {c.code} · {c.title}</span>
+              <span className="block text-xs text-muted">Checked in{c.since ? ` at ${timeOf(c.since)}` : ""} · tap to open the live class</span>
+            </Link>
+            <LeaveButton session={c.session} />
+          </section>
+        ))}
         <PushToggle compact logo={theme.header.logoUrl || null} institution={theme.header.title || undefined} />
         {blocks}
       </div>
