@@ -61,3 +61,15 @@ export async function dispute(_: unknown, form: FormData) {
   revalidatePath("/student/history");
   return { ok: "Dispute submitted. Your lecturer has been notified." };
 }
+
+/** "I'm leaving": the student's own check-out. */
+export async function checkOut(session: string): Promise<{ error?: string; ok?: string }> {
+  if (!z.string().uuid().safeParse(session).success) return { error: "Unknown session." };
+  const supabase = await supabaseServer();
+  const { data, error } = await supabase.rpc("check_out", { p_session: session });
+  if (error) return { error: error.message };
+  revalidatePath("/student");
+  const r = data as { outcome: string; left_early?: boolean; minutes_present?: number | null };
+  if (r.outcome === "duplicate") return { ok: "You already checked out." };
+  return { ok: `Checked out${r.minutes_present != null ? ` after ${r.minutes_present} min` : ""}.${r.left_early ? " Recorded as left early." : ""}` };
+}
