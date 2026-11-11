@@ -1,4 +1,4 @@
--- UniAttend 0016 — readiness fixes from docs/capacity/10k-readiness-report.md (P0 items 2 and 6).
+-- UniAttend 0018 — readiness fixes from docs/capacity/10k-readiness-report.md (P0 items 2 and 6).
 --
 -- 1. Indexes the report lists as missing (B-2/D-9 follow-ups):
 --    attendance_verification_events(session_id), class_sessions(lecturer_id), class_sessions(venue_id).

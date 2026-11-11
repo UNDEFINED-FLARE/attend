@@ -12,6 +12,7 @@ export type CustomStatus = { id: string; name: string; color: string; category: 
 export type RegisterRow = {
   student_id: string; student_number: string; full_name: string; record_id: string | null;
   status: string | null; custom_status_id: string | null; checked_in_at: string | null; method: string | null; minutes_late: number | null;
+  checked_out_at?: string | null;
 };
 type Choice = { status: Base; custom: string | null };
 
@@ -25,7 +26,7 @@ const SAVED_LABEL: Record<string, string> = {
   present: "Present", late: "Late", absent: "Absent", excused: "Excused",
   pending_verification: "In review", late_pending: "Late · awaiting you", disputed: "Disputed",
 };
-const METHOD: Record<string, string> = { qr: "QR", code: "Code", manual: "Manual", system: "Auto", acoustic: "Sound" };
+const METHOD: Record<string, string> = { qr: "QR", code: "Code", manual: "Manual", system: "Auto", acoustic: "Sound", card: "Card" };
 const time = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" }) : "");
 
 export function Register({ session, open, rows, statuses }: { session: string; open: boolean; rows: RegisterRow[]; statuses: CustomStatus[] }) {
@@ -137,7 +138,7 @@ export function Register({ session, open, rows, statuses }: { session: string; o
                   <p className="truncate font-semibold">{r.full_name}</p>
                   <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted">
                     <span className="font-mono">{r.student_number}</span>
-                    {r.checked_in_at && <span>{time(r.checked_in_at)}{r.method ? ` · ${METHOD[r.method] ?? r.method}` : ""}</span>}
+                    {r.checked_in_at && <span>{time(r.checked_in_at)}{r.checked_out_at ? `–${time(r.checked_out_at)}` : ""}{r.method ? ` · ${METHOD[r.method] ?? r.method}` : ""}</span>}
                     {r.status && !changed && <span className="font-semibold">{SAVED_LABEL[r.status] ?? r.status}{r.custom_status_id && customById.get(r.custom_status_id) ? ` · ${customById.get(r.custom_status_id)!.name}` : ""}</span>}
                     {changed && <span className="font-semibold text-accent">unsaved</span>}
                     <LateChip minutes={r.minutes_late} />

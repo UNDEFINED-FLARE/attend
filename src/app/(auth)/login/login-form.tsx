@@ -29,7 +29,7 @@ export function LoginForm({ next }: { next: string }) {
   }, [state]);
 
   return (
-    <form ref={form} action={run} method="post" className="space-y-4" autoComplete="on">
+    <form ref={form} action={run} className="space-y-4" autoComplete="on">
       <input type="hidden" name="next" value={next} />
       <Field label="Email">
         <Input id="email" name="email" type="email" inputMode="email" autoComplete="username" autoCapitalize="none" spellCheck={false} required />

@@ -191,7 +191,7 @@ export async function grantAdmin(_: S, f: FormData): Promise<S> {
   const { supabase, institutionId } = await ctx();
   const { error } = await supabase.rpc("grant_role", { p_inst: institutionId, p_email: email.data, p_role: "institution_admin" });
   revalidatePath("/admin/people");
-  // grant_role answers the same way whether or not the email has an account (0016), so the
+  // grant_role answers the same way whether or not the email has an account (0018), so the
   // message covers both cases.
   return fail(error) ?? {
     ok: `Done. If ${email.data} already has a confirmed UniAttend account, they're an administrator now. If not, they become one when they sign up and confirm that email.`,
@@ -302,20 +302,6 @@ export async function addVenuesBulk(_: S, f: FormData): Promise<S> {
   revalidatePath("/admin/structure");
   revalidatePath("/admin/timetable");
   return fail(error) ?? { ok: `${rows.length} venue${rows.length > 1 ? "s" : ""} created with their building outlines.` };
-}
-
-// ------------------------------------------------- campus location sharing (0013)
-
-export async function saveLocationSettings(_: S, f: FormData): Promise<S> {
-  const p = z.object({
-    location_sharing_enabled: z.preprocess((v) => v === "on", z.boolean()),
-    location_interval_s: z.coerce.number().int().min(15).max(900),
-  }).safeParse({ ...Object.fromEntries(f), location_sharing_enabled: f.get("location_sharing_enabled") });
-  if (!p.success) return { error: `${p.error.issues[0].path.join(".")}: ${p.error.issues[0].message}` };
-  const { supabase, institutionId } = await ctx();
-  const { error } = await supabase.from("institution_settings").update(p.data).eq("institution_id", institutionId);
-  revalidatePath("/admin/live");
-  return fail(error) ?? { ok: p.data.location_sharing_enabled ? "Campus location sharing is on." : "Campus location sharing is off." };
 }
 
 // ---------------------------------------------- attendance statuses (0014)

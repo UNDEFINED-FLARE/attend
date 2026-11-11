@@ -18,7 +18,7 @@ beforeAll(async () => {
   await db.admin("update uniattend.subscription_plans set price_cents = 120000, currency = 'ZAR', billing_interval = 'year' where code = 'starter'");
 }, 120_000);
 
-// Since 0016 grant_role answers the same way for every email (see readiness.test.ts), so
+// Since 0018 grant_role answers the same way for every email (see readiness.test.ts), so
 // the unconfirmed case no longer raises; the rule under test is unchanged: an account
 // whose email was never confirmed gets no role.
 describe("3. grant_role never gives a role to an unconfirmed account", () => {

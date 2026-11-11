@@ -81,7 +81,7 @@ policy.
 ### E. Student portal, ✅ mostly
 
 Dashboard (trend, ring, week, modules, recent), check-in with welcome screen, history with Today / Week / All,
-disputes, timetable, campus map, directions, location sharing, notifications. **Missing:** module filter and
+disputes, timetable, campus map, directions, notifications. (Live location sharing was removed in migration 0017.) **Missing:** module filter and
 date range on history, a "My Modules" page with lecturers, monthly charts.
 
 ### F. Registration and onboarding, 🟡

@@ -1,6 +1,6 @@
 // Late-arrival pieces shared by the student check-in result and the lecturer register.
 
-const t = (iso: string) => new Date(iso).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" });
+const t = (iso: string) => new Date(iso).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Johannesburg" });
 
 /** "17 min late", coloured by how late: a few minutes, up to half an hour, more. */
 export function LateChip({ minutes, className = "" }: { minutes: number | null | undefined; className?: string }) {

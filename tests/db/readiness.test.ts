@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { createDb, type Db } from "./harness";
 
-// Readiness fixes (migration 0016, docs/capacity/10k-readiness-report.md):
+// Readiness fixes (migration 0018, docs/capacity/10k-readiness-report.md):
 //  * the indexes the report lists as missing exist;
 //  * S-1: an unapproved institution can't attach people to itself, and grant_role is
 //    no longer a way to test whether an email has an account.

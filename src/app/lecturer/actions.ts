@@ -126,6 +126,9 @@ export async function saveRegister(session: string, entries: unknown, note: stri
 export async function finaliseSession(session: string): Promise<{ error?: string; ok?: string }> {
   if (!uuid.safeParse(session).success) return { error: "Unknown session." };
   const supabase = await supabaseServer();
+  // A paused session is resumed first, so it can be closed normally.
+  const { data: st } = await supabase.from("class_sessions").select("status").eq("id", session).maybeSingle();
+  if (st?.status === "scheduled") await supabase.rpc("session_control", { p_session: session, p_action: "resume" });
   const { data, error } = await supabase.rpc("close_session", { p_session: session });
   if (error) return { error: error.message };
   revalidatePath(`/lecturer/sessions/${session}`);
@@ -139,4 +142,39 @@ export async function recordHistory(record: string): Promise<HistoryItem[] | { e
   const supabase = await supabaseServer();
   const { data, error } = await supabase.rpc("record_history", { p_record: record });
   return error ? { error: error.message } : ((data ?? []) as HistoryItem[]);
+}
+
+// ------------------------------------------------------- check-in controls (0016)
+
+export async function sessionControl(_: { error?: string; ok?: string } | undefined, f: FormData): Promise<{ error?: string; ok?: string }> {
+  const p = z.object({
+    session: uuid,
+    action: z.enum(["pause", "resume", "regenerate", "printed_on", "printed_off", "window"]),
+    closes: z.coerce.number().int().min(1).max(480).optional().catch(undefined),
+    late: z.coerce.number().int().min(0).max(480).optional().catch(undefined),
+  }).safeParse({ ...Object.fromEntries(f), closes: f.get("closes") || undefined, late: f.get("late") || undefined });
+  if (!p.success) return { error: "Check the values and try again." };
+  const supabase = await supabaseServer();
+  const { error } = await supabase.rpc("session_control", {
+    p_session: p.data.session, p_action: p.data.action, p_closes_in_min: p.data.closes ?? null, p_late_in_min: p.data.late ?? null,
+  });
+  if (error) return { error: error.code === "PGRST202" ? "These controls need the latest database update (migration 0016)." : error.message };
+  revalidatePath(`/lecturer/sessions/${p.data.session}`);
+  const done: Record<string, string> = {
+    pause: "Check-in paused.", resume: "Check-in resumed.", regenerate: "New QR and code. Old printouts no longer work.",
+    printed_on: "Printed QR allowed.", printed_off: "Printed QR switched off.", window: "Times updated.",
+  };
+  return { ok: done[p.data.action] };
+}
+
+export type ScanResult = { outcome: string; message?: string; full_name?: string; student_number?: string; status?: string;
+  minutes_late?: number | null; left_early?: boolean; minutes_present?: number | null };
+
+/** A student card read by camera or USB scanner. */
+export async function scanStudent(session: string, code: string, direction: "in" | "out"): Promise<ScanResult> {
+  if (!uuid.safeParse(session).success || typeof code !== "string" || code.length > 64) return { outcome: "unknown", message: "That card could not be read." };
+  const supabase = await supabaseServer();
+  const { data, error } = await supabase.rpc("scan_student", { p_session: session, p_code: code, p_direction: direction === "out" ? "out" : "in" });
+  if (error) return { outcome: "error", message: error.code === "PGRST202" ? "Card scanning needs the latest database update (migration 0016)." : error.message };
+  return data as ScanResult;
 }

@@ -19,13 +19,16 @@ export default async function LecturerHome() {
   const ids = modules.map((m) => m.id);
   const none = ["00000000-0000-0000-0000-000000000000"];
 
-  const [{ data: sessions }, { data: recs }, { data: enrol }] = await Promise.all([
+  const [{ data: sessions }, { data: recs }, { data: enrol }, { data: alerts }] = await Promise.all([
     supabase.from("class_sessions").select("id, title, status, join_code, opens_at, closes_at, module_id, modules(code), venues(name)")
       .in("module_id", ids.length ? ids : none).gte("opens_at", sastMidnight(29)).order("opens_at", { ascending: false }).limit(200),
     supabase.from("attendance_records").select("module_id, status").in("module_id", ids.length ? ids : none)
       .gte("created_at", sastMidnight(29)).limit(5000),
     supabase.from("module_enrolments").select("module_id").in("module_id", ids.length ? ids : none).eq("status", "active"),
+    // Early warning (0015); empty if the institution hasn't run that update yet.
+    supabase.rpc("list_student_alerts", { p_inst: institutionId, p_live_only: true }),
   ]);
+  const needFollowUp = Array.isArray(alerts) ? alerts.length : 0;
   const open = (sessions ?? []).filter((s) => s.status === "open");
   const week = (sessions ?? []).filter((s) => s.opens_at >= sastMidnight(6)).length;
   const byModule = groupBy(recs ?? [], (r) => r.module_id as string);
@@ -64,6 +67,17 @@ export default async function LecturerHome() {
         <StatTile icon="calendar" tone="violet" label="Sessions this week" value={week} />
         <StatTile icon="flag" tone="amber" label="To review" value={toReview} hint={<Link href="/lecturer/disputes" className="text-accent">Open reviews →</Link>} />
       </div>
+
+      {needFollowUp > 0 && (
+        <Link href="/lecturer/early-warning" className="mb-6 flex items-center gap-3 rounded-2xl border border-bad/30 bg-bad/5 p-4 transition hover:bg-bad/10">
+          <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-bad/10 text-bad"><Icon name="alert" /></span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-semibold">{needFollowUp} student{needFollowUp === 1 ? "" : "s"} need{needFollowUp === 1 ? "s" : ""} follow-up</span>
+            <span className="text-sm text-muted">Low attendance or several classes missed in a row.</span>
+          </span>
+          <span className="inline-flex items-center gap-1 text-sm font-medium text-accent">Early warning <Icon name="arrowRight" size={14} /></span>
+        </Link>
+      )}
 
       <h2 className="mb-3 text-lg font-semibold">My modules</h2>
       {modules.length === 0 && <Card><p className="text-center text-sm text-muted">No modules are assigned to you yet. Your institution administrator assigns them.</p></Card>}

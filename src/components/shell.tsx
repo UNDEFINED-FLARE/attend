@@ -56,7 +56,7 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
   return (
     <div style={themeStyle(theme)} className="min-h-dvh font-sans">
       {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 flex-col border-r border-line px-4 py-5 lg:flex"
+      <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 flex-col print:!hidden border-r border-line px-4 py-5 lg:flex"
         style={{ background: sideBg, color: sideDark ? inkOn(sideBg) : undefined, ["--muted" as string]: sideDark ? "rgb(255 255 255 / 0.7)" : undefined }}>
         <Logo name={instName} theme={theme} onDark={sideDark} />
         <p className="mt-8 mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted">{area}</p>
@@ -75,9 +75,9 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
         </div>
       </aside>
 
-      <div className="flex min-h-dvh flex-col lg:pl-64">
+      <div className="flex min-h-dvh flex-col lg:pl-64 print:!pl-0">
         {/* Top bar */}
-        <header className={`sticky top-0 z-10 border-b ${app ? "hidden lg:block" : ""} ${head === "light" ? "border-line bg-surface/90 backdrop-blur" : "border-transparent"}`}
+        <header className={`sticky top-0 z-10 border-b print:hidden ${app ? "hidden lg:block" : ""} ${head === "light" ? "border-line bg-surface/90 backdrop-blur" : "border-transparent"}`}
           style={{ background: headBg, color: headInk, ["--muted" as string]: headInk ? "rgb(255 255 255 / 0.75)" : undefined }}>
           <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 lg:px-8">
             <div className="lg:hidden"><Logo name={instName} theme={theme} onDark={!!headInk} /></div>

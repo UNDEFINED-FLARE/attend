@@ -17,7 +17,7 @@ const Placement = z.object({
 export async function mapVenuesBulk(_: S, f: FormData): Promise<S> {
   let rows: z.infer<typeof Placement>[];
   try {
-    const r = z.array(Placement).min(1).max(1000).safeParse(JSON.parse(String(f.get("placements") ?? "[]")));
+    const r = z.array(Placement).min(1).max(3000).safeParse(JSON.parse(String(f.get("placements") ?? "[]")));
     if (!r.success) return { error: "Tick at least one venue to place." };
     rows = r.data;
   } catch { return { error: "Tick at least one venue to place." }; }
@@ -33,5 +33,5 @@ export async function mapVenuesBulk(_: S, f: FormData): Promise<S> {
   }
   revalidatePath("/admin/structure");
   revalidatePath("/student/map");
-  return { ok: `${done} venue${done === 1 ? "" : "s"} placed on the map. Students now see them on the campus map.` };
+  return { ok: `${done} venue${done === 1 ? "" : "s"} outlined. Students see them on the campus map, and check-ins anywhere inside count.` };
 }
