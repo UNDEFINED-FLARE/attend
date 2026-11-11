@@ -28,14 +28,19 @@ const RANGES = [["today", "Today"], ["week", "This week"], ["all", "All"]] as co
 
 export default async function History({ searchParams }: { searchParams: Promise<{ when?: string }> }) {
   const range = ((await searchParams).when ?? "all") as (typeof RANGES)[number][0];
-  const { supabase, institutionId } = await requireRole("student");
+  const { supabase, institutionId, user } = await requireRole("student");
+  // Only this student's own records and disputes (index on student_id), not the
+  // institution's filtered row by row through RLS (readiness report B-4 / D-8).
+  const { data: me } = await supabase.from("students").select("id")
+    .eq("institution_id", institutionId).eq("user_id", user.id).maybeSingle();
+  const mine = me?.id ?? "00000000-0000-0000-0000-000000000000";
   const select = (late: boolean) => supabase.from("attendance_records")
     .select(`id, status, ${late ? "minutes_late, attendance_statuses(name, color), " : ""}checked_in_at, created_at, score, explanation, class_sessions(title, opens_at, modules(code, title))`)
-    .eq("institution_id", institutionId).order("created_at", { ascending: false }).limit(200);
+    .eq("institution_id", institutionId).eq("student_id", mine).order("created_at", { ascending: false }).limit(200);
   const [recRes, { data: disputes }] = await Promise.all([
     select(true),
     supabase.from("attendance_disputes").select("id, record_id, status, reason, resolution_note, created_at")
-      .eq("institution_id", institutionId).order("created_at", { ascending: false }),
+      .eq("institution_id", institutionId).eq("student_id", mine).order("created_at", { ascending: false }),
   ]);
   // minutes_late and custom statuses need database updates 0010 and 0014.
   const all = ((recRes.error ? (await select(false)).data : recRes.data) ?? []) as unknown as Rec[];

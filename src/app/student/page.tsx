@@ -24,14 +24,18 @@ export default async function StudentHome() {
   const { supabase, institutionId, user } = await requireRole("student");
   const nowIso = new Date().toISOString();
   const since = new Date(Date.now() - 8 * 7 * 864e5).toISOString();
+  // Ask for this student's own records (index on student_id) instead of the institution's,
+  // which made RLS walk the whole institution's history (readiness report B-4 / D-8).
+  const { data: me } = await supabase.from("students").select("id, full_name, student_number")
+    .eq("institution_id", institutionId).eq("user_id", user.id).maybeSingle();
+  const mine = me?.id ?? "00000000-0000-0000-0000-000000000000";
   const recSelect = (late: boolean) => supabase.from("attendance_records")
     .select(`id, status, session_id, checked_in_at, created_at, module_id${late ? ", minutes_late" : ""}, modules(code, title), class_sessions(title, opens_at)`)
-    .eq("institution_id", institutionId).gte("created_at", since).order("created_at", { ascending: false }).limit(600);
-  const [{ data }, { data: open }, { data: me }, recRes, theme, slots] = await Promise.all([
+    .eq("institution_id", institutionId).eq("student_id", mine).gte("created_at", since).order("created_at", { ascending: false }).limit(600);
+  const [{ data }, { data: open }, recRes, theme, slots] = await Promise.all([
     supabase.rpc("my_attendance"),
     supabase.from("class_sessions").select("id, title, opens_at, closes_at, late_after, modules(code, title), venues(name)")
       .eq("status", "open").eq("institution_id", institutionId).gt("closes_at", nowIso).order("opens_at"),
-    supabase.from("students").select("full_name, student_number").eq("institution_id", institutionId).eq("user_id", user.id).maybeSingle(),
     recSelect(true),
     loadTheme(supabase, institutionId),
     myTimetable(supabase, institutionId),

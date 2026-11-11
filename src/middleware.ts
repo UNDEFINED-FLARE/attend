@@ -1,7 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { authCookieOptions, SESSION_ONLY_COOKIE } from "@/lib/supabase/cookies";
-import { getUserWithRetry } from "@/lib/supabase/resilient";
+import { fetchWithTimeout } from "@/lib/supabase/fetch";
+import { getAuthUser } from "@/lib/supabase/resilient";
 
 const PUBLIC = ["/", "/login", "/signup", "/forgot-password", "/auth/callback", "/privacy"];
 // Machine endpoints that check their own secret.
@@ -18,6 +19,7 @@ export async function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      global: { fetch: fetchWithTimeout },
       cookies: {
         getAll: () => request.cookies.getAll(),
         setAll: (list) => {
@@ -28,7 +30,9 @@ export async function middleware(request: NextRequest) {
       },
     },
   );
-  const { user, unreachable } = await getUserWithRetry(supabase);
+  // Verifies the token locally with the project's signing keys (no Auth round trip), and
+  // still refreshes an expired session, which renews the cookie.
+  const { user, unreachable } = await getAuthUser(supabase);
   const path = request.nextUrl.pathname;
   // If Supabase is unreachable, let the request through: the page's own
   // server-side check will show a connection error instead of a false logout.

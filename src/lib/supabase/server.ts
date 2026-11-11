@@ -3,6 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { DB_SCHEMA, env } from "@/lib/env";
 import { authCookieOptions, SESSION_ONLY_COOKIE } from "@/lib/supabase/cookies";
+import { fetchWithTimeout } from "@/lib/supabase/fetch";
 
 /**
  * Supabase client bound to the signed-in user's session. RLS always applies.
@@ -13,6 +14,7 @@ export async function supabaseServer(opts: { sessionOnly?: boolean } = {}) {
   const sessionOnly = opts.sessionOnly ?? store.get(SESSION_ONLY_COOKIE)?.value === "1";
   return createServerClient(env.url, env.anonKey, {
     db: { schema: DB_SCHEMA },
+    global: { fetch: fetchWithTimeout },
     cookies: {
       getAll: () => store.getAll(),
       setAll: (list) => {

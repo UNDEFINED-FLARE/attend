@@ -2,7 +2,7 @@ import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
-import { getUserWithRetry, SupabaseUnreachable } from "@/lib/supabase/resilient";
+import { getAuthUser, SupabaseUnreachable } from "@/lib/supabase/resilient";
 import { supabaseServer } from "@/lib/supabase/server";
 
 export type Role = "super_admin" | "institution_admin" | "lecturer" | "student";
@@ -27,7 +27,7 @@ export const INST_COOKIE = "ua_inst";
 /** The signed-in user and their active roles, read from the database (never from the client). */
 export const getSession = cache(async () => {
   const supabase = await supabaseServer();
-  const { user, unreachable } = await getUserWithRetry(supabase);
+  const { user, unreachable } = await getAuthUser(supabase);
   if (unreachable) throw new SupabaseUnreachable();
   if (!user) return null;
   // A failed roles lookup must not look like "no roles" (that would send an

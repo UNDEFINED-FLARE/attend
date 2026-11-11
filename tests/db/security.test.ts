@@ -18,18 +18,23 @@ beforeAll(async () => {
   await db.admin("update uniattend.subscription_plans set price_cents = 120000, currency = 'ZAR', billing_interval = 'year' where code = 'starter'");
 }, 120_000);
 
-describe("3. grant_role needs a confirmed email", () => {
-  it("refuses an account whose email was never confirmed", async () => {
-    await db.newUser("squatter@sec.ac.za", { confirmed: false });
-    await expect(db.as(adminId, "select uniattend.grant_role($1, 'squatter@sec.ac.za', 'lecturer')", [inst]))
-      .rejects.toThrow(/confirm/i);
+// Since 0016 grant_role answers the same way for every email (see readiness.test.ts), so
+// the unconfirmed case no longer raises; the rule under test is unchanged: an account
+// whose email was never confirmed gets no role.
+describe("3. grant_role never gives a role to an unconfirmed account", () => {
+  const rolesOf = (user: string) => db.admin<{ role: string }>("select role from uniattend.user_roles where user_id = $1", [user]);
+
+  it("an account whose email was never confirmed gets nothing, even when it signs in", async () => {
+    const squatter = await db.newUser("squatter@sec.ac.za", { confirmed: false });
+    await db.as(adminId, "select uniattend.grant_role($1, 'squatter@sec.ac.za', 'lecturer')", [inst]);
+    await db.as(squatter, "select uniattend.link_my_accounts()");
+    expect(await rolesOf(squatter)).toHaveLength(0);
   });
 
-  it("still works for a confirmed account", async () => {
-    await db.newUser("real.lecturer@sec.ac.za");
-    const r = await db.asOne<{ grant_role: string }>(adminId,
-      "select uniattend.grant_role($1, 'real.lecturer@sec.ac.za', 'lecturer')", [inst]);
-    expect(r.grant_role).toMatch(/^[0-9a-f-]{36}$/);
+  it("a confirmed account gets the role straight away", async () => {
+    const real = await db.newUser("real.lecturer@sec.ac.za");
+    await db.as(adminId, "select uniattend.grant_role($1, 'real.lecturer@sec.ac.za', 'lecturer')", [inst]);
+    expect(await rolesOf(real)).toEqual([{ role: "lecturer" }]);
   });
 });
 

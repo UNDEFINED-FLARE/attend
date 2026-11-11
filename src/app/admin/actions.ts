@@ -191,7 +191,11 @@ export async function grantAdmin(_: S, f: FormData): Promise<S> {
   const { supabase, institutionId } = await ctx();
   const { error } = await supabase.rpc("grant_role", { p_inst: institutionId, p_email: email.data, p_role: "institution_admin" });
   revalidatePath("/admin/people");
-  return fail(error) ?? { ok: "Administrator added." };
+  // grant_role answers the same way whether or not the email has an account (0016), so the
+  // message covers both cases.
+  return fail(error) ?? {
+    ok: `Done. If ${email.data} already has a confirmed UniAttend account, they're an administrator now. If not, they become one when they sign up and confirm that email.`,
+  };
 }
 
 export async function saveSettings(_: S, f: FormData): Promise<S> {

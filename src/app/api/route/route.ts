@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { distanceM, type LatLng } from "@/lib/geo";
 import type { RouteResult, RouteStep } from "@/lib/route";
+import { getAuthUser } from "@/lib/supabase/resilient";
 import { supabaseServer } from "@/lib/supabase/server";
 
 // Walking directions for "Find my class".
@@ -21,8 +22,8 @@ type OrsFeature = {
 
 export async function POST(request: Request) {
   const supabase = await supabaseServer();
-  const { data } = await supabase.auth.getUser();
-  if (!data.user) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
+  const { user } = await getAuthUser(supabase);
+  if (!user) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
 
   const parsed = Body.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Bad request." }, { status: 400 });
