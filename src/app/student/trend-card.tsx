@@ -27,8 +27,8 @@ export function TrendCard({ title, series }: { title: string; series: TrendSerie
   const tipX = cur ? Math.min(W - tipW / 2 - 2, Math.max(tipW / 2 + 2, x(at))) : 0;
 
   return (
-    <section className="min-w-0 rounded-[28px] bg-surface p-5 shadow-card">
-      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted">{title}</p>
+    <section className="min-w-0 rounded-2xl bg-surface p-5 shadow-card">
+      <h2 className="text-base font-semibold text-muted">{title}</h2>
       <label className="relative mt-3 inline-flex items-center gap-3">
         <span className="grid size-10 place-items-center rounded-xl text-white" style={{ background: s?.color }}>
           {s?.key === "all" ? <Icon name="chart" size={20} /> : <span className="text-xs font-bold">{s?.badge}</span>}

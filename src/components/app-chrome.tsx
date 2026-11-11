@@ -23,7 +23,7 @@ export function AppTitle({ title, eyebrow, sub, action }: { title: string; eyebr
     <div className="mb-6 flex items-start justify-between gap-3">
       <div className="min-w-0">
         {eyebrow && <p className="text-sm font-medium text-muted">{eyebrow}</p>}
-        <h1 className="truncate text-[28px] font-bold leading-tight tracking-tight sm:text-[32px]">{title}</h1>
+        <h1 className="truncate text-[32px] font-bold leading-tight tracking-tight sm:text-[36px]">{title}</h1>
         {sub && <p className="mt-1 text-sm text-muted">{sub}</p>}
       </div>
       <div className="flex shrink-0 items-center gap-2 pt-1">
@@ -56,11 +56,11 @@ function AvatarMenu({ me }: { me: Me }) {
   return (
     <div ref={ref} className="relative">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-label="Account"
-        className="grid size-11 place-items-center rounded-full bg-gradient-to-br from-accent to-brand text-sm font-bold text-white shadow-card ring-[3px] ring-surface">
+        className="grid size-11 place-items-center rounded-full bg-brand font-display text-base font-bold text-brand-ink ring-[3px] ring-surface">
         {me.initials}
       </button>
       {open && (
-        <div className="absolute right-0 top-14 z-40 w-64 overflow-hidden rounded-2xl bg-surface shadow-[0_12px_40px_rgb(15_27_45/0.18)]">
+        <div className="absolute right-0 top-14 z-40 w-64 overflow-hidden rounded-2xl bg-surface shadow-float">
           <div className="border-b border-line p-4">
             <p className="truncate font-semibold">{me.name}</p>
             <p className="truncate text-xs text-muted">{me.institution}</p>
@@ -79,31 +79,35 @@ function AvatarMenu({ me }: { me: Me }) {
   );
 }
 
-/** Floating bottom bar; the scanner sits raised in the middle. */
+/** Bottom bar; the scanner sits raised in the middle in sign yellow, the app's one main action. */
 export function AppTabBar({ items, center }: { items: NavItem[]; center: string }) {
   const path = usePathname();
   const active = items.filter((i) => path === i.href || path.startsWith(i.href + "/")).sort((a, b) => b.href.length - a.href.length)[0]?.href;
   return (
-    <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 px-4 print:hidden pb-[max(12px,env(safe-area-inset-bottom))] lg:hidden">
-      <ul className="mx-auto flex max-w-md items-center justify-around rounded-[28px] bg-surface px-2 py-2 shadow-[0_10px_40px_rgb(15_27_45/0.14)]">
+    <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 px-3 print:hidden pb-[max(10px,env(safe-area-inset-bottom))] lg:hidden">
+      <ul className="mx-auto flex max-w-md items-end justify-around rounded-2xl bg-surface px-1 pt-1.5 pb-1 shadow-float">
         {items.map((i) => {
           const on = i.href === active;
           if (i.href === center) {
             return (
-              <li key={i.href} className="-mt-9">
+              <li key={i.href} className="-mt-8 flex flex-col items-center gap-1">
                 <Link href={i.href} aria-label={i.label} aria-current={on ? "page" : undefined}
-                  className="grid size-16 place-items-center rounded-full bg-accent text-white shadow-[0_10px_24px_color-mix(in_srgb,var(--accent)_45%,transparent)] ring-[6px] ring-bg transition active:scale-95">
-                  <Icon name="scan" size={28} strokeWidth={2.2} />
+                  className="grid size-16 place-items-center rounded-full bg-signal text-signal-ink ring-[5px] ring-bg transition active:scale-95">
+                  <Icon name="scan" size={30} strokeWidth={2.4} />
                 </Link>
+                <span className="text-[11px] font-semibold text-ink">{i.label}</span>
               </li>
             );
           }
+          // Labels always show: an icon on its own is a guess.
           return (
-            <li key={i.href}>
-              <Link href={i.href} aria-current={on ? "page" : undefined} aria-label={i.label}
-                className={`flex flex-col items-center gap-1 rounded-2xl px-3 py-1.5 text-[10px] font-semibold transition ${on ? "text-accent" : "text-muted"}`}>
-                <Icon name={i.icon} size={22} strokeWidth={on ? 2.3 : 1.8} />
-                <span className={on ? "" : "opacity-0"}>{i.label}</span>
+            <li key={i.href} className="min-w-0 flex-1">
+              <Link href={i.href} aria-current={on ? "page" : undefined}
+                className={`flex flex-col items-center gap-0.5 px-1 pt-1 pb-0.5 text-[11px] font-semibold transition ${on ? "text-ink" : "text-muted"}`}>
+                <span className={`grid h-8 w-12 place-items-center rounded-full ${on ? "bg-brand text-brand-ink" : ""}`}>
+                  <Icon name={i.icon} size={21} strokeWidth={on ? 2.3 : 1.9} />
+                </span>
+                <span className="max-w-full truncate">{i.label}</span>
               </Link>
             </li>
           );

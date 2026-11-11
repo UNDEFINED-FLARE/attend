@@ -8,7 +8,7 @@ export const metadata = { title: "Reset password" };
 export default function Forgot() {
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Reset your password</h1>
+      <h1 className="text-[32px] font-semibold leading-none tracking-tight">Reset your password</h1>
       <ActionForm action={requestReset} submit="Send reset link" pending="Sending…">
         <Field label="Email"><Input name="email" type="email" autoComplete="email" required /></Field>
       </ActionForm>

@@ -16,9 +16,9 @@ function Logo({ name, theme, onDark }: { name: string; theme: Theme; onDark: boo
       {theme.header.logoUrl
         // eslint-disable-next-line @next/next/no-img-element -- institution logo from an admin-set https URL
         ? <img src={theme.header.logoUrl} alt="" className="size-9 shrink-0 rounded-xl bg-white object-contain p-0.5" referrerPolicy="no-referrer" />
-        : <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-brand text-brand-ink"><Icon name="check" size={20} strokeWidth={2.6} /></span>}
+        : <span className={`grid size-9 shrink-0 place-items-center rounded-xl text-signal ${onDark ? "bg-white/10" : "bg-brand"}`}><Icon name="check" size={20} strokeWidth={3} /></span>}
       <span className="min-w-0 leading-tight">
-        <span className="block truncate text-[15px] font-semibold">{title}</span>
+        <span className="block truncate font-display text-[17px] font-bold">{title}</span>
         <span className={`block max-w-44 truncate text-xs ${onDark ? "opacity-75" : "text-muted"}`}>{theme.header.subtitle || name}</span>
       </span>
     </Link>
@@ -59,13 +59,14 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 flex-col print:!hidden border-r border-line px-4 py-5 lg:flex"
         style={{ background: sideBg, color: sideDark ? inkOn(sideBg) : undefined, ["--muted" as string]: sideDark ? "rgb(255 255 255 / 0.7)" : undefined }}>
         <Logo name={instName} theme={theme} onDark={sideDark} />
-        <p className="mt-8 mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted">{area}</p>
+        <p className="mt-8 mb-2 px-3 text-xs font-semibold text-muted">{area}</p>
         <SideNav items={nav} dark={sideDark} />
         <div className="mt-auto space-y-3">
           <div className={`rounded-2xl p-4 ${sideDark ? "bg-white/10" : "bg-bg"}`}>
-            <span className="grid size-9 place-items-center rounded-xl bg-accent/15 text-accent"><Icon name="help" /></span>
+            <span className={`grid size-9 place-items-center rounded-xl ${sideDark ? "bg-white/10 text-signal" : "bg-accent/15 text-accent"}`}><Icon name="help" /></span>
             <p className="mt-3 text-sm font-semibold">Need help?</p>
-            <Link href="/privacy" className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-accent">Privacy &amp; guides <Icon name="arrowRight" size={14} /></Link>
+            {/* Blue links fail contrast on a navy sidebar; sign yellow passes (9.9:1). */}
+            <Link href="/privacy" className={`mt-1 inline-flex items-center gap-1 text-sm font-semibold hover:underline ${sideDark ? "text-signal" : "text-accent"}`}>Privacy &amp; guides</Link>
           </div>
           <form action={signOut}>
             <button className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted ${sideDark ? "hover:bg-white/10" : "hover:bg-bg hover:text-ink"}`}>

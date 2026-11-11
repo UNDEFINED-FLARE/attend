@@ -21,7 +21,8 @@ export function SideNav({ items, dark = false }: { items: NavItem[]; dark?: bool
         const on = i.href === active;
         return (
           <Link key={i.href} href={i.href} aria-current={on ? "page" : undefined}
-            className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${on ? (dark ? "bg-white/15" : "bg-accent/10 text-accent") : dark ? "text-muted hover:bg-white/10" : "text-muted hover:bg-bg hover:text-ink"}`}>
+            // The current page is lit like a sign: a solid navy plate (a yellow edge on dark sidebars).
+            className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${on ? (dark ? "bg-white/15 text-white shadow-[inset_3px_0_0_var(--signal)]" : "bg-brand text-brand-ink") : dark ? "text-muted hover:bg-white/10" : "text-muted hover:bg-bg hover:text-ink"}`}>
             <Icon name={i.icon} size={19} />
             {i.label}
           </Link>
@@ -42,8 +43,8 @@ export function TabBar({ items }: { items: NavItem[] }) {
           return (
             <li key={i.href} className="flex-1">
               <Link href={i.href} aria-current={on ? "page" : undefined}
-                className={`flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium ${on ? "text-accent" : "text-muted"}`}>
-                <span className={`grid h-8 w-14 place-items-center rounded-full ${on ? "bg-accent/10" : ""}`}><Icon name={i.icon} size={20} /></span>
+                className={`flex flex-col items-center gap-1 py-2.5 text-[11px] font-semibold ${on ? "text-ink" : "text-muted"}`}>
+                <span className={`grid h-8 w-14 place-items-center rounded-full ${on ? "bg-brand text-brand-ink" : ""}`}><Icon name={i.icon} size={20} /></span>
                 {i.label}
               </Link>
             </li>

@@ -6,8 +6,20 @@ export type Slot = {
 };
 
 export const DAYS = ["", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const COLORS = ["#2f6fed", "#16a34a", "#d97706", "#7c3aed", "#db2777", "#0891b2", "#dc2626", "#4f46e5"];
-export const moduleColor = (code: string) => COLORS[[...code].reduce((a, c) => a + c.charCodeAt(0), 0) % COLORS.length];
+// Module "zone" colours, like the colour-coded zones on campus signs: a module keeps its
+// colour everywhere (timetable, home, map). Each passes 4.5:1 as text on white and on the
+// background, so a module code may be written in its own colour.
+export const ZONE_COLORS = ["#c8102e", "#00704a", "#00727a", "#6a1b9a", "#b0177a", "#b54a00", "#5c6b00", "#0057b8"];
+// djb2: codes that differ by one character (CSC111, CSC112, MAT101) land far apart. A plain sum
+// of character codes put most first-year codes on the same colour.
+const zoneIndex = (code: string) => {
+  let h = 5381;
+  for (const ch of code.toUpperCase()) h = ((h * 33) ^ ch.charCodeAt(0)) >>> 0;
+  return h % ZONE_COLORS.length;
+};
+export const moduleColor = (code: string) => ZONE_COLORS[zoneIndex(code)];
+/** The zone colour lifted for navy sign panels, where the deep version would disappear. */
+export const moduleColorOnDark = (code: string) => `color-mix(in srgb, ${moduleColor(code)} 65%, #ffffff)`;
 export const hhmm = (t: string) => t.slice(0, 5);
 
 /** Today as ISO weekday (1 = Monday) in South African time. */

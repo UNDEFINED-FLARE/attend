@@ -5,7 +5,9 @@ describe("institution theme", () => {
   it("falls back to defaults for missing or broken values", () => {
     expect(parseTheme(null)).toEqual(DEFAULT_THEME);
     expect(parseTheme({ colors: { primary: "red" } }).colors.primary).toBe(DEFAULT_THEME.colors.primary);
-    expect(parseTheme({ shape: "blobby" }).shape).toBe("rounded");
+    // The default is "sharp": the campus-signage plates (globals.css).
+    expect(parseTheme({ shape: "blobby" }).shape).toBe(DEFAULT_THEME.shape);
+    expect(DEFAULT_THEME.shape).toBe("sharp");
   });
   it("keeps valid parts of a partial theme", () => {
     const t = parseTheme({ colors: { primary: "#006400" }, header: { style: "gradient" }, footer: { show: true, text: "© UNIVEN" } });
@@ -26,6 +28,7 @@ describe("institution theme", () => {
   it("picks readable text and maps to CSS variables", () => {
     expect(inkOn("#ffffff")).toBe("#0f1b2d");
     expect(inkOn("#0b2545")).toBe("#ffffff");
-    expect(themeStyle({ ...DEFAULT_THEME, shape: "sharp" })["--radius-2xl"]).toBe("6px");
+    expect(themeStyle({ ...DEFAULT_THEME, shape: "sharp" })["--radius-2xl"]).toBe("8px");
+    expect(themeStyle({ ...DEFAULT_THEME, shape: "rounded" })["--radius-2xl"]).toBe("16px");
   });
 });

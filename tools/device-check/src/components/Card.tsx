@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { Level } from "../lib/platform";
 
-const LABEL: Record<Level, string> = {
+export const LABEL: Record<Level, string> = {
   idle: "Not tested",
   ok: "Working",
   warn: "Needs attention",

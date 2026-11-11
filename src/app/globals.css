@@ -1,21 +1,27 @@
 @import "tailwindcss";
 
-/* UniAttend: navy and white, with a bright accent blue for highlights and charts.
-   Institution branding overrides --brand at runtime. */
+/* UniAttend "campus signage": the look of university wayfinding signs.
+   Signal navy panels, sign yellow for "now" and the one main action, a cool pavement
+   grey behind white content, and a strong colour per module (week-grid moduleColor).
+   Every text colour passes WCAG AA on white and on the background.
+   Institution branding (lib/theme.ts) overrides these at runtime. */
 :root {
-  --brand: #0b2545;
+  --brand: #0b2545;        /* signal navy */
   --brand-ink: #ffffff;
-  --accent: #2f6fed;
-  --bg: #f3f6fb;
+  --signal: #ffc72c;       /* sign yellow: only for "now" and the main action */
+  --signal-ink: #0b2545;
+  --accent: #1d5fd6;       /* links and highlights (5.7:1 on white) */
+  --bg: #eceff3;           /* pavement */
   --surface: #ffffff;
-  --ink: #0f1b2d;
-  --muted: #64748b;
-  --line: #e4e9f2;
-  --ok: #16a34a;
-  --warn: #d97706;
-  --bad: #dc2626;
-  --info: #2563eb;
-  --violet: #7c3aed;
+  --ink: #0a1628;
+  --muted: #556274;
+  --line: #d9dee6;
+  --line-strong: #6f7b8e;  /* form borders: over 3:1, so fields are visible outdoors */
+  --ok: #15803d;
+  --warn: #b45309;
+  --bad: #c81e1e;
+  --info: #1d5fd6;
+  --violet: #6a1b9a;
 }
 
 @theme inline {
@@ -32,8 +38,23 @@
   --color-bad: var(--bad);
   --color-info: var(--info);
   --color-violet: var(--violet);
+  --color-signal: var(--signal);
+  --color-signal-ink: var(--signal-ink);
+  --color-line-strong: var(--line-strong);
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --shadow-card: 0 1px 2px rgb(15 27 45 / 0.04), 0 4px 16px rgb(15 27 45 / 0.04);
+  /* Barlow Semi Condensed, drawn from road and highway signs (layout.tsx loads it). */
+  --font-display: var(--font-barlow), "Arial Narrow", ui-sans-serif, system-ui, sans-serif;
+  /* Signs are crisp plates, not floating cards: a hairline edge instead of a soft shadow. */
+  --shadow-card: 0 0 0 1px var(--line);
+  --shadow-float: 0 0 0 1px var(--line), 0 12px 32px rgb(10 22 40 / 0.16);
+}
+
+/* Not inline: rounded-xl/2xl/3xl must read these at runtime, so an institution's
+   "shape" (themeStyle in lib/theme.ts) still overrides them. */
+@theme {
+  --radius-xl: 6px;
+  --radius-2xl: 8px;
+  --radius-3xl: 10px;
 }
 
 body {
@@ -41,9 +62,17 @@ body {
   color: var(--ink);
 }
 
+/* Headings read like sign lettering; body text stays the phone's own font. */
+h1, h2, h3 {
+  font-family: var(--font-display);
+  letter-spacing: -0.005em;
+}
+
+/* Thick and two-tone, so the focus ring shows on navy, yellow and white alike. */
 :focus-visible {
-  outline: 2px solid var(--info);
+  outline: 3px solid var(--accent);
   outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--surface);
 }
 
 /* QR scanner: corner brackets around the camera view */

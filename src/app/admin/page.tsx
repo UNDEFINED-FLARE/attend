@@ -35,7 +35,7 @@ export default async function AdminHome() {
     <>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{greeting()}{name ? `, ${name}` : ""}</h1>
+          <h1 className="text-[32px] font-semibold leading-none tracking-tight">{greeting()}{name ? `, ${name}` : ""}</h1>
           <p className="mt-1 text-sm text-muted">Here&apos;s what&apos;s happening at {current.institution_name} today.</p>
         </div>
         <div className="flex gap-2">

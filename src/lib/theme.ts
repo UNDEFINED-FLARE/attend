@@ -38,16 +38,17 @@ export const ThemeSchema = z.object({
 export type Theme = z.infer<typeof ThemeSchema>;
 
 export const DEFAULT_THEME: Theme = {
-  colors: { primary: "#0b2545", accent: "#2f6fed", background: "#f3f6fb", surface: "#ffffff", text: "#0f1b2d", muted: "#64748b",
-            success: "#16a34a", warning: "#d97706", danger: "#dc2626" },
-  shape: "rounded",
+  // "Campus signage" (globals.css): signal navy, accessible blue links, pavement grey, crisp plates.
+  colors: { primary: "#0b2545", accent: "#1d5fd6", background: "#eceff3", surface: "#ffffff", text: "#0a1628", muted: "#556274",
+            success: "#15803d", warning: "#b45309", danger: "#c81e1e" },
+  shape: "sharp",
   font: "system",
-  header: { style: "light", gradientTo: "#2f6fed", title: "", subtitle: "", logoUrl: "", showDate: true },
-  sidebar: { style: "light" },
+  header: { style: "light", gradientTo: "#1d5fd6", title: "", subtitle: "", logoUrl: "", showDate: true },
+  sidebar: { style: "brand" }, // a navy sign post, with the current page lit in yellow
   footer: { show: false, text: "", links: [] },
   announcement: { show: false, text: "", tone: "info" },
   student: {
-    greeting: "{greeting}", heroTitle: "Your attendance", heroFrom: "#1d4ed8", heroTo: "#0b2545",
+    greeting: "{greeting}", heroTitle: "Your attendance", heroFrom: "#0b2545", heroTo: "#0b2545",
     cards: STUDENT_CARDS.map((id) => ({ id, show: true, title: CARD_LABEL[id] })),
   },
 };
@@ -66,7 +67,8 @@ export function parseTheme(raw: unknown): Theme {
   return out as Theme;
 }
 
-const RADIUS = { sharp: ["4px", "6px", "8px"], rounded: ["12px", "16px", "24px"], soft: ["16px", "22px", "32px"] } as const;
+// "sharp" (the default) matches the signage plates in globals.css.
+const RADIUS = { sharp: ["6px", "8px", "10px"], rounded: ["12px", "16px", "24px"], soft: ["16px", "22px", "32px"] } as const;
 const FONT = {
   system: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
   serif: 'Georgia, Cambria, "Times New Roman", Times, serif',

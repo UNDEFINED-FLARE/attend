@@ -39,7 +39,7 @@ export default async function LecturerHome() {
     <>
       <div className="mb-6">
         <p className="text-sm text-muted">{greeting()} 👋</p>
-        <h1 className="text-2xl font-semibold tracking-tight">{me?.full_name ?? "Welcome"}</h1>
+        <h1 className="text-[32px] font-semibold leading-none tracking-tight">{me?.full_name ?? "Welcome"}</h1>
       </div>
 
       {open.length > 0 && (

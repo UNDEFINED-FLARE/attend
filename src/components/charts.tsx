@@ -134,16 +134,16 @@ const TONES = {
   amber: "bg-warn/10 text-warn", violet: "bg-violet/10 text-violet", navy: "bg-brand/10 text-brand",
 } as const;
 
-/** Stat tile: tinted icon, big number, context line. */
+/** Stat tile: what it counts, then the number in big sign numerals, then context. */
 export function StatTile({ icon, tone, label, value, hint }: { icon: IconName; tone: keyof typeof TONES; label: string; value: ReactNode; hint?: ReactNode }) {
   return (
-    <div className="flex items-start gap-4 rounded-2xl bg-surface p-5 shadow-card">
-      <span className={`grid size-12 shrink-0 place-items-center rounded-xl ${TONES[tone]}`}><Icon name={icon} size={22} /></span>
-      <div className="min-w-0">
-        <p className="text-sm text-muted">{label}</p>
-        <p className="mt-0.5 text-2xl font-semibold tabular-nums tracking-tight">{value}</p>
-        {hint && <p className="mt-1 text-xs text-muted">{hint}</p>}
+    <div className="rounded-2xl bg-surface p-5 shadow-card">
+      <div className="flex items-center gap-2.5">
+        <span className={`grid size-9 shrink-0 place-items-center rounded-lg ${TONES[tone]}`}><Icon name={icon} size={19} /></span>
+        <p className="text-sm font-semibold text-muted">{label}</p>
       </div>
+      <p className="mt-3 font-display text-[40px] font-bold leading-none tabular-nums tracking-tight">{value}</p>
+      {hint && <p className="mt-2 text-sm text-muted">{hint}</p>}
     </div>
   );
 }

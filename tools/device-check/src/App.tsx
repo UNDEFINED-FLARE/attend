@@ -4,6 +4,7 @@ import { GpsCard } from "./components/GpsCard";
 import { MapCard } from "./components/MapCard";
 import { NotificationCard } from "./components/NotificationCard";
 import { WifiCard } from "./components/WifiCard";
+import { LABEL } from "./components/Card";
 import { DeviceStatus, type DeviceStatusInfo } from "./lib/deviceStatus";
 import { errorText, platformLabel, type CheckKey, type Fix, type Level, type Report } from "./lib/platform";
 
@@ -44,13 +45,15 @@ export default function App() {
 
   return (
     <div className="app">
+      {/* A status board, like a departures sign: one plate per check, tap to jump to it. */}
       <header className="top">
         <h1>UniAttend Check</h1>
-        <p>{platformLabel} · tests what UniAttend needs on this device</p>
-        <nav className="summary" aria-label="Check results">
+        <p>Tests what UniAttend needs on this device. Running as the {platformLabel.toLowerCase()}.</p>
+        <nav className="board" aria-label="Check results">
           {CHECKS.map((c) => (
-            <a key={c.key} href={c.anchor} className={`chip chip-${levels[c.key]}`}>
-              <span aria-hidden="true">{ICON[levels[c.key]]}</span> {c.label}
+            <a key={c.key} href={c.anchor} className={`plate plate-${levels[c.key]}`}>
+              <span className="plate-name">{c.label}</span>
+              <span className="plate-state"><span aria-hidden="true">{ICON[levels[c.key]]}</span> {LABEL[levels[c.key]]}</span>
             </a>
           ))}
         </nav>

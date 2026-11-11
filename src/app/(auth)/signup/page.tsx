@@ -9,7 +9,7 @@ export default function Signup() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Create your account</h1>
+        <h1 className="text-[32px] font-semibold leading-none tracking-tight">Create your account</h1>
         <p className="text-sm text-muted">
           Use the email your institution has on record (for students, usually your university email). Your
           student or lecturer access is linked automatically once you confirm it.

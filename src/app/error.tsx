@@ -8,7 +8,7 @@ export default function ErrorPage({ error, reset }: { error: Error & { digest?: 
   useEffect(() => { console.error(error); }, [error]);
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center gap-4 px-4">
-      <h1 className="text-2xl font-semibold">This page could not load</h1>
+      <h1 className="text-[32px] font-semibold leading-none tracking-tight">This page could not load</h1>
       <p className="text-sm text-muted">
         UniAttend couldn&apos;t reach its database, or something went wrong on our side. Check your internet connection
         and try again. Your attendance records are safe.
