@@ -1,3 +1,5 @@
+import { FeatureOff } from "@/components/feature-off";
+import { loadTheme } from "@/lib/shell-data";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireRole } from "@/lib/auth";
@@ -9,6 +11,8 @@ export const metadata = { title: "In class" };
 export default async function ClassPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { supabase, institutionId, user } = await requireRole("student");
+  const features = (await loadTheme(supabase, institutionId)).features;
+  if (!features.liveClass) return <FeatureOff name="The live class screen" />;
   const { data: s } = await supabase.from("class_sessions")
     .select("id, title, status, opens_at, closes_at, late_after, modules(code, title), venues(name)").eq("id", id).maybeSingle();
   if (!s) notFound();
@@ -32,7 +36,7 @@ export default async function ClassPage({ params }: { params: Promise<{ id: stri
     );
   }
   return (
-    <LiveClass
+    <LiveClass checkOut={features.checkOut}
       session={{ id: s.id, title: s.title, status: s.status, opens_at: s.opens_at, closes_at: s.closes_at, code: mod.code, module: mod.title,
         venue: (s.venues as unknown as { name: string } | null)?.name ?? null }}
       record={{ id: r.id, status: r.status, checked_in_at: r.checked_in_at, minutes_late: r.minutes_late ?? null,

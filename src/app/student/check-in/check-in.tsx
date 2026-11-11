@@ -19,7 +19,7 @@ const HEADLINE: Record<string, [string, string]> = {
   rejected: ["Not recorded", "bg-bad"],
 };
 
-export function CheckIn({ initialSession, initialToken }: { initialSession: string | null; initialToken: string | null }) {
+export function CheckIn({ initialSession, initialToken, liveClass = true }: { initialSession: string | null; initialToken: string | null; liveClass?: boolean }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [code, setCode] = useState("");
   const [result, setResult] = useState<Verdict | null>(null);
@@ -75,7 +75,7 @@ export function CheckIn({ initialSession, initialToken }: { initialSession: stri
   const busy = phase === "locating" || phase === "sending";
   const late = result?.status === "late_pending";
   const router = useRouter();
-  const liveUrl = result?.session_id && result.outcome !== "rejected" ? `/student/class/${result.session_id}` : null;
+  const liveUrl = liveClass && result?.session_id && result.outcome !== "rejected" ? `/student/class/${result.session_id}` : null;
   // After a successful check-in, go to the live class screen.
   useEffect(() => {
     if (!liveUrl || result?.outcome !== "accepted") return;

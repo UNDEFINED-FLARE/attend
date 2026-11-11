@@ -1,3 +1,4 @@
+import { loadTheme } from "@/lib/shell-data";
 import { requireRole } from "@/lib/auth";
 import { myTimetable } from "@/lib/student-data";
 import { timetableIcs } from "@/lib/timetable-export";
@@ -5,6 +6,7 @@ import { timetableIcs } from "@/lib/timetable-export";
 // The student's timetable as a calendar file (Google, Outlook, Apple Calendar).
 export async function GET() {
   const { supabase, institutionId, current } = await requireRole("student");
+  if (!(await loadTheme(supabase, institutionId)).features.calendarDownload) return new Response("Timetable download is switched off.", { status: 404 });
   const slots = await myTimetable(supabase, institutionId);
   return timetableIcs(supabase, institutionId, `${current.institution_name ?? "UniAttend"} timetable`, "my-timetable", slots);
 }

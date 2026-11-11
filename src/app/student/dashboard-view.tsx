@@ -31,8 +31,8 @@ export type DashboardData = {
   week: { wd: number; date: number; letter: string; kinds: Set<string> }[];
 };
 
-const COLORS = ["#2f6fed", "#16a34a", "#d97706", "#7c3aed", "#db2777", "#0891b2", "#dc2626", "#4f46e5"];
-export const colorFor = (code: string) => COLORS[[...code].reduce((a, c) => a + c.charCodeAt(0), 0) % COLORS.length];
+import { moduleShade } from "@/lib/palette";
+export const colorFor = moduleShade;
 export const badgeOf = (code: string) => code.replace(/[^A-Z]/gi, "").slice(0, 3).toUpperCase() || code.slice(0, 2);
 
 export function DashboardView({ d }: { d: DashboardData }) {
@@ -226,11 +226,11 @@ export function DashboardView({ d }: { d: DashboardData }) {
         {(d.inClass ?? []).map((c) => (
           <section key={c.session} className="flex items-center gap-3 rounded-[28px] bg-surface p-4 shadow-card ring-2 ring-ok/30">
             <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-ok/10 text-ok"><Icon name="userCheck" size={22} /></span>
-            <Link href={`/student/class/${c.session}`} className="min-w-0 flex-1">
+            <Link href={theme.features.liveClass ? `/student/class/${c.session}` : "/student/history"} className="min-w-0 flex-1">
               <span className="flex items-center gap-2 truncate font-bold"><span className="size-2 shrink-0 animate-pulse rounded-full bg-ok" />In {c.code} · {c.title}</span>
-              <span className="block text-xs text-muted">Checked in{c.since ? ` at ${timeOf(c.since)}` : ""} · tap to open the live class</span>
+              <span className="block text-xs text-muted">Checked in{c.since ? ` at ${timeOf(c.since)}` : ""}{theme.features.liveClass ? " · tap to open the live class" : ""}</span>
             </Link>
-            <LeaveButton session={c.session} />
+            {theme.features.checkOut && <LeaveButton session={c.session} />}
           </section>
         ))}
         <PushToggle compact logo={theme.header.logoUrl || null} institution={theme.header.title || undefined} />

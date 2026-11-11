@@ -1,3 +1,5 @@
+import { FeatureOff } from "@/components/feature-off";
+import { loadTheme } from "@/lib/shell-data";
 import Link from "next/link";
 import { recheckAlerts, saveAlertSettings } from "@/app/early-warning-actions";
 import { EarlyWarningList, loadAlerts } from "@/components/early-warning";
@@ -11,6 +13,7 @@ export default async function AdminEarlyWarning({ searchParams }: { searchParams
   const sp = await searchParams;
   const show = sp.show === "closed" ? "closed" : "live";
   const { supabase, institutionId, user } = await requireRole("institution_admin");
+  if (!(await loadTheme(supabase, institutionId)).features.earlyWarning) return <FeatureOff name="Early warning" />;
   const [{ alerts, missing }, { data: s }] = await Promise.all([
     loadAlerts(supabase, institutionId, false),
     supabase.from("institution_settings").select("*").eq("institution_id", institutionId).single(),

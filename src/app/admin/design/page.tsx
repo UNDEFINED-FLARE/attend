@@ -11,7 +11,7 @@ export default async function DesignPage() {
   return (
     <>
       <PageHeader title="Design your platform"
-        subtitle="Colours, header, footer and every card students see. Changes preview live and apply to everyone at your institution when you save." />
+        subtitle="Colours, header, footer, menus, features and every card students see. Changes preview live and apply to everyone at your institution when you save." />
       <Designer initial={theme} institutionName={current.institution_name ?? "Your institution"} />
     </>
   );

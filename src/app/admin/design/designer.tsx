@@ -5,12 +5,15 @@ import { Icon } from "@/components/icons";
 import { Input, Notice, Select } from "@/components/ui";
 import { CARD_LABEL, DEFAULT_THEME, inkOn, themeStyle, type StudentCard, type Theme } from "@/lib/theme";
 import { saveTheme } from "./actions";
+import { FeatureSwitches, MenuEditor } from "./menus-features";
 
 type S = { error?: string; ok?: string } | undefined;
 
 // Starting points only; every colour stays editable.
 const PRESETS: { name: string; colors: Partial<Theme["colors"]>; hero: [string, string]; gradientTo: string }[] = [
-  { name: "Navy (default)", colors: DEFAULT_THEME.colors, hero: ["#1d4ed8", "#0b2545"], gradientTo: "#2f6fed" },
+  { name: "Graphite (default)", colors: DEFAULT_THEME.colors, hero: ["#45484d", "#2d2f33"], gradientTo: "#45484d" },
+  { name: "Navy", colors: { primary: "#0b2545", accent: "#2f6fed", background: "#f3f6fb", surface: "#ffffff", text: "#0f1b2d", muted: "#64748b",
+    success: "#16a34a", warning: "#d97706", danger: "#dc2626" }, hero: ["#1d4ed8", "#0b2545"], gradientTo: "#2f6fed" },
   { name: "Maroon & gold", colors: { primary: "#6d1a2c", accent: "#c8961e", background: "#faf7f2", surface: "#ffffff", text: "#2a1a1d" }, hero: ["#8b2336", "#4a0f1c"], gradientTo: "#a0283f" },
   { name: "Forest", colors: { primary: "#14532d", accent: "#16a34a", background: "#f2f7f3", surface: "#ffffff", text: "#0f1f15" }, hero: ["#15803d", "#14532d"], gradientTo: "#16a34a" },
   { name: "Ocean", colors: { primary: "#0c4a6e", accent: "#0891b2", background: "#f0f7fa", surface: "#ffffff", text: "#0b1f2a" }, hero: ["#0891b2", "#0c4a6e"], gradientTo: "#0e7490" },
@@ -110,6 +113,14 @@ export function Designer({ initial, institutionName }: { initial: Theme; institu
                 onClick={() => set("footer", { links: [...t.footer.links, { label: "", url: "" }] })}><Icon name="plus" size={16} />Add a link</button>
             )}
           </div>
+        </Section>
+
+        <Section title="Features">
+          <FeatureSwitches value={t.features} onChange={(features) => setT((p) => ({ ...p, features }))} />
+        </Section>
+
+        <Section title="Menus">
+          <MenuEditor value={t.menus} features={t.features} onChange={(menus) => setT((p) => ({ ...p, menus }))} />
         </Section>
 
         <Section title="Student home" open>

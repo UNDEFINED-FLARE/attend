@@ -1,4 +1,6 @@
+import { loadTheme } from "@/lib/shell-data";
 import Link from "next/link";
+import { MODULE_SHADES } from "@/lib/palette";
 import { Bar, StatTile } from "@/components/charts";
 import { Icon } from "@/components/icons";
 import { Badge, Card, CardTitle, pct } from "@/components/ui";
@@ -7,7 +9,7 @@ import { greeting, groupBy, rate, sastMidnight, timeOf } from "@/lib/stats";
 
 export const metadata = { title: "Home" };
 
-const COLORS = ["#2f6fed", "#16a34a", "#d97706", "#7c3aed", "#db2777", "#0891b2"];
+const COLORS = MODULE_SHADES;
 
 export default async function LecturerHome() {
   const { supabase, institutionId, user } = await requireRole("lecturer");
@@ -28,7 +30,7 @@ export default async function LecturerHome() {
     // Early warning (0015); empty if the institution hasn't run that update yet.
     supabase.rpc("list_student_alerts", { p_inst: institutionId, p_live_only: true }),
   ]);
-  const needFollowUp = Array.isArray(alerts) ? alerts.length : 0;
+  const needFollowUp = (await loadTheme(supabase, institutionId)).features.earlyWarning && Array.isArray(alerts) ? alerts.length : 0;
   const open = (sessions ?? []).filter((s) => s.status === "open");
   const week = (sessions ?? []).filter((s) => s.opens_at >= sastMidnight(6)).length;
   const byModule = groupBy(recs ?? [], (r) => r.module_id as string);
@@ -43,7 +45,7 @@ export default async function LecturerHome() {
       </div>
 
       {open.length > 0 && (
-        <section className="mb-6 overflow-hidden rounded-3xl bg-gradient-to-br from-[#14532d] via-[#16a34a] to-[#15803d] p-6 text-white shadow-card">
+        <section className="mb-6 overflow-hidden rounded-3xl bg-brand p-6 text-brand-ink shadow-card">
           <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider"><span className="size-2 animate-pulse rounded-full bg-white" />Live now</p>
           <ul className="mt-3 space-y-3">
             {open.map((s) => (
@@ -52,7 +54,7 @@ export default async function LecturerHome() {
                   <p className="text-lg font-semibold">{(s.modules as unknown as { code: string }).code} · {s.title}</p>
                   <p className="text-sm opacity-85">{(s.venues as unknown as { name: string } | null)?.name ?? "No venue"} · code <span className="font-mono font-semibold tracking-widest">{s.join_code}</span> · closes {timeOf(s.closes_at)}</p>
                 </div>
-                <Link href={`/lecturer/sessions/${s.id}`} className="inline-flex h-11 items-center gap-2 rounded-xl bg-white px-4 text-sm font-semibold text-[#15803d]">
+                <Link href={`/lecturer/sessions/${s.id}`} className="inline-flex h-11 items-center gap-2 rounded-xl bg-white px-4 text-sm font-semibold text-ink">
                   <Icon name="qr" size={18} />Show QR & register
                 </Link>
               </li>

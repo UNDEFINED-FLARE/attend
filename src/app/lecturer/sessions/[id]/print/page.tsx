@@ -1,3 +1,5 @@
+import { FeatureOff } from "@/components/feature-off";
+import { loadTheme } from "@/lib/shell-data";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
@@ -11,7 +13,8 @@ export const metadata = { title: "Printed QR" };
 /** A printable / downloadable fixed QR for one session (only when the location check is on). */
 export default async function PrintQr({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { supabase } = await requireRole("lecturer");
+  const { supabase, institutionId } = await requireRole("lecturer");
+  if (!(await loadTheme(supabase, institutionId)).features.printedQr) return <FeatureOff name="The printed QR code" />;
   const { data: s } = await supabase.from("class_sessions")
     .select("id, title, closes_at, modules(code, title), venues(name)").eq("id", id).maybeSingle();
   if (!s) notFound();

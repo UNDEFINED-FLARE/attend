@@ -15,6 +15,19 @@ export const CARD_LABEL: Record<StudentCard, string> = {
   hero: "Attendance summary", live: "Check-in prompt", quick: "At a glance", today: "Today's classes", modules: "My modules", recent: "Recent",
 };
 
+const menuItem = z.object({ href: z.string().regex(/^\/[a-z0-9/_-]*$/), label: text(30), show: z.boolean() });
+
+/** Optional parts of UniAttend an institution can switch off. */
+export const FEATURES = {
+  earlyWarning: ["Early warning", "Automatic alerts and follow-up for students with low attendance."],
+  cardScanning: ["Student card scanning", "Lecturers scan student cards (camera or USB scanner) to check students in and out."],
+  printedQr: ["Printed QR codes", "A fixed QR code to print, accepted only together with the location check."],
+  checkOut: ["Check-out", "Students tap \"I'm leaving\"; leaving early is recorded."],
+  directions: ["Walking directions", "\"Find my class\" guides students to their next venue."],
+  calendarDownload: ["Timetable download", "Students and lecturers download their timetable for their phone's calendar."],
+  liveClass: ["Live class screen", "After check-in, a live screen with the time left until the class ends."],
+} as const;
+
 export const ThemeSchema = z.object({
   colors: z.object({
     primary: hex, accent: hex, background: hex, surface: hex, text: hex, muted: hex,
@@ -29,6 +42,8 @@ export const ThemeSchema = z.object({
   sidebar: z.object({ style: z.enum(["light", "dark", "brand"]) }),
   footer: z.object({ show: z.boolean(), text: text(200), links: z.array(link).max(6) }),
   announcement: z.object({ show: z.boolean(), text: text(240), tone: z.enum(["info", "ok", "warn", "bad"]) }),
+  features: z.object(Object.fromEntries(Object.keys(FEATURES).map((k) => [k, z.boolean()])) as Record<keyof typeof FEATURES, z.ZodBoolean>),
+  menus: z.object({ student: z.array(menuItem).max(20), lecturer: z.array(menuItem).max(20), admin: z.array(menuItem).max(20) }),
   student: z.object({
     greeting: text(60), heroTitle: text(60), heroFrom: hex, heroTo: hex,
     cards: z.array(z.object({ id: z.enum(STUDENT_CARDS), show: z.boolean(), title: text(40) })).length(STUDENT_CARDS.length)
@@ -38,16 +53,20 @@ export const ThemeSchema = z.object({
 export type Theme = z.infer<typeof ThemeSchema>;
 
 export const DEFAULT_THEME: Theme = {
-  colors: { primary: "#0b2545", accent: "#2f6fed", background: "#f3f6fb", surface: "#ffffff", text: "#0f1b2d", muted: "#64748b",
-            success: "#16a34a", warning: "#d97706", danger: "#dc2626" },
+  // Minimal graphite: light grey surfaces, dark grey ink and buttons, muted status colours.
+  colors: { primary: "#2d2f33", accent: "#45484d", background: "#e7e8ea", surface: "#f5f5f6", text: "#1d1e20", muted: "#6b6e74",
+            success: "#3d7a55", warning: "#9a6a1f", danger: "#a8443d" },
   shape: "rounded",
   font: "system",
-  header: { style: "light", gradientTo: "#2f6fed", title: "", subtitle: "", logoUrl: "", showDate: true },
+  header: { style: "light", gradientTo: "#45484d", title: "", subtitle: "", logoUrl: "", showDate: true },
   sidebar: { style: "light" },
   footer: { show: false, text: "", links: [] },
   announcement: { show: false, text: "", tone: "info" },
+  features: Object.fromEntries(Object.keys(FEATURES).map((k) => [k, true])) as Theme["features"],
+  // Empty means "the app's default menus"; the Design page fills them in when edited.
+  menus: { student: [], lecturer: [], admin: [] },
   student: {
-    greeting: "{greeting}", heroTitle: "Your attendance", heroFrom: "#1d4ed8", heroTo: "#0b2545",
+    greeting: "{greeting}", heroTitle: "Your attendance", heroFrom: "#45484d", heroTo: "#2d2f33",
     cards: STUDENT_CARDS.map((id) => ({ id, show: true, title: CARD_LABEL[id] })),
   },
 };

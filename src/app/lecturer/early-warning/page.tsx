@@ -1,3 +1,5 @@
+import { FeatureOff } from "@/components/feature-off";
+import { loadTheme } from "@/lib/shell-data";
 import Link from "next/link";
 import { EarlyWarningList, loadAlerts } from "@/components/early-warning";
 import { Notice, PageHeader } from "@/components/ui";
@@ -9,6 +11,7 @@ export default async function LecturerEarlyWarning({ searchParams }: { searchPar
   const sp = await searchParams;
   const show = sp.show === "closed" ? "closed" : "live";
   const { supabase, institutionId, user } = await requireRole("lecturer");
+  if (!(await loadTheme(supabase, institutionId)).features.earlyWarning) return <FeatureOff name="Early warning" />;
   const { alerts, missing } = await loadAlerts(supabase, institutionId, false);
   if (missing) return <Notice tone="warn">Early warning isn&apos;t set up for your institution yet. Ask your administrator.</Notice>;
 

@@ -1,3 +1,5 @@
+import { FeatureOff } from "@/components/feature-off";
+import { loadTheme } from "@/lib/shell-data";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireRole } from "@/lib/auth";
@@ -7,7 +9,8 @@ export const metadata = { title: "Scan student cards" };
 
 export default async function ScanPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { supabase } = await requireRole("lecturer");
+  const { supabase, institutionId } = await requireRole("lecturer");
+  if (!(await loadTheme(supabase, institutionId)).features.cardScanning) return <FeatureOff name="Student card scanning" />;
   const { data: s } = await supabase.from("class_sessions").select("id, title, status, modules(code)").eq("id", id).maybeSingle();
   if (!s) notFound();
   const mod = s.modules as unknown as { code: string };

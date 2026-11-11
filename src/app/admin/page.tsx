@@ -69,11 +69,11 @@ export default async function AdminHome() {
           <CardTitle>{anyToday ? "Today's check-ins" : "Attendance rate, last 14 days"}</CardTitle>
           {anyToday
             ? <AreaChart labels={HOURS.map((h) => `${h}:00`)} series={[
-                { label: "Present", color: "#2f6fed", points: d.hourly.present },
-                { label: "Late", color: "#d97706", points: d.hourly.late },
-                { label: "Pending review", color: "#7c3aed", points: d.hourly.pending_verification },
+                { label: "Present", color: "var(--ink)", points: d.hourly.present },
+                { label: "Late", color: "var(--warn)", points: d.hourly.late },
+                { label: "Pending review", color: "var(--muted)", points: d.hourly.pending_verification },
               ]} />
-            : <AreaChart unit="%" max={100} labels={d.daily.map((x) => dayLabel(x.day))} series={[{ label: "Attendance %", color: "#2f6fed", points: d.daily.map((x) => x.rate ?? 0) }]} />}
+            : <AreaChart unit="%" max={100} labels={d.daily.map((x) => dayLabel(x.day))} series={[{ label: "Attendance %", color: "var(--ink)", points: d.daily.map((x) => x.rate ?? 0) }]} />}
           {!anyData && <p className="mt-2 text-center text-sm text-muted">No attendance yet. The chart fills in as lecturers run sessions.</p>}
         </Card>
         <Card>
@@ -81,9 +81,9 @@ export default async function AdminHome() {
             Location checks <span className="font-normal text-muted">· 30 days</span>
           </CardTitle>
           <Donut center={inside + outside + noLoc ? `${Math.round((100 * inside) / (inside + outside + noLoc))}%` : "—"} sub="inside venue" segments={[
-            { label: "Inside venue", value: inside, color: "#16a34a" },
-            { label: "Outside venue", value: outside, color: "#dc2626" },
-            { label: "No location", value: noLoc, color: "#94a3b8" },
+            { label: "Inside venue", value: inside, color: "var(--ink)" },
+            { label: "Outside venue", value: outside, color: "var(--bad)" },
+            { label: "No location", value: noLoc, color: "var(--line)" },
           ]} />
           <p className="mt-4 text-xs text-muted">Outside or missing location sends a check-in to review. It never marks a student absent on its own.</p>
         </Card>

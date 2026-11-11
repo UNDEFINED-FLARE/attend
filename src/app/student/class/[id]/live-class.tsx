@@ -26,7 +26,7 @@ function left(ms: number) {
  * Stays live for the whole class: counts down to the end, keeps the screen on,
  * and updates by itself when the lecturer decides on a late arrival or closes the session.
  */
-export function LiveClass({ session, record }: { session: Session; record: Rec }) {
+export function LiveClass({ session, record, checkOut = true }: { session: Session; record: Rec; checkOut?: boolean }) {
   const router = useRouter();
   // Starts on the phone (not the server), so the first render matches and the clock is the phone's.
   const [mounted, setMounted] = useState(false);
@@ -128,10 +128,12 @@ export function LiveClass({ session, record }: { session: Session; record: Rec }
             <input type="checkbox" className="peer sr-only" checked={keepOn} onChange={(e) => setKeepOn(e.target.checked)} />
             <span aria-hidden className="relative h-7 w-12 shrink-0 rounded-full bg-line transition peer-checked:bg-accent after:absolute after:left-1 after:top-1 after:size-5 after:rounded-full after:bg-white after:shadow after:transition peer-checked:after:translate-x-5" />
           </label>
-          <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
-            <span className="text-sm text-muted">Leaving before the end?</span>
-            <LeaveButton session={session.id} />
-          </div>
+          {checkOut && (
+            <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
+              <span className="text-sm text-muted">Leaving before the end?</span>
+              <LeaveButton session={session.id} />
+            </div>
+          )}
         </section>
       ) : (
         <Link href="/student" className="flex h-12 items-center justify-center rounded-2xl bg-accent font-semibold text-white">Back to my dashboard</Link>
