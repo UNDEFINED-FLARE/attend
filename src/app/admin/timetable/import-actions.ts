@@ -2,8 +2,9 @@
 import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { findLecturerByName } from "@/lib/assignment-match";
 import { requireRole } from "@/lib/auth";
-import { extractPdfItems, parseTimetableItems, type ParsedClass, type ParsedTimetable } from "@/lib/timetable-pdf";
+import { extractPdfItems, parseTimetableItems, SCANNED_PDF, type ParsedClass, type ParsedTimetable } from "@/lib/timetable-pdf";
 import { sourceCatalog, sourceClasses, type SourceItem, type SourceType } from "@/lib/timetable-sources";
 
 type S = { error?: string; ok?: string } | undefined;
@@ -34,6 +35,8 @@ const ClassRow = z.object({
   kind: z.enum(["lecture", "tutorial", "practical", "test", "other"]).optional(),
 });
 const MAX_CLASSES = 20000;
+/** "CSC 111" typed on the Modules page is the timetable's "CSC111". */
+const codeKey = (c: string) => c.toUpperCase().replace(/\s+/g, "");
 
 /** What would be created, compared with what the institution already has. */
 async function buildPreview(parsed: Omit<ParsedTimetable, "classes"> & { classes: ParsedClass[] }): Promise<PreviewState> {
@@ -46,15 +49,15 @@ async function buildPreview(parsed: Omit<ParsedTimetable, "classes"> & { classes
     supabase.from("venues").select("name").eq("institution_id", institutionId).is("deleted_at", null),
     supabase.from("lecturers").select("full_name").eq("institution_id", institutionId).is("deleted_at", null),
   ]);
-  const haveMod = new Set((mods ?? []).map((m) => m.code.toUpperCase()));
+  const haveMod = new Set((mods ?? []).map((m) => codeKey(m.code)));
   const haveVen = new Set((vens ?? []).map((v) => v.name.toLowerCase()));
-  const haveLect = new Set((lects ?? []).map((l) => l.full_name.trim().toUpperCase()));
   return {
     preview: {
       title: parsed.title, expected: parsed.expected, classes: parsed.classes, warnings: parsed.warnings,
-      newModules: codes.filter((c) => !haveMod.has(c.toUpperCase())).sort(),
+      newModules: codes.filter((c) => !haveMod.has(codeKey(c))).sort(),
       newVenues: venues.filter((v) => !haveVen.has(v.toLowerCase())).sort(),
-      lecturers: Object.fromEntries(names.map((n) => [n, haveLect.has(n.toUpperCase())])),
+      // Same matching as the import itself, so "already registered" is what will happen.
+      lecturers: Object.fromEntries(names.map((n) => [n, findLecturerByName(n, lects ?? []) !== null])),
     },
   };
 }
@@ -70,7 +73,9 @@ export async function previewTimetablePdf(_: PreviewState, f: FormData): Promise
   if (String.fromCharCode(...bytes.slice(0, 5)) !== "%PDF-") return { error: "That file is not a PDF." };
   let parsed: ParsedTimetable;
   try {
-    parsed = parseTimetableItems(await extractPdfItems(bytes));
+    const items = await extractPdfItems(bytes);
+    if (!items.length) return { error: SCANNED_PDF };
+    parsed = parseTimetableItems(items);
   } catch (e) {
     return { error: e instanceof Error && /20 pages/.test(e.message) ? e.message : "That PDF could not be read. Export the timetable again and retry." };
   }
@@ -157,8 +162,8 @@ export async function applyTimetableImport(_: S, f: FormData): Promise<S> {
   // Modules: match by code; create the missing ones if asked.
   const codes = [...new Set(classes.map((c) => c.code))];
   const { data: mods } = await supabase.from("modules").select("id, code").eq("institution_id", institutionId).is("deleted_at", null);
-  const modId = new Map((mods ?? []).map((m) => [m.code.toUpperCase(), m.id as string]));
-  const missingMods = codes.filter((c) => !modId.has(c));
+  const modId = new Map((mods ?? []).map((m) => [codeKey(m.code), m.id as string]));
+  const missingMods = codes.filter((c) => !modId.has(codeKey(c)));
   // Class size per module: the sum of its distinct groups' sizes.
   const groupSizes = new Map<string, Map<string, number>>();
   for (const c of classes) if (c.students) {
@@ -172,7 +177,7 @@ export async function applyTimetableImport(_: S, f: FormData): Promise<S> {
       const { data, error } = await supabase.from("modules")
         .insert(part.map((code) => ({ institution_id: institutionId, code, title: code, ...(size(code) ? { expected_students: size(code) } : {}) }))).select("id, code");
       if (error) return { error: errText(error) };
-      for (const m of data ?? []) modId.set(m.code.toUpperCase(), m.id);
+      for (const m of data ?? []) modId.set(codeKey(m.code), m.id);
     }
     notes.push(`${missingMods.length} modules created (give them proper titles on the Modules page)`);
   } else if (missingMods.length) {
@@ -190,21 +195,34 @@ export async function applyTimetableImport(_: S, f: FormData): Promise<S> {
     if (updated) notes.push(`class sizes updated on ${updated} existing modules`);
   }
 
-  // Lecturers: create the ones named in the timetable that aren't registered yet.
+  // Lecturers: find the registered one each timetable name means. Timetables print names
+  // without titles ("THANDI MOKOENA" for "Dr Thandi Mokoena"), so an exact match would
+  // register the same person twice. Create only the names that fit nobody.
   const lecturerNames = [...new Set(classes.map((c) => c.lecturer).filter(Boolean) as string[])];
-  const { data: lectRows } = await supabase.from("lecturers").select("id, full_name, staff_number").eq("institution_id", institutionId);
-  const lectId = new Map((lectRows ?? []).map((l) => [l.full_name.trim().toUpperCase(), l.id as string]));
+  const { data: lectRows } = await supabase.from("lecturers").select("id, full_name, staff_number, deleted_at").eq("institution_id", institutionId);
+  const active = (lectRows ?? []).filter((l) => !l.deleted_at) as { id: string; full_name: string }[];
   const takenStaffNo = new Set((lectRows ?? []).map((l) => l.staff_number));
-  const newLects = lecturerNames.filter((n) => !lectId.has(n.toUpperCase()) && !takenStaffNo.has(placeholderStaffNo(n)));
+  const lectId = new Map<string, string>(); // timetable name (upper case) -> lecturer id
+  const unsure: string[] = [];
+  for (const n of lecturerNames) {
+    const hit = findLecturerByName(n, active);
+    if (hit === "ambiguous") unsure.push(nameCase(n));
+    else if (hit) lectId.set(n.toUpperCase(), hit.id);
+  }
+  const newLects = lecturerNames.filter((n) => !lectId.has(n.toUpperCase()) && !unsure.includes(nameCase(n)) && !takenStaffNo.has(placeholderStaffNo(n)));
   if (newLects.length && opt("create_lecturers")) {
     for (const part of chunks(newLects, 500)) {
       const { data, error } = await supabase.from("lecturers")
         .insert(part.map((n) => ({ institution_id: institutionId, full_name: nameCase(n), staff_number: placeholderStaffNo(n), source: "timetable" })))
-        .select("id, full_name");
+        .select("id, staff_number");
       if (error) return { error: errText(error) };
-      for (const l of data ?? []) lectId.set(l.full_name.trim().toUpperCase(), l.id);
+      const byStaff = new Map((data ?? []).map((l) => [l.staff_number as string, l.id as string]));
+      for (const n of part) { const id = byStaff.get(placeholderStaffNo(n)); if (id) lectId.set(n.toUpperCase(), id); }
     }
-    notes.push(`${newLects.length} lecturers created from the timetable (add their staff numbers and emails under People so they can sign in)`);
+    notes.push(`${newLects.length} lecturer${newLects.length === 1 ? "" : "s"} created from the timetable (add their staff numbers and emails under People so they can sign in)`);
+  }
+  if (unsure.length) {
+    notes.push(`${unsure.slice(0, 3).join(", ")}${unsure.length > 3 ? "…" : ""} could be more than one registered lecturer, so ${unsure.length === 1 ? "was" : "were"} not linked; assign ${unsure.length === 1 ? "them" : "these"} on the Modules page`);
   }
 
   // Venues: match by name; create the missing ones (not yet mapped) if asked.
@@ -250,7 +268,7 @@ export async function applyTimetableImport(_: S, f: FormData): Promise<S> {
   const clashes: string[] = [];
   const rows: Record<string, unknown>[] = [];
   for (const c of classes) {
-    const module_id = modId.get(c.code);
+    const module_id = modId.get(codeKey(c.code));
     if (!module_id) continue;
     const venue_id = c.venue ? venId.get(c.venue.toLowerCase()) ?? null : null;
     const k = key(module_id, venue_id, c.weekday, c.starts_at, c.ends_at);
@@ -286,7 +304,7 @@ export async function applyTimetableImport(_: S, f: FormData): Promise<S> {
     const byName = lectId;
     const pairs = new Map<string, { institution_id: string; module_id: string; lecturer_id: string }>();
     for (const c of classes) {
-      const m = modId.get(c.code), l = c.lecturer ? byName.get(c.lecturer.toUpperCase()) : undefined;
+      const m = modId.get(codeKey(c.code)), l = c.lecturer ? byName.get(c.lecturer.toUpperCase()) : undefined;
       if (m && l) pairs.set(`${m}|${l}`, { institution_id: institutionId, module_id: m, lecturer_id: l });
     }
     for (const part of chunks([...pairs.values()], 500)) {

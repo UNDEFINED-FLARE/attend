@@ -115,6 +115,9 @@ function parseBlockItems(items: TextItem[]): ParsedTimetable {
   return { title, expected: Number.isFinite(expected) ? expected : null, classes, warnings };
 }
 
+/** A scanned PDF is a picture of a page: there is no text in it to read. */
+export const SCANNED_PDF = "This PDF is a scan (a picture of the page), so UniAttend can't read the text in it. Use the original file instead: the PDF downloaded from the system, or the Excel/Word document it was printed from.";
+
 /** Positioned text from every page of a PDF (server-side). */
 export async function extractPdfItems(data: Uint8Array): Promise<TextItem[]> {
   // Load the worker module ourselves and hand it to pdf.js: on a server it runs

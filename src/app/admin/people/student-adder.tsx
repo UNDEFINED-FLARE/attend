@@ -11,7 +11,7 @@ type Tab = "one" | "paste" | "csv";
 const TABS: [Tab, string, IconName][] = [
   ["one", "One student", "user"],
   ["paste", "Paste a list", "file"],
-  ["csv", "Upload CSV", "download"],
+  ["csv", "Upload a file", "download"],
 ];
 
 export function StudentAdder({ modules, addOne, paste, upload }: {
@@ -58,7 +58,7 @@ export function StudentAdder({ modules, addOne, paste, upload }: {
 
       {tab === "paste" && (
         <ActionForm action={paste} submit="Add students" pending="Adding…">
-          <Field label="One student per line" hint="student number, full name, email (optional), module code (optional). You can paste straight from Excel.">
+          <Field label="One student per line" hint="Student number, full name, email (optional), module code (optional). You can paste straight from Excel; include the heading row and the columns can be in any order.">
             <Textarea name="list" required rows={8} className="font-mono text-xs"
               placeholder={"22012345, Thabo Mulaudzi, 22012345@students.example.ac.za, CSC1541\n22012346, Lufuno Netshiongolwe\n22012347, Ntsako Baloyi, , CSC1541"} />
           </Field>
@@ -72,12 +72,14 @@ export function StudentAdder({ modules, addOne, paste, upload }: {
       )}
 
       {tab === "csv" && (
-        <ActionForm action={upload} submit="Import file" pending="Importing…">
+        <ActionForm action={upload} submit="Import students" pending="Importing…">
           <p className="text-sm text-muted">
-            First row: <code className="rounded bg-bg px-1">student_number, full_name</code>, optionally <code className="rounded bg-bg px-1">email, module_code</code>.
-            In Excel use File → Save As → CSV UTF-8. Up to 10,000 rows per file.
+            Excel, CSV, Word or PDF, up to 5 MB and 10,000 students. The list needs a heading row with
+            {" "}<b>Student number</b> and <b>Name</b> (or <b>First name</b> and <b>Surname</b>);
+            {" "}<b>Email</b> and <b>Module</b> are optional. Columns can be in any order, and titles above the list are ignored.
           </p>
-          <Input type="file" name="file" accept=".csv,text/csv" required className="py-1.5" />
+          <Input type="file" name="file" accept=".xlsx,.xlsm,.csv,.tsv,.txt,.docx,.pdf,text/csv,application/pdf" required className="py-1.5" />
+          <p className="text-xs text-muted">An existing student number is updated, never duplicated, so it is safe to import the same list again.</p>
         </ActionForm>
       )}
     </div>

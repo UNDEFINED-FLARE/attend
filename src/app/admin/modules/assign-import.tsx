@@ -52,6 +52,7 @@ export function AssignImport() {
         <form action={apply} className="mt-4 space-y-3">
           <input type="hidden" name="items" value={JSON.stringify(chosen.map((r) => ({
             code: r.code, lecturer_id: r.lecturer_id, lecturer_name: r.lecturer_name, email: r.email, staff_number: r.staff_number, role: r.role,
+            module_title: r.module_id ? null : r.module_title,
           })))} />
           <div className="flex flex-wrap items-center gap-1.5 text-xs">
             <span className="mr-1 text-muted">{preview?.file} ·</span>
@@ -92,7 +93,8 @@ export function AssignImport() {
           </div>
           <div className="flex flex-wrap items-center gap-4 text-sm">
             <label className={`flex items-center gap-2 ${needLect ? "" : "opacity-50"}`}><input type="checkbox" name="create_lecturers" defaultChecked disabled={!needLect} />Create new lecturers</label>
-            <label className={`flex items-center gap-2 ${needMod ? "" : "opacity-50"}`}><input type="checkbox" name="create_modules" disabled={!needMod} />Create missing modules</label>
+            {/* On by default, like "Create new lecturers": rows marked "New module" are ticked, so leaving it off skipped them. */}
+            <label className={`flex items-center gap-2 ${needMod ? "" : "opacity-50"}`}><input type="checkbox" name="create_modules" defaultChecked disabled={!needMod} />Create missing modules</label>
             <span className="ml-auto text-muted">{chosen.length} selected</span>
             <Submit label={`Assign ${chosen.length}`} pending="Saving…" />
           </div>

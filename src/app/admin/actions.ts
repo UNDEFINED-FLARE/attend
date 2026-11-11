@@ -3,7 +3,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireRole } from "@/lib/auth";
 import { coveringRadius } from "@/lib/campuses";
-import { csvObjects, parseCsv } from "@/lib/csv";
+import { csvRows, documentRows } from "@/lib/doc-rows";
+import { friendlyImportError, studentRows, type StudentRow } from "@/lib/student-rows";
 
 type S = { error?: string; ok?: string } | undefined;
 const uuid = z.string().uuid();
@@ -21,6 +22,10 @@ function fail(e: { message: string; code?: string } | null): S | null {
   if (!e) return null;
   if (e.code === "23505") return { error: "That already exists." };
   if (e.code === "23503") return { error: "That refers to something that does not exist in your institution." };
+  // Database wording ("violates check constraint ...") means nothing to an administrator.
+  if (e.code === "23514" || e.code === "22P02" || e.code === "22001") return { error: "One of the values isn't allowed or is too long. Check the form and try again." };
+  if (e.code === "42501") return { error: "Your account isn't allowed to do that. Ask an administrator of your institution." };
+  if (!e.code && /fetch|network|timed? ?out|did not answer/i.test(e.message)) return { error: "UniAttend couldn't be reached. Check your internet connection and try again." };
   return { error: e.message };
 }
 
@@ -118,39 +123,54 @@ export async function addLecturer(_: S, f: FormData): Promise<S> {
   return fail(error) ?? { ok: "Lecturer added. They get access when they sign up with that email." };
 }
 
-export async function importStudents(_: S, f: FormData): Promise<S> {
-  const file = f.get("file");
-  if (!(file instanceof File) || file.size === 0) return { error: "Choose a CSV file." };
-  if (file.size > 5 * 1024 * 1024) return { error: "The file is larger than 5 MB. Split it and import in parts." };
-  if (!/\.csv$/i.test(file.name)) return { error: "Upload a .csv file (in Excel: File → Save As → CSV UTF-8)." };
-  const rows = csvObjects(await file.text());
-  if (!rows.length) return { error: "The file has no rows." };
-  if (!("student_number" in rows[0]) || !("full_name" in rows[0])) {
-    return { error: "The first row must have columns student_number and full_name (optional: email, module_code)." };
-  }
-  return runImport(rows as ImportRow[], 1); // +1: the header is line 1 of the file (columns checked above)
+/** The institution's module codes, so a file's "csc 111" finds "CSC111". */
+async function moduleCodes(): Promise<string[]> {
+  const { supabase, institutionId } = await ctx();
+  const { data } = await supabase.from("modules").select("code").eq("institution_id", institutionId).is("deleted_at", null);
+  return (data ?? []).map((m) => m.code as string);
 }
 
-type ImportRow = { student_number: string; full_name: string; email?: string; module_code?: string };
+// Any student list a person is likely to have: Excel, CSV (comma or semicolon, as South
+// African Excel saves it), Word or PDF. The heading row is found wherever it is.
+export async function importStudents(_: S, f: FormData): Promise<S> {
+  const file = f.get("file");
+  if (!(file instanceof File) || file.size === 0) return { error: "Choose the file with your student list." };
+  if (file.size > 5 * 1024 * 1024) return { error: "The file is larger than 5 MB. Split it and import in parts." };
+  let doc;
+  try {
+    doc = await documentRows(file.name, new Uint8Array(await file.arrayBuffer()));
+  } catch (e) {
+    return { error: e instanceof Error && /supported|pages|zip|Word|expands|scan/.test(e.message) ? e.message : "That file could not be read. Use Excel (.xlsx), CSV, Word (.docx) or PDF." };
+  }
+  const parsed = studentRows(doc.rows.slice(0, 20000), { modules: await moduleCodes() });
+  if ("error" in parsed) return { error: parsed.error };
+  return runImport(parsed.rows, "row");
+}
 
-// All three ways of adding students (one form, a pasted list, a CSV file) go
+// All three ways of adding students (one form, a pasted list, a file) go
 // through import_students(), so validation, de-duplication against existing
 // records, the student-number format and plan limits are identical.
-async function runImport(rows: ImportRow[], lineOffset: number, single = false): Promise<S> {
+async function runImport(rows: StudentRow[], unit: "row" | "line", single = false): Promise<S> {
+  if (rows.length > 10000) return { error: "That is more than 10,000 students. Split the list and import it in parts." };
   const { supabase, institutionId } = await ctx();
-  const { data, error } = await supabase.rpc("import_students", { p_inst: institutionId, p_rows: rows });
-  if (error) return { error: error.message };
+  const { data, error } = await supabase.rpc("import_students", {
+    p_inst: institutionId,
+    p_rows: rows.map((r) => ({ student_number: r.student_number, full_name: r.full_name,
+      ...(r.email ? { email: r.email } : {}), ...(r.module_code ? { module_code: r.module_code } : {}) })),
+  });
+  if (error) return fail(error) ?? { error: error.message };
   const r = data as { inserted: number; updated: number; enrolled: number; errors: { row: number; error: string }[] };
   revalidatePath("/admin/people");
   revalidatePath("/admin/modules");
   if (single) {
-    if (r.errors.length) return { error: r.errors[0].error.replace(/^./, (c) => c.toUpperCase()) + "." };
+    if (r.errors.length) return { error: friendlyImportError(r.errors[0].error).replace(/^./, (c) => c.toUpperCase()) + "." };
     const what = r.inserted ? "Student added" : "Student already existed; details updated";
     return { ok: `${what}${r.enrolled ? ` and enrolled in ${r.enrolled} module${r.enrolled > 1 ? "s" : ""}` : ""}.` };
   }
-  const errs = r.errors.slice(0, 8).map((e) => `line ${e.row + lineOffset}: ${e.error}`).join("; ");
-  const msg = `${r.inserted} added, ${r.updated} updated, ${r.enrolled} enrolments.`;
-  return r.errors.length ? { error: `${msg} ${r.errors.length} skipped — ${errs}${r.errors.length > 8 ? "…" : ""}` } : { ok: msg };
+  // e.row counts the rows sent (1-based); report the row of the person's own file.
+  const errs = r.errors.slice(0, 8).map((e) => `${unit} ${rows[e.row - 1]?.line ?? e.row}: ${friendlyImportError(e.error)}`).join("; ");
+  const msg = `${r.inserted} added, ${r.updated} updated, ${r.enrolled} enrolment${r.enrolled === 1 ? "" : "s"}.`;
+  return r.errors.length ? { error: `${msg} ${r.errors.length} not imported — ${errs}${r.errors.length > 8 ? "…" : ""}` } : { ok: msg };
 }
 
 export async function addStudent(_: S, f: FormData): Promise<S> {
@@ -163,26 +183,19 @@ export async function addStudent(_: S, f: FormData): Promise<S> {
   const modules = f.getAll("module_code").map(String).filter(Boolean);
   const base = { student_number: p.data.student_number, full_name: p.data.full_name, ...(p.data.email ? { email: p.data.email } : {}) };
   // One row per module; identical details on each row, so they merge into one student.
-  const rows = modules.length ? modules.map((module_code) => ({ ...base, module_code })) : [base];
-  return runImport(rows, 0, true);
+  const rows = modules.length ? modules.map((module_code) => ({ ...base, module_code, line: 1 })) : [{ ...base, line: 1 }];
+  return runImport(rows, "line", true);
 }
 
 export async function pasteStudents(_: S, f: FormData): Promise<S> {
   const text = String(f.get("list") ?? "").trim();
   if (!text) return { error: "Paste at least one line." };
-  if (text.length > 1_000_000) return { error: "That list is too long. Split it, or upload a CSV file." };
-  // Excel copies cells as tab-separated; typed lists use commas.
-  const lines = parseCsv(text.includes("\t") ? text.replace(/\t/g, ",") : text);
-  const hasHeader = /student|number|name/i.test(lines[0]?.join(" ") ?? "") && !/\d{4,}/.test(lines[0]?.[0] ?? "");
-  const body = hasHeader ? lines.slice(1) : lines;
-  const defaultModule = String(f.get("module_code") ?? "").trim();
-  const rows: ImportRow[] = body.map(([number = "", name = "", email = "", module = ""]) => ({
-    student_number: number.trim(), full_name: name.trim(),
-    ...(email.trim() ? { email: email.trim() } : {}),
-    ...((module.trim() || defaultModule) ? { module_code: module.trim() || defaultModule } : {}),
-  }));
-  if (!rows.length) return { error: "No students found in the list." };
-  return runImport(rows, hasHeader ? 1 : 0);
+  if (text.length > 1_000_000) return { error: "That list is too long. Split it, or upload it as a file." };
+  // Excel copies cells as tab-separated; typed lists use commas or semicolons. With a heading
+  // row the columns may be in any order; without one they follow the order on the screen.
+  const parsed = studentRows(csvRows(text), { modules: await moduleCodes(), defaultModule: String(f.get("module_code") ?? ""), pasted: true });
+  if ("error" in parsed) return { error: parsed.error };
+  return runImport(parsed.rows, "line");
 }
 
 export async function grantAdmin(_: S, f: FormData): Promise<S> {

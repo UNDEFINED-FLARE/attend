@@ -74,10 +74,25 @@ export function looksLikeName(s: string): boolean {
 
 const tidyName = (s: string) => s.replace(LABEL_RE, " ").replace(/\s+/g, " ").trim()
   .replace(/^[,;:\-–\s]+|[,;:\-–\s]+$/g, "");
-/** "MELLO NS" -> "Mello NS": title case, but initials stay capitals. */
+/** "MELLO NS" -> "Mello NS", "DR NOMSA DLAMINI" -> "Dr Nomsa Dlamini": title case, initials stay capitals. */
 const nameCase = (n: string) => (n === n.toUpperCase()
-  ? n.split(" ").map((w) => (w.length <= 3 && !/[AEIOUY]/.test(w) ? w : w.toLowerCase().replace(/(^|['-])([a-z])/g, (_, p, c) => p + c.toUpperCase()))).join(" ")
+  ? n.split(" ").map((w) => (TITLES.has(w.replace(/\.$/, "")) || w.length > 3 || /[AEIOUY]/.test(w)
+    ? w.toLowerCase().replace(/(^|['-])([a-z])/g, (_, p, c) => p + c.toUpperCase())
+    : w)).join(" ")
   : n);
+
+/**
+ * The registered lecturer a name refers to: the same name, or the one name that fits
+ * ("THANDI MOKOENA" or "MOKOENA T" finds "Dr Thandi Mokoena"). "ambiguous" when several fit.
+ */
+export function findLecturerByName<L extends { full_name: string }>(name: string, lecturers: L[]): L | "ambiguous" | null {
+  const exact = lecturers.filter((l) => l.full_name.trim().toUpperCase() === name.trim().toUpperCase());
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) return "ambiguous";
+  const scored = lecturers.map((l) => ({ l, s: nameScore(name, l.full_name) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s);
+  if (!scored.length) return null;
+  return scored.length === 1 || scored[0].s > scored[1].s ? scored[0].l : "ambiguous";
+}
 
 type Header = { code?: number; lecturer?: number; email?: number; staff?: number; role?: number; title?: number };
 
@@ -97,7 +112,7 @@ function findHeader(row: string[]): Header | null {
 
 /** All "lecturer for module" claims in the rows, before matching. */
 export function extractClaims(rows: string[][], pairs?: { code: string; lecturer: string }[]) {
-  const claims: { code: string; text: string | null; email: string | null; staff: string | null; role: "primary" | "assistant"; line: string; strong: boolean }[] = [];
+  const claims: { code: string; text: string | null; email: string | null; staff: string | null; role: "primary" | "assistant"; line: string; strong: boolean; title?: string | null }[] = [];
   for (const p of pairs ?? []) {
     for (const name of p.lecturer.split(/\s*[;/&]\s*|\s*,\s*(?=[A-Z][A-Z]+\b)/)) {
       if (name.trim()) claims.push({ code: p.code, text: name.trim(), email: null, staff: null, role: "primary", line: `${p.code} — ${p.lecturer}`, strong: true });
@@ -123,8 +138,10 @@ export function extractClaims(rows: string[][], pairs?: { code: string; lecturer
       const roleCell = header.role != null ? cells[header.role] ?? "" : line;
       const role = /assist|asst|tutor|secondary/i.test(roleCell) ? "assistant" : "primary";
       const names = header.lecturer != null ? (cells[header.lecturer] ?? "").split(/\s*[;/&\n]\s*/).filter(Boolean) : [null];
+      // The module's name in the document, so a module created from it gets a real title.
+      const title = header.title != null && codes.length === 1 ? (cells[header.title] ?? "").trim().slice(0, 200) || null : null;
       for (const c of codes.length ? codes : lastCodes) {
-        for (const n of names) claims.push({ code: c, text: n ? tidyName(n) : null, email: names.length === 1 ? email : null, staff: names.length === 1 ? staff : null, role, line, strong: true });
+        for (const n of names) claims.push({ code: c, text: n ? tidyName(n) : null, email: names.length === 1 ? email : null, staff: names.length === 1 ? staff : null, role, line, strong: true, title });
       }
       if (codes.length) lastCodes = codes;
       continue;
@@ -193,7 +210,7 @@ export function matchAssignments(
     if (out.has(key)) continue;
     moduleHasLecturer.add(c.code);
     out.set(key, {
-      key, code: c.code, module_id: mod?.id ?? null, module_title: mod?.title ?? null,
+      key, code: c.code, module_id: mod?.id ?? null, module_title: mod?.title ?? c.title ?? null,
       lecturer_text: c.text, lecturer_id: lect?.id ?? null, lecturer_name: lect?.full_name ?? newName ?? c.text,
       email: lect?.email ?? c.email, staff_number: lect?.staff_number ?? c.staff, role: c.role, status,
       note: ambiguous ? "More than one lecturer matches this name." : !lect && !mod ? "New module and new lecturer" : undefined,

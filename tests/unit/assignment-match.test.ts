@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { looksLikeName, matchAssignments, nameScore } from "@/lib/assignment-match";
+import { findLecturerByName, looksLikeName, matchAssignments, nameScore } from "@/lib/assignment-match";
 
 const modules = [
   { id: "m1", code: "CSC101", title: "Intro to CS" },
@@ -66,5 +66,33 @@ describe("assignments from documents", () => {
 
   it("ignores unknown codes in free text", () => {
     expect(matchAssignments([["Room ABC1234 Dr Jane Mokoena"]], modules, lecturers, [])).toEqual([]);
+  });
+
+  it("writes titles of new lecturers as Dr/Mr/Ms, not DR/MR/MS", () => {
+    const r = matchAssignments([], modules, lecturers, [], [{ code: "CSC101", lecturer: "DR NOMSA DLAMINI" }, { code: "MAT201", lecturer: "MRS K NDLOVU" }]);
+    expect(r.find((x) => x.code === "CSC101")?.lecturer_name).toBe("Dr Nomsa Dlamini");
+    expect(r.find((x) => x.code === "MAT201")?.lecturer_name).toBe("Mrs K Ndlovu");
+  });
+
+  it("keeps the document's module name for a module that will be created", () => {
+    const r = matchAssignments([["Module code", "Module name", "Lecturer"], ["STA102", "Introduction to Statistics", "N.S. Mello"]], modules, lecturers, []);
+    expect(r[0]).toMatchObject({ status: "new_module", module_title: "Introduction to Statistics", lecturer_id: "l1" });
+  });
+
+  it("finds modules typed with a space", () => {
+    const r = matchAssignments([["Code", "Lecturer"], ["CSC101", "N.S. Mello"]], [{ id: "m9", code: "CSC 101", title: "Intro" }], lecturers, []);
+    expect(r[0]).toMatchObject({ status: "assign", module_id: "m9" });
+  });
+});
+
+describe("finding a lecturer by a timetable name", () => {
+  it("matches without the title, by surname and initials, and exactly", () => {
+    expect(findLecturerByName("THANDI ZHANJE", lecturers)).toMatchObject({ id: "l2" });
+    expect(findLecturerByName("MELLO NS", lecturers)).toMatchObject({ id: "l1" });
+    expect(findLecturerByName("mr peter zhanje", lecturers)).toMatchObject({ id: "l3" });
+  });
+  it("says so when a surname fits two people, and returns nothing for strangers", () => {
+    expect(findLecturerByName("ZHANJE", lecturers)).toBe("ambiguous");
+    expect(findLecturerByName("NOMSA DLAMINI", lecturers)).toBeNull();
   });
 });

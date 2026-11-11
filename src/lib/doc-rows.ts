@@ -1,5 +1,5 @@
 import "server-only";
-import { extractPdfItems, parseTimetableItems, type TextItem } from "@/lib/timetable-pdf";
+import { extractPdfItems, parseTimetableItems, SCANNED_PDF, type TextItem } from "@/lib/timetable-pdf";
 import { openZip } from "@/lib/zip";
 
 // Turns an uploaded document into rows of cells, whatever its format:
@@ -15,8 +15,9 @@ const xmlText = (s: string) => s
 
 export function csvRows(text: string): string[][] {
   const lines = text.replace(/^﻿/, "").split(/\r?\n/).filter((l) => l.trim());
-  const first = lines[0] ?? "";
-  const delim = [",", ";", "\t", "|"].sort((a, b) => first.split(b).length - first.split(a).length)[0];
+  // Judge the separator on several lines: a file may start with a title that has none.
+  const sample = lines.slice(0, 10).join("\n");
+  const delim = [",", ";", "\t", "|"].sort((a, b) => sample.split(b).length - sample.split(a).length)[0];
   return lines.map((line) => {
     const cells: string[] = [];
     let cur = "", q = false;
@@ -114,6 +115,7 @@ export async function documentRows(name: string, bytes: Uint8Array): Promise<Doc
   const head = String.fromCharCode(...bytes.slice(0, 5));
   if (head === "%PDF-") {
     const items = await extractPdfItems(bytes);
+    if (!items.length) throw new Error(SCANNED_PDF);
     // A timetable PDF already pairs each module with its lecturer.
     const tt = parseTimetableItems(items);
     const pairs = tt.classes.filter((c) => c.lecturer).map((c) => ({ code: c.code, lecturer: c.lecturer! }));
