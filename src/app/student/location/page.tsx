@@ -1,4 +1,5 @@
-import { Notice, PageHeader } from "@/components/ui";
+import { AppTitle } from "@/components/app-chrome";
+import { Notice } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { LocationSharing } from "./location-sharing";
 
@@ -12,7 +13,7 @@ export default async function StudentLocation() {
   ]);
   return (
     <div className="mx-auto max-w-lg">
-      <PageHeader title="Campus location sharing" subtitle={current.institution_name ?? undefined} />
+      <AppTitle title="Location sharing" eyebrow={current.institution_name ?? "Campus safety"} sub="Share where you are on campus with your administrators. Off by default; you choose." />
       {!s?.location_sharing_enabled ? (
         <Notice>Your institution has not turned on campus location sharing. Nothing about your location is collected outside check-in.</Notice>
       ) : (

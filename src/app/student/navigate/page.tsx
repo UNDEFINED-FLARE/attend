@@ -1,4 +1,5 @@
-import { Notice, PageHeader } from "@/components/ui";
+import { AppTitle } from "@/components/app-chrome";
+import { Notice } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { loadCampuses } from "@/lib/shell-data";
 import { Navigator, type Destination, type NextClass } from "./navigator";
@@ -16,7 +17,7 @@ export default async function Navigate() {
   const dests = (venues ?? []) as Destination[];
   return (
     <div className="mx-auto max-w-3xl">
-      <PageHeader title="Find my class" subtitle="Walking directions to your next class or any venue on campus." />
+      <AppTitle title="Find my class" eyebrow="Walking directions" sub="To your next class or any venue on campus." />
       {dests.length === 0 ? (
         <Notice>No venues have been placed on the map yet. Ask your administrator to add venue locations.</Notice>
       ) : (
