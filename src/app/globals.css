@@ -16,6 +16,18 @@
   --bad: #a8443d;
   --info: #4f5f73;
   --violet: #5c5f65;
+  --hi: rgb(255 255 255 / 0.7);
+}
+
+/* "Follow the device" designs carry their dark palette as --d-*; swap it in at night. */
+@media (prefers-color-scheme: dark) {
+  [style*="--d-bg"] {
+    --brand: var(--d-brand) !important; --brand-ink: var(--d-brand-ink) !important; --accent: var(--d-accent) !important;
+    --bg: var(--d-bg) !important; --surface: var(--d-surface) !important; --ink: var(--d-ink) !important;
+    --muted: var(--d-muted) !important; --ok: var(--d-ok) !important; --warn: var(--d-warn) !important;
+    --bad: var(--d-bad) !important; --info: var(--d-info) !important; --line: var(--d-line) !important; --hi: var(--d-hi) !important;
+    color-scheme: dark !important;
+  }
 }
 
 @theme inline {
@@ -34,7 +46,7 @@
   --color-violet: var(--violet);
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   /* Soft, raised cards on grey, as in neumorphic mobile designs. */
-  --shadow-card: 0 1px 1px rgb(0 0 0 / 0.04), 0 6px 18px rgb(0 0 0 / 0.07), inset 0 1px 0 rgb(255 255 255 / 0.7);
+  --shadow-card: 0 1px 1px rgb(0 0 0 / 0.04), 0 6px 18px rgb(0 0 0 / 0.07), inset 0 1px 0 var(--hi);
 }
 
 body {

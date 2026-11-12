@@ -656,3 +656,52 @@ describe("targeted announcements and lecturer messages", () => {
     expect(rows.filter((r) => r.kind === "class_update").map((r) => r.endpoint)).toEqual(["https://push.example.com/send/1"]); // A2's device turned classes off earlier
   });
 });
+
+describe("design drafts, version history and sign-in branding", () => {
+  const look = (primary: string) => JSON.stringify({ colors: { primary }, login: { headline: `Welcome ${primary}` }, menus: { student: [] } });
+
+  it("a draft is private to the institution's admins and replaced, not duplicated", async () => {
+    await db.as(u.adminA, "select uniattend.save_theme_draft($1, $2)", [id.instA, look("#111111")]);
+    await db.as(u.adminA, "select uniattend.save_theme_draft($1, $2)", [id.instA, look("#222222")]);
+    const drafts = await db.as<{ theme: { colors: { primary: string } } }>(u.adminA,
+      "select theme from uniattend.theme_versions where status = 'draft'");
+    expect(drafts.map((d) => d.theme.colors.primary)).toEqual(["#222222"]);
+    expect(await db.as(u.sA1, "select * from uniattend.theme_versions")).toHaveLength(0);
+    expect(await db.as(u.adminB, "select * from uniattend.theme_versions")).toHaveLength(0);
+    const live = await db.asOne<{ theme: object }>(u.adminA, "select theme from uniattend.institutions where id = $1", [id.instA]);
+    expect(JSON.stringify(live.theme)).not.toContain("#222222");
+  });
+
+  it("publishing makes it live, records a version and clears the draft", async () => {
+    await db.as(u.adminA, "select uniattend.publish_theme($1, $2, 'Blue for open day')", [id.instA, look("#333333")]);
+    const inst = await db.asOne<{ brand_primary: string }>(u.sA1, "select brand_primary from uniattend.institutions where id = $1", [id.instA]);
+    expect(inst.brand_primary).toBe("#333333");
+    await db.as(u.adminA, "select uniattend.publish_theme($1, $2)", [id.instA, look("#444444")]);
+    const versions = await db.as<{ status: string; note: string | null }>(u.adminA,
+      "select status, note from uniattend.theme_versions where institution_id = $1 order by created_at desc", [id.instA]);
+    // (an earlier design, if the institution had one, is kept as "Design before version history")
+    expect(versions.every((v) => v.status === "published")).toBe(true);
+    expect(versions.slice(1).map((v) => v.note)).toEqual(expect.arrayContaining(["Blue for open day"]));
+    expect(versions.length).toBeLessThanOrEqual(3);
+    expect(await db.as(u.adminA, "select 1 from uniattend.theme_versions where status = 'draft'")).toHaveLength(0);
+  });
+
+  it("only the institution's own admins can draft or publish", async () => {
+    await expect(db.as(u.adminB, "select uniattend.publish_theme($1, $2)", [id.instA, look("#555555")])).rejects.toThrow(/administrators/);
+    await expect(db.as(u.lectA, "select uniattend.save_theme_draft($1, $2)", [id.instA, look("#555555")])).rejects.toThrow(/administrators/);
+    await expect(db.as(u.sA1, "insert into uniattend.theme_versions (institution_id, status, theme) values ($1, 'published', '{}')", [id.instA]))
+      .rejects.toThrow();
+  });
+
+  it("the sign-in page gets the name, logo, colours and welcome text without signing in, and nothing more", async () => {
+    const b = (await db.asOne<{ public_branding: { name: string; theme: Record<string, unknown> } }>(null,
+      "select uniattend.public_branding('uni-a')")).public_branding;
+    expect(b.name).toBe("University A");
+    expect(b.theme.login).toEqual({ headline: "Welcome #444444" });
+    expect(b.theme.menus).toBeUndefined();
+    const byId = (await db.asOne<{ public_branding: { slug: string } }>(null, "select uniattend.public_branding($1)", [id.instB])).public_branding;
+    expect(byId.slug).toBe("uni-b");
+    expect((await db.asOne<{ public_branding: unknown }>(null, "select uniattend.public_branding('nope')")).public_branding).toBeNull();
+    expect(await db.as(null, "select * from uniattend.theme_versions")).toHaveLength(0);
+  });
+});
