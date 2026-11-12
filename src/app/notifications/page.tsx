@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { markAllRead } from "@/app/actions";
 import { Icon, type IconName } from "@/components/icons";
+import { AppLock } from "@/components/app-lock";
 import { PushToggle } from "@/components/push-toggle";
 import { getSession, INST_COOKIE, ROLE_HOME } from "@/lib/auth";
 import { loadTheme } from "@/lib/shell-data";
@@ -55,7 +56,8 @@ export default async function Notifications({ searchParams }: { searchParams: Pr
 
   return (
     <div style={themeStyle(theme)} className="min-h-dvh font-sans">
-      <main className="mx-auto max-w-2xl px-4 pb-16 pt-[max(20px,env(safe-area-inset-top))]">
+      <AppLock userId={s.user.id} name={(s.user.user_metadata as { full_name?: string } | undefined)?.full_name || s.user.email || "you"} institution={instName} logo={logo} />
+      <main data-lockable className="mx-auto max-w-2xl px-4 pb-16 pt-[max(20px,env(safe-area-inset-top))]">
         <div className="mb-5 flex items-center justify-between">
           <Link href={role ? ROLE_HOME[role.role] : "/dashboard"} className="grid size-11 place-items-center rounded-2xl bg-surface shadow-card" aria-label="Back">
             <Icon name="arrowRight" size={18} className="rotate-180" />

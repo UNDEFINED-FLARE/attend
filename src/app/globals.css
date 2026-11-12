@@ -49,6 +49,9 @@
   --shadow-card: 0 1px 1px rgb(0 0 0 / 0.04), 0 6px 18px rgb(0 0 0 / 0.07), inset 0 1px 0 var(--hi);
 }
 
+/* App lock: signed-in pages stay hidden until the device confirms its owner. */
+html.ua-locked [data-lockable] { visibility: hidden; }
+
 body {
   background: var(--bg);
   color: var(--ink);

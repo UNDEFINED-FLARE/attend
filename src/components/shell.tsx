@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { signOut, switchInstitution } from "@/app/actions";
 import { AppProvider, AppTabBar } from "@/components/app-chrome";
+import { AppLock } from "@/components/app-lock";
 import { Icon } from "@/components/icons";
 import { SideNav, TabBar, type NavItem } from "@/components/nav";
 import type { RoleRow } from "@/lib/auth";
@@ -33,7 +34,7 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
   current: RoleRow;
   choices: RoleRow[];
   area: string;
-  user: { email?: string | null; name?: string | null };
+  user: { id?: string; email?: string | null; name?: string | null };
   unread?: number;
   theme?: Theme;
   /** Phone-app layout (students): page titles carry the avatar, and a floating tab bar raises this item. */
@@ -56,7 +57,9 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
   const headInk = head === "light" ? undefined : "var(--brand-ink)";
 
   return (
-    <div style={themeStyle(theme)} className="min-h-dvh font-sans">
+    <>
+    {user.id && <div style={themeStyle(theme)} className="font-sans"><AppLock userId={user.id} name={who || "you"} institution={theme.header.title || instName} logo={theme.header.logoUrl || null} /></div>}
+    <div data-lockable style={themeStyle(theme)} className="min-h-dvh font-sans">
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 flex-col print:!hidden border-r border-line px-4 py-5 lg:flex"
         style={{ background: sideBg, color: sideInk, ["--muted" as string]: sideDark ? "color-mix(in srgb, currentColor 70%, transparent)" : undefined }}>
@@ -98,6 +101,9 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
                   <button className="h-9 rounded-xl border border-line px-3 text-sm hover:opacity-80">Switch</button>
                 </form>
               )}
+              <Link href="/settings" className="grid size-10 place-items-center rounded-xl hover:bg-black/5" aria-label="Security and app lock">
+                <Icon name="lock" />
+              </Link>
               <Link href="/notifications" className="relative grid size-10 place-items-center rounded-xl hover:bg-black/5" aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}>
                 <Icon name="bell" />
                 {unread > 0 && <span className="absolute right-1.5 top-1.5 grid min-w-4 place-items-center rounded-full bg-bad px-1 text-[10px] font-semibold text-white">{unread > 9 ? "9+" : unread}</span>}
@@ -137,5 +143,6 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
 
       {app ? <AppTabBar items={nav} center={app.center} /> : <TabBar items={nav} />}
     </div>
+    </>
   );
 }

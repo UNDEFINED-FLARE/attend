@@ -23,6 +23,8 @@ export function LoginForm({ next }: { next: string }) {
         const PC = (window as unknown as { PasswordCredential?: PasswordCredentialCtor }).PasswordCredential;
         if (PC && form.current) await navigator.credentials.store(new PC(form.current));
       } catch { /* saving the password is optional */ }
+      // Signing in with the password counts as unlocking the app lock for this session.
+      try { sessionStorage.setItem("ua_unlocked", "1"); sessionStorage.removeItem("ua_hidden_at"); } catch { /* storage blocked */ }
       // A full load, so every page sees the new session cookies straight away.
       window.location.assign(state.next!);
     })();

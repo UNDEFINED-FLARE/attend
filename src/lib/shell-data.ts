@@ -24,7 +24,7 @@ export async function shellData(s: Pick<S, "user" | "supabase"> & { institutionI
     loadTheme(s.supabase, s.institutionId ?? null),
   ]);
   const meta = s.user.user_metadata as { full_name?: string } | undefined;
-  return { user: { email: s.user.email, name: meta?.full_name || null }, unread: count ?? 0, theme };
+  return { user: { id: s.user.id, email: s.user.email, name: meta?.full_name || null }, unread: count ?? 0, theme };
 }
 
 /** The institution's campuses that have a location, for the maps. Works before migration 0009 (no outline/zoom yet). */
