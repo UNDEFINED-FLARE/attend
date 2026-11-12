@@ -14,6 +14,7 @@ export const metadata = { title: "Notifications" };
 const KIND: Record<string, { icon: IconName; tone: string; group: "classes" | "announcements" | "attendance" }> = {
   class_reminder: { icon: "calendar", tone: "bg-accent/10 text-accent", group: "classes" },
   announcement: { icon: "bell", tone: "bg-violet/10 text-violet", group: "announcements" },
+  class_update: { icon: "calendar", tone: "bg-warn/10 text-warn", group: "classes" },
   session_open: { icon: "scan", tone: "bg-ok/10 text-ok", group: "attendance" },
   check_in_ok: { icon: "check", tone: "bg-ok/10 text-ok", group: "attendance" },
   check_in_review: { icon: "alert", tone: "bg-warn/10 text-warn", group: "attendance" },

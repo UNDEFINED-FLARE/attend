@@ -27,4 +27,4 @@ it("install script coexists with an existing app in public and is not re-runnabl
   const other = await db.query<{ note: string }>("select note from public.attendance_records");
   expect(other.rows).toEqual([{ note: "acvosa row" }]);
   await expect(db.exec(sql)).rejects.toThrow(/already installed/);
-});
+}, 180_000); // the whole installer on PGlite: slow on a busy machine

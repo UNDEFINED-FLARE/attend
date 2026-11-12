@@ -6,6 +6,7 @@ const ACTIONS = {
   class_reminder: [{ action: "map", title: "Show venue" }, { action: "timetable", title: "Timetable" }],
   session_open: [{ action: "checkin", title: "Check in now" }],
   announcement: [{ action: "open", title: "Read" }],
+  class_update: [{ action: "timetable", title: "Timetable" }, { action: "open", title: "Read" }],
 };
 const ROUTES = { map: "/student/map", timetable: "/student/timetable", checkin: "/student/check-in" };
 
@@ -20,7 +21,7 @@ self.addEventListener("push", (event) => {
     badge: p.badge || "/icons/badge-96.png",      // small monochrome mark in the status bar
     tag: p.kind === "class_reminder" ? `class-${p.id}` : p.id,
     renotify: p.kind === "session_open",
-    requireInteraction: p.kind === "session_open",
+    requireInteraction: p.kind === "session_open" || p.kind === "class_update",
     vibrate: p.kind === "announcement" ? [60] : [90, 50, 90],
     timestamp: Date.now(),
     actions: ACTIONS[p.kind] || [],

@@ -34,7 +34,7 @@ type Claimed = { notification_id: string; kind: string; title: string; body: str
 export type PushPayload = { id: string; kind: string; title: string; body: string; url: string; icon: string;
   badge: string; institution: string | null };
 
-const URGENT = new Set(["class_reminder", "session_open"]);
+const URGENT = new Set(["class_reminder", "session_open", "class_update"]);
 
 export async function dispatchPush(): Promise<{ sent: number; gone: number; failed: number }> {
   if (!pushConfigured()) return { sent: 0, gone: 0, failed: 0 };

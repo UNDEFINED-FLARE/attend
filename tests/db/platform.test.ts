@@ -608,3 +608,51 @@ describe("check-in controls, printed QR, card scans and check-out", () => {
     expect(await scan("A002", "out")).toMatchObject({ outcome: "checked_out" });
   });
 });
+
+describe("targeted announcements and lecturer messages", () => {
+  const SECRET = "x".repeat(40);
+  const inbox = async (user: string) => (await db.as<{ title: string; kind: string }>(user,
+    "select title, kind from uniattend.notifications where kind in ('announcement','class_update') order by created_at desc limit 1"))[0];
+
+  it("a lecturer messages their module's students, with the module code and category", async () => {
+    const n = await db.asOne<{ send_class_message: number }>(u.lectA,
+      "select uniattend.send_class_message($1, 'venue_change', 'Moved to Hall 2', 'Today''s lecture is in Hall 2.')", [id.modA]);
+    expect(n.send_class_message).toBe(3);
+    expect(await inbox(u.sA1)).toEqual({ title: "Venue change: CSC101 · Moved to Hall 2", kind: "class_update" });
+    expect((await inbox(u.sB1))?.title ?? "").not.toContain("Moved to Hall 2");
+  });
+
+  it("only the module's lecturers (or an admin) can message it", async () => {
+    await expect(db.as(u.lectB, "select uniattend.send_class_message($1, 'announcement', 'Hello', 'Hi there')", [id.modA]))
+      .rejects.toThrow(/only the module's lecturers/);
+    await expect(db.as(u.sA1, "select uniattend.send_class_message($1, 'announcement', 'Hello', 'Hi there')", [id.modA]))
+      .rejects.toThrow(/only the module's lecturers/);
+  });
+
+  it("admins can target one student, and others can't read it", async () => {
+    const [a2] = await db.as<{ id: string }>(u.adminA, "select id from uniattend.students where student_number = 'A002'");
+    await db.as(u.adminA, "insert into uniattend.announcements (institution_id, title, body, audience, target_kind, target_id, category) values ($1, 'Please see the dean', 'Monday 10:00.', 'all', 'student', $2, 'academic')", [id.instA, a2.id]);
+    expect((await inbox(u.sA2)).title).toBe("Academic: Please see the dean");
+    expect((await inbox(u.sA1)).title).not.toContain("dean");
+    expect(await db.as(u.sA1, "select * from uniattend.announcements where target_kind <> 'all'")).toHaveLength(0);
+  });
+
+  it("a department announcement reaches its students and lecturers only", async () => {
+    await db.as(u.adminA, "insert into uniattend.announcements (institution_id, title, body, audience, target_kind, target_id) values ($1, 'Department meeting', 'Thursday.', 'all', 'department', $2)", [id.instA, id.depA]);
+    expect((await inbox(u.sA3)).title).toBe("Department meeting");
+    expect((await inbox(u.lectA)).title).toBe("Department meeting");
+    expect((await inbox(u.sB2))?.title ?? "").not.toBe("Department meeting");
+  });
+
+  it("refuses targets from another institution", async () => {
+    await expect(db.as(u.adminA, "insert into uniattend.announcements (institution_id, title, body, target_kind, target_id) values ($1, 'x', 'y', 'module', $2)", [id.instA, id.modB]))
+      .rejects.toThrow(/not part of this institution/);
+  });
+
+  it("class updates follow each device's class-reminder setting", async () => {
+    await db.as(null, "select * from uniattend.push_claim($1)", [SECRET]); // drain
+    await db.as(u.lectA, "select uniattend.send_class_message($1, 'class_cancelled', 'No lecture today', 'Sorry, I am ill.')", [id.modA]);
+    const rows = await db.as<{ endpoint: string; kind: string }>(null, "select endpoint, kind from uniattend.push_claim($1)", [SECRET]);
+    expect(rows.filter((r) => r.kind === "class_update").map((r) => r.endpoint)).toEqual(["https://push.example.com/send/1"]); // A2's device turned classes off earlier
+  });
+});

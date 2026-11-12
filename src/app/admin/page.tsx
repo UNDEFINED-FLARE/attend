@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { AreaChart, Bar, Donut, StatTile } from "@/components/charts";
 import { Icon } from "@/components/icons";
-import { ActionForm } from "@/components/form";
-import { announceToInstitution } from "@/app/push-actions";
-import { Badge, Card, CardTitle, Input, LinkButton, Select, Table, Td, Textarea, pct } from "@/components/ui";
+import { AnnounceForm } from "./announce-form";
+import { Badge, Card, CardTitle, LinkButton, Table, Td, pct } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { HOURS, loadDashboard } from "@/lib/dashboard";
 import { dayLabel, greeting, timeOf } from "@/lib/stats";
@@ -16,11 +15,15 @@ const METHOD: Record<string, string> = { qr: "QR + GPS", code: "Typed code", man
 
 export default async function AdminHome() {
   const { supabase, institutionId, current, user } = await requireRole("institution_admin");
-  const [d, { data: ov }, { data: sub }] = await Promise.all([
+  const [d, { data: ov }, { data: sub }, { data: facs }, { data: deps }, { data: mods }, { data: lects }] = await Promise.all([
     loadDashboard(supabase, institutionId),
     supabase.rpc("institution_overview", { p_inst: institutionId }),
     supabase.from("institution_subscriptions").select("status, subscription_plans(name, max_students)")
       .eq("institution_id", institutionId).in("status", ["trialing", "active", "past_due", "suspended"]).maybeSingle(),
+    supabase.from("faculties").select("id, name").eq("institution_id", institutionId).is("deleted_at", null).order("name"),
+    supabase.from("departments").select("id, name").eq("institution_id", institutionId).is("deleted_at", null).order("name"),
+    supabase.from("modules").select("id, code, title").eq("institution_id", institutionId).is("deleted_at", null).order("code"),
+    supabase.from("lecturers").select("id, full_name").eq("institution_id", institutionId).is("deleted_at", null).order("full_name"),
   ]);
   const o = ov as Overview | null;
   const { inside, outside, noLoc } = d.gps;
@@ -54,14 +57,10 @@ export default async function AdminHome() {
 
       <Card className="mb-6">
         <CardTitle>Send an announcement <span className="font-normal text-muted">· reaches inboxes and phones with notifications on</span></CardTitle>
-        <ActionForm action={announceToInstitution} submit="Send announcement" pending="Sending…" className="grid gap-3 md:grid-cols-[1fr_12rem] [&>[role]]:md:col-span-2 [&>button]:md:w-fit">
-          <Input name="title" placeholder="Lectures cancelled on Friday" required maxLength={120} />
-          <Select name="audience" defaultValue="students">
-            <option value="students">Students</option><option value="lecturers">Lecturers</option>
-            <option value="admins">Administrators</option><option value="all">Everyone</option>
-          </Select>
-          <Textarea name="body" placeholder="Graduation takes place in the main hall. All lectures move online." required maxLength={2000} className="md:col-span-2" />
-        </ActionForm>
+        <AnnounceForm faculties={(facs ?? []).map((f) => ({ id: f.id, label: f.name }))}
+          departments={(deps ?? []).map((x) => ({ id: x.id, label: x.name }))}
+          modules={(mods ?? []).map((m) => ({ id: m.id, label: `${m.code} · ${m.title}` }))}
+          lecturers={(lects ?? []).map((l) => ({ id: l.id, label: l.full_name }))} />
       </Card>
 
       <div className="mb-6 grid gap-6 xl:grid-cols-[1.6fr_1fr]">
