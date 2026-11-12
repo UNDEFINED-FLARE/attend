@@ -6,7 +6,7 @@ export const metadata = { title: "Check in" };
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ s?: string; t?: string }> }) {
   const { s, t } = await searchParams;
-  const { supabase, institutionId } = await requireRole("student");
+  const { supabase, institutionId, user } = await requireRole("student");
   const { features } = await loadTheme(supabase, institutionId);
-  return <CheckIn initialSession={s ?? null} initialToken={t ?? null} liveClass={features.liveClass} />;
+  return <CheckIn userId={user.id} initialSession={s ?? null} initialToken={t ?? null} liveClass={features.liveClass} />;
 }

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { signOut, switchInstitution } from "@/app/actions";
 import { AppProvider, AppTabBar } from "@/components/app-chrome";
 import { AppLock } from "@/components/app-lock";
+import { OfflineSync } from "@/components/offline-sync";
 import { Icon } from "@/components/icons";
 import { SideNav, TabBar, type NavItem } from "@/components/nav";
 import type { RoleRow } from "@/lib/auth";
@@ -58,7 +59,7 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
 
   return (
     <>
-    {user.id && <div style={themeStyle(theme)} className="font-sans"><AppLock userId={user.id} name={who || "you"} institution={theme.header.title || instName} logo={theme.header.logoUrl || null} /></div>}
+    {user.id && <div style={themeStyle(theme)} className="font-sans"><AppLock userId={user.id} name={who || "you"} institution={theme.header.title || instName} logo={theme.header.logoUrl || null} /><OfflineSync userId={user.id} /></div>}
     <div data-lockable style={themeStyle(theme)} className="min-h-dvh font-sans">
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 flex-col print:!hidden border-r border-line px-4 py-5 lg:flex"

@@ -16,6 +16,9 @@ export function LoginForm({ next }: { next: string }) {
   const form = useRef<HTMLFormElement>(null);
   const [show, setShow] = useState(false);
 
+  // Pages kept for offline use belong to whoever was signed in before: drop them here.
+  useEffect(() => { if (typeof caches !== "undefined") void caches.delete("ua-pages-v1").catch(() => {}); }, []);
+
   useEffect(() => {
     if (!state?.next) return;
     void (async () => {

@@ -17,7 +17,7 @@ type Rec = { id: string; student_id: string; status: string; custom_status_id?: 
 
 export default async function SessionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { supabase, institutionId } = await requireRole("lecturer");
+  const { supabase, institutionId, user } = await requireRole("lecturer");
   const features = (await loadTheme(supabase, institutionId)).features;
   // allow_printed_qr needs database update 0016; older databases still load.
   const sessionSelect = (printed: boolean) => supabase.from("class_sessions")
@@ -91,7 +91,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
 
         <div className="min-w-0 space-y-6">
         <LateArrivals session={id} rows={lateRows} />
-        <Register session={id} open={open} statuses={(statusRows ?? []) as CustomStatus[]}
+        <Register session={id} open={open} userId={user.id} label={`${mod.code} · ${s.title}`} statuses={(statusRows ?? []) as CustomStatus[]}
           rows={roster.map((st): RegisterRow => {
             const r = byStudent.get(st.id);
             return { student_id: st.id, student_number: st.student_number, full_name: st.full_name, record_id: r?.id ?? null,

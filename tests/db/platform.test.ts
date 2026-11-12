@@ -705,3 +705,48 @@ describe("design drafts, version history and sign-in branding", () => {
     expect(await db.as(null, "select * from uniattend.theme_versions")).toHaveLength(0);
   });
 });
+
+describe("check-ins made without signal", () => {
+  type Off = { outcome: string; status: string; reasons: string[]; offline?: boolean };
+  const offline = async (user: string, session: string | null, code: string | null, token: string | null, at: Date, device = hex("a")) =>
+    (await db.asOne<{ check_in_offline: Off }>(user, "select uniattend.check_in_offline($1, $2, $3, $4, $5, $6)",
+      [session, code, token, JSON.stringify(gpsAt(0)), device, at.toISOString()])).check_in_offline;
+  let S: Awaited<ReturnType<typeof openSession>>;
+  beforeAll(async () => { S = await openSession("B"); });
+
+  it("goes to review, never straight to present, keeping the original time and the QR proof", async () => {
+    const at = new Date(Date.now() - 30_000);
+    const r = await offline(u.sB1, S.id, null, S.token, at);
+    expect(r).toMatchObject({ outcome: "review", status: "pending_verification", offline: true });
+    expect(r.reasons.join(" ")).toMatch(/without signal at .*sent at/);
+    expect(r.reasons.join(" ")).toMatch(/QR code matches the one on screen/);
+    const [rec] = await db.as<{ method: string; checked_in_at: string }>(u.sB1,
+      "select method, checked_in_at from uniattend.attendance_records where session_id = $1", [S.id]);
+    expect(rec.method).toBe("offline");
+    expect(Math.abs(Date.parse(rec.checked_in_at) - at.getTime())).toBeLessThan(1000);
+  });
+
+  it("refuses times in the future, outside the session, or older than 48 hours", async () => {
+    await expect(offline(u.sB2, S.id, null, S.token, new Date(Date.now() + 10 * 60_000))).rejects.toThrow(/future/);
+    await expect(offline(u.sB2, S.id, null, S.token, new Date(Date.now() - 3 * 24 * 3600_000))).rejects.toThrow(/48 hours/);
+    await expect(offline(u.sB2, S.id, null, S.token, new Date(Date.now() - 5 * 3600_000))).rejects.toThrow(/outside the time/);
+  });
+
+  it("a forged QR is flagged, and students outside the module can't use it", async () => {
+    const r = await offline(u.sB2, S.id, null, `${S.token.split(".")[0]}.${"A".repeat(22)}`, new Date(), hex("b"));
+    expect(r.reasons.join(" ")).toMatch(/not valid for this session/);
+    await expect(offline(u.sA1, S.id, null, S.token, new Date())).rejects.toThrow(/not registered as a student|not enrolled/);
+  });
+
+  it("after the session closes: an automatic absence becomes a review, a lecturer's decision is kept", async () => {
+    await db.as(u.lectB, "select uniattend.close_session($1)", [S.id]);
+    const r = await offline(u.sB3, S.id, null, S.token, new Date(Date.now() - 60_000), hex("c"));
+    expect(r.status).toBe("pending_verification");
+    expect(r.reasons.join(" ")).toMatch(/could not be checked/);
+    const [b3] = await db.as<{ id: string }>(u.lectB, "select id from uniattend.students where student_number = 'B003'");
+    await db.as(u.lectB, "select uniattend.override_attendance($1, $2, 'absent', 'Was not in class')", [S.id, b3.id]);
+    const again = await offline(u.sB3, S.id, null, S.token, new Date(Date.now() - 60_000), hex("c"));
+    expect(again.outcome).toBe("duplicate");
+    expect(again.reasons[0]).toMatch(/already recorded this session/);
+  });
+});

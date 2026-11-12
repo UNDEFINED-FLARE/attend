@@ -2,6 +2,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { Icon } from "@/components/icons";
 import { LateChip } from "@/components/late";
+import { enqueue, isNetworkError } from "@/lib/offline-queue";
 import { finaliseSession, recordHistory, saveRegister, type HistoryItem } from "../../actions";
 
 // The lecturer's register: search, tap a status per student, bulk actions,
@@ -29,7 +30,7 @@ const SAVED_LABEL: Record<string, string> = {
 const METHOD: Record<string, string> = { qr: "QR", code: "Code", manual: "Manual", system: "Auto", acoustic: "Sound", card: "Card" };
 const time = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" }) : "");
 
-export function Register({ session, open, rows, statuses }: { session: string; open: boolean; rows: RegisterRow[]; statuses: CustomStatus[] }) {
+export function Register({ session, open, rows, statuses, userId, label }: { session: string; open: boolean; rows: RegisterRow[]; statuses: CustomStatus[]; userId: string; label: string }) {
   const [changes, setChanges] = useState<Map<string, Choice>>(new Map());
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "unmarked" | "changed" | Base>("all");
@@ -67,16 +68,31 @@ export function Register({ session, open, rows, statuses }: { session: string; o
   const unmarked = rows.filter((r) => !current(r) && !r.status).length;
   const waiting = rows.filter((r) => !changes.has(r.student_id) && ["pending_verification", "late_pending", "disputed"].includes(r.status ?? "")).length;
 
+  // No signal: keep the marks on this device and send them when it's back.
+  function saveOffline(entries: unknown[]) {
+    const at = new Date().toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" });
+    enqueue({ userId, kind: "register", payload: { session, entries, label, note: `${note ? `${note} ` : ""}(marked without signal at ${at})`.slice(0, 300) } });
+    setMsg({ tone: "ok", text: `No signal: ${entries.length} mark${entries.length === 1 ? "" : "s"} saved on this device. They're sent automatically when you're back online.` });
+  }
   function save() {
     setMsg(null);
     const entries = [...changes.entries()].map(([student, c]) => ({ student, status: c.status, custom: c.custom }));
+    if (!navigator.onLine) { saveOffline(entries); return; }
     start(async () => {
-      const r = await saveRegister(session, entries, note);
+      let r: Awaited<ReturnType<typeof saveRegister>>;
+      try { r = await saveRegister(session, entries, note); }
+      catch (e) { if (isNetworkError(e)) saveOffline(entries); else setMsg({ tone: "bad", text: "Something went wrong. Try again." }); return; }
       if (r.error) setMsg({ tone: "bad", text: r.error });
       else { setMsg({ tone: "ok", text: r.ok! }); setChanges(new Map()); setNote(""); }
     });
   }
   function finalise() {
+    if (!navigator.onLine) {
+      setConfirm(false);
+      if (changes.size) save();
+      setMsg({ tone: "bad", text: "Closing the session needs signal. Your marks are kept on this device; close it once you're back online." });
+      return;
+    }
     start(async () => {
       if (changes.size) {
         const s = await saveRegister(session, [...changes.entries()].map(([student, c]) => ({ student, status: c.status, custom: c.custom })), note);
