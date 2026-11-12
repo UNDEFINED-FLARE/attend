@@ -1,6 +1,7 @@
 "use client";
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
+import { Captcha } from "@/components/captcha";
 import { Button, Field, Input, Notice } from "@/components/ui";
 import { signIn, type SignInState } from "../actions";
 
@@ -51,6 +52,7 @@ export function LoginForm({ next }: { next: string }) {
         <input type="checkbox" name="remember" defaultChecked className="mt-0.5 size-4 accent-[var(--accent)]" />
         <span><span className="font-medium">Keep me signed in</span><span className="block text-xs text-muted">Untick on a shared or lab computer.</span></span>
       </label>
+      <Captcha />
       {state?.error && <Notice tone="bad">{state.error}</Notice>}
       <SubmitButton done={!!state?.next} />
     </form>

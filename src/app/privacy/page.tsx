@@ -22,6 +22,13 @@ export default function Privacy() {
           (HeiGIT, Germany). Nothing is stored. Map images are loaded from OpenStreetMap.</li>
         <li><b>Device check</b>: your browser creates a random identifier that never leaves your phone. Only a one-way hash of
           it is sent, to detect one phone being used for several students.</li>
+        <li><b>Fingerprint or face unlock (optional)</b>: your phone or computer checks your fingerprint or face itself and
+          only tells UniAttend &ldquo;confirmed&rdquo; or &ldquo;not confirmed&rdquo;. No fingerprint image, face scan or biometric
+          template is ever sent to or stored by UniAttend. The setting stays on your device.</li>
+        <li><b>Check-ins without signal</b>: the evidence above (scan, location reading, device check, time) is kept on your
+          phone until it can be sent, then handled like any check-in and confirmed by your lecturer.</li>
+        <li><b>Phone notifications (optional)</b>: if you turn them on, your browser&apos;s push address is stored so we can send
+          class reminders and announcements. Turn them off at any time in Notifications.</li>
         <li><b>Ambient sound (optional, if your institution enables it)</b>: never recorded or uploaded. Your phone reduces a few
           seconds of sound to numeric fingerprints, which are deleted as soon as they have been compared.</li>
       </ul>

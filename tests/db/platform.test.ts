@@ -750,3 +750,66 @@ describe("check-ins made without signal", () => {
     expect(again.reasons[0]).toMatch(/already recorded this session/);
   });
 });
+
+describe("nobody is added to an institution without approval, notice and a way out", () => {
+  let rogue: string, instC: string;
+  const rolesAt = (user: string, inst: string) =>
+    db.as<{ role: string; status: string }>(user, "select role, status from uniattend.user_roles where user_id = auth.uid() and institution_id = $1", [inst]);
+
+  beforeAll(async () => {
+    rogue = await db.newUser("founder@fake-uni.example");
+    instC = (await db.asOne<{ request_institution: string }>(rogue, "select uniattend.request_institution('Fake University', 'fake-uni')")).request_institution;
+    // The (still pending) institution's admin lists a real lecturer of University A as theirs.
+    await db.as(rogue, "insert into uniattend.lecturers (institution_id, staff_number, full_name, email) values ($1, 'X1', 'Borrowed', 'lectA@uniA.ac.za')", [instC]);
+  });
+
+  it("a pending institution can't attach someone's account, by email match or by granting a role", async () => {
+    await db.as(u.lectA, "select uniattend.link_my_accounts()");
+    expect(await rolesAt(u.lectA, instC)).toHaveLength(0);
+    await expect(db.as(rogue, "select uniattend.grant_role($1, 'lectA@uniA.ac.za', 'lecturer')", [instC])).rejects.toThrow(/must be approved/);
+  });
+
+  it("once approved, the person is linked and told, and can leave; the institution can't add them back", async () => {
+    await db.as(u.super, "select uniattend.set_institution_status($1, 'active')", [instC]);
+    await db.as(u.lectA, "select uniattend.link_my_accounts()");
+    expect(await rolesAt(u.lectA, instC)).toEqual([{ role: "lecturer", status: "active" }]);
+    const [note] = await db.as<{ title: string }>(u.lectA, "select title from uniattend.notifications where kind = 'membership' order by created_at desc limit 1");
+    expect(note.title).toBe("Added to Fake University");
+
+    expect((await db.asOne<{ leave_institution: number }>(u.lectA, "select uniattend.leave_institution($1)", [instC])).leave_institution).toBe(1);
+    expect(await rolesAt(u.lectA, instC)).toEqual([{ role: "lecturer", status: "suspended" }]);
+    await expect(db.as(rogue, "select uniattend.grant_role($1, 'lectA@uniA.ac.za', 'lecturer')", [instC])).rejects.toThrow(/left your institution/);
+    const [rid] = await db.as<{ id: string }>(rogue, "select id from uniattend.user_roles where institution_id = $1 and role = 'lecturer'", [instC]);
+    await expect(db.as(rogue, "select uniattend.set_role_status($1, 'active')", [rid.id])).rejects.toThrow(/left your institution/);
+    // Their real institution is untouched.
+    expect(await rolesAt(u.lectA, id.instA)).toEqual([{ role: "lecturer", status: "active" }]);
+  });
+
+  it("an only administrator can't leave and strand the institution", async () => {
+    await expect(db.as(rogue, "select uniattend.leave_institution($1)", [instC])).rejects.toThrow(/only administrator/);
+  });
+});
+
+describe("invoicing by hand and warnings before access ends", () => {
+  it("only the platform admin records a payment; it activates and extends, once per reference", async () => {
+    await expect(db.as(u.adminA, "select uniattend.record_manual_payment($1, 1500000, 'INV-001', 12)", [id.instA])).rejects.toThrow(/super admin only/);
+    const r = (await db.asOne<{ record_manual_payment: { active_until: string } }>(u.super,
+      "select uniattend.record_manual_payment($1, 1500000, 'INV-001', 12)", [id.instA])).record_manual_payment;
+    const days = (Date.parse(r.active_until) - Date.now()) / 86400_000;
+    expect(days).toBeGreaterThan(360);
+    await expect(db.as(u.super, "select uniattend.record_manual_payment($1, 1500000, 'INV-001', 12)", [id.instA])).rejects.toThrow(/already recorded/);
+    // A second payment extends from the current end, not from today.
+    const r2 = (await db.asOne<{ record_manual_payment: { active_until: string } }>(u.super,
+      "select uniattend.record_manual_payment($1, 1500000, 'INV-002', 1)", [id.instA])).record_manual_payment;
+    expect(Date.parse(r2.active_until)).toBeGreaterThan(Date.parse(r.active_until));
+  });
+
+  it("an institution's admins see their own subscription notice, nobody else does", async () => {
+    const n = (await db.asOne<{ subscription_notice: { status: string; operating: boolean; days_left: number } }>(u.adminA,
+      "select uniattend.subscription_notice($1)", [id.instA])).subscription_notice;
+    expect(n).toMatchObject({ status: "active", operating: true });
+    expect(n.days_left).toBeGreaterThan(360);
+    expect((await db.asOne<{ subscription_notice: unknown }>(u.adminB, "select uniattend.subscription_notice($1)", [id.instA])).subscription_notice).toBeNull();
+    expect((await db.asOne<{ subscription_notice: unknown }>(u.lectA, "select uniattend.subscription_notice($1)", [id.instA])).subscription_notice).toBeNull();
+  });
+});
