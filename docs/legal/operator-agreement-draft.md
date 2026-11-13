@@ -6,7 +6,7 @@
 
 **Parties**
 - **The Institution:** [legal name, registration number, address], the *responsible party* under the Protection of Personal Information Act 4 of 2013 (POPIA).
-- **The Provider:** [legal name of the company operating UniAttend, registration number, address], the *operator* under POPIA.
+- **The Provider:** Webbex Solutions (Pty) Ltd, registration number 2026/690092/07, of Stand No 619 Block F, Mutshidzi Street, Thohoyandou, Limpopo, 0950, the *operator* under POPIA.
 
 ## 1. Purpose
 

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CompanyMark } from "@/components/company-mark";
 import { LEGAL, show, SUB_OPERATORS } from "@/lib/legal";
 
 export const metadata = { title: "Privacy notice" };
@@ -140,6 +141,7 @@ export default function Privacy() {
 
       <p className="mt-10 text-sm text-muted">See also the <Link href="/terms" className="text-info underline">terms of service</Link> and our{" "}
         <Link href="/paia" className="text-info underline">PAIA manual</Link>.</p>
+      <CompanyMark className="mt-12 border-t border-line pt-4" />
     </main>
   );
 }

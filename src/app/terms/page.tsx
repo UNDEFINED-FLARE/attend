@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CompanyMark } from "@/components/company-mark";
 
 export const metadata = { title: "Terms of service" };
 
@@ -73,6 +74,7 @@ export default function Terms() {
 
       <h2 className="mt-8 text-lg font-semibold">Questions</h2>
       <p className="mt-2">Ask your institution&apos;s UniAttend administrator first; they can reach us directly.</p>
+      <CompanyMark className="mt-12 border-t border-line pt-4" />
     </main>
   );
 }

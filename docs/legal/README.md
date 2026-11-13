@@ -19,12 +19,12 @@ Not legal advice. Everything here is a working draft. **A South African attorney
 | Leave an institution | Security page | Built (migration 0021) |
 | No biometric data collected | Device-only fingerprint/face check | Built and stated in the notice |
 | Location minimised | Only distance and accuracy kept | Built |
-| Company details in one place | `src/lib/legal.ts` | **Empty**: pages show "[to be completed]" |
+| Company details in one place | `src/lib/legal.ts` | Name, registration and address filled; the rest shows "[to be completed]" |
 
 ## What you must do (in order)
 
-1. **Register the company** with CIPC, if not done, and open a business bank account.
-2. **Fill in `src/lib/legal.ts`**: company name, registration number, address, head, Information Officer, privacy and support emails, and phone.
+1. ~~Register the company~~: done (Webbex Solutions (Pty) Ltd, 2026/690092/07). Open a business bank account if not done.
+2. **Finish `src/lib/legal.ts`**: company name, registration and registered office are in; still needed: head of the company (one of the two directors), Information Officer, privacy and support emails, phone.
 3. **Register the Information Officer** (and any deputy) with the Information Regulator: the eServices portal at inforegulator.org.za. By default the head of the company is the Information Officer.
 4. **Attorney review** of the privacy notice, terms, PAIA manual and operator agreement. Decide:
    - breach notice hours;

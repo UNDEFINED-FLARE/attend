@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CompanyMark } from "@/components/company-mark";
 import { LEGAL, show, SUB_OPERATORS } from "@/lib/legal";
 
 export const metadata = { title: "PAIA manual" };
@@ -93,6 +94,7 @@ export default function Paia() {
 
       <H2>10. Where this manual is available</H2>
       <p className="mt-2">On this website and, on request, at our address above.</p>
+      <CompanyMark className="mt-12 border-t border-line pt-4" />
     </main>
   );
 }

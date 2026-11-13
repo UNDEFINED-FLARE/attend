@@ -4,12 +4,12 @@
 // "[to be completed]" on the pages, so a gap is visible rather than invented.
 
 export const LEGAL = {
-  /** Registered company that operates UniAttend, e.g. "Blue Flare Technologies (Pty) Ltd". */
-  company: null as string | null,
+  /** Registered company that operates UniAttend. */
+  company:"Webbex Solutions (Pty) Ltd" as string | null,
   /** CIPC registration number, e.g. "2026/123456/07". */
-  registration: null as string | null,
+  registration: "2026/690092/07" as string | null,
   /** Physical and postal address. */
-  address: null as string | null,
+  address: "Stand No 619 Block F, Mutshidzi Street, Thohoyandou, Limpopo, 0950" as string | null,
   /** Head of the company (PAIA section 51: the "head of a private body"). */
   head: null as string | null,
   /** Information Officer (POPIA s 55), registered on the Information Regulator's eServices portal. */

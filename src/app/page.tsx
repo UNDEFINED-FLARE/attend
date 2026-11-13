@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CompanyMark } from "@/components/company-mark";
 import { LinkButton } from "@/components/ui";
 
 const LAYERS = [
@@ -49,6 +50,7 @@ export default function Home() {
         <Link href="/paia" className="hover:underline">PAIA manual</Link>
         <span className="mx-2">·</span>
         <LinkButton href="/login" variant="ghost" className="h-auto px-0">Sign in</LinkButton>
+        <CompanyMark className="mt-3" />
       </footer>
     </div>
   );
