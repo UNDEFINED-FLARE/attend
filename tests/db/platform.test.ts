@@ -813,3 +813,54 @@ describe("invoicing by hand and warnings before access ends", () => {
     expect((await db.asOne<{ subscription_notice: unknown }>(u.lectA, "select uniattend.subscription_notice($1)", [id.instA])).subscription_notice).toBeNull();
   });
 });
+
+describe("retention, access to your own data, and data requests", () => {
+  it("old records are listed, then deleted only by the institution's own admin; other institutions are untouched", async () => {
+    const S = await openSession("A");
+    await checkIn(u.sA2, S.id, null, S.token, gpsAt(0), hex("e"));
+    await db.as(u.lectA, "select uniattend.close_session($1)", [S.id]);
+    // Pretend it happened four years ago (past the default three-year period).
+    await db.admin("update uniattend.class_sessions set opens_at = now() - interval '4 years 2 hours', late_after = now() - interval '4 years 1 hour', closes_at = now() - interval '4 years', closed_at = now() - interval '4 years' where id = $1", [S.id]);
+    const B = await db.asOne<{ n: number }>(u.adminB, "select count(*)::int n from uniattend.attendance_records");
+
+    const p = (await db.asOne<{ retention_preview: { sessions: number; attendance_records: number; auto: boolean } }>(u.adminA,
+      "select uniattend.retention_preview($1)", [id.instA])).retention_preview;
+    expect(p.sessions).toBe(1);
+    expect(p.attendance_records).toBeGreaterThanOrEqual(1);
+    expect(p.auto).toBe(false);
+    await expect(db.as(u.adminB, "select uniattend.apply_retention($1)", [id.instA])).rejects.toThrow(/institution admin only/);
+    await expect(db.as(u.lectA, "select uniattend.apply_retention($1)", [id.instA])).rejects.toThrow(/institution admin only/);
+    await expect(db.as(u.sA1, "select uniattend.run_retention()")).rejects.toThrow(/permission denied/);
+
+    await db.as(u.adminA, "select uniattend.apply_retention($1)", [id.instA]);
+    expect(await db.as(u.adminA, "select 1 from uniattend.class_sessions where id = $1", [S.id])).toHaveLength(0);
+    expect(await db.as(u.adminA, "select 1 from uniattend.attendance_records where session_id = $1", [S.id])).toHaveLength(0);
+    expect((await db.asOne<{ n: number }>(u.adminB, "select count(*)::int n from uniattend.attendance_records")).n).toBe(B.n);
+    const [log] = await db.as<{ action: string }>(u.adminA, "select action from uniattend.audit_logs where action = 'retention_applied'");
+    expect(log.action).toBe("retention_applied");
+  });
+
+  it("anyone can download what is held about them, and only about them", async () => {
+    const S = await openSession("A");
+    await checkIn(u.sA1, S.id, null, S.token, gpsAt(0), hex("f"));
+    const d =(await db.asOne<{ my_personal_data: { account: { email: string }; student_records: { student_number: string; attendance: unknown[] | null }[] } }>(u.sA1,
+      "select uniattend.my_personal_data()")).my_personal_data;
+    expect(d.account.email.toLowerCase()).toBe("s1@unia.ac.za");
+    expect(d.student_records.map((s) => s.student_number)).toEqual(["A001"]);
+    expect((d.student_records[0].attendance ?? []).length).toBeGreaterThan(0);
+    await expect(db.as(null, "select uniattend.my_personal_data()")).rejects.toThrow();
+  });
+
+  it("a request reaches the person's own institution admins, not others, and the answer reaches the person", async () => {
+    const { request_data_action: rid } = await db.asOne<{ request_data_action: string }>(u.sA3,
+      "select uniattend.request_data_action('correction', 'My surname is spelt wrong.')");
+    expect(await db.as(u.adminA, "select 1 from uniattend.data_requests where id = $1", [rid])).toHaveLength(1);
+    expect(await db.as(u.adminB, "select 1 from uniattend.data_requests where id = $1", [rid])).toHaveLength(0);
+    expect(await db.as(u.sA1, "select 1 from uniattend.data_requests where id = $1", [rid])).toHaveLength(0);
+    await expect(db.as(u.adminB, "select uniattend.answer_data_request($1, 'done', 'Fixed it.')", [rid])).rejects.toThrow(/not allowed/);
+    await expect(db.as(u.adminA, "select uniattend.answer_data_request($1, 'done', '')", [rid])).rejects.toThrow(/Tell the person/);
+    await db.as(u.adminA, "select uniattend.answer_data_request($1, 'done', 'Your surname is corrected.')", [rid]);
+    const [n] = await db.as<{ title: string }>(u.sA3, "select title from uniattend.notifications where kind = 'data_request' order by created_at desc limit 1");
+    expect(n.title).toBe("Your request: done");
+  });
+});

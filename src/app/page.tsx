@@ -46,6 +46,8 @@ export default function Home() {
         <span className="mx-2">·</span>
         <Link href="/terms" className="hover:underline">Terms of service</Link>
         <span className="mx-2">·</span>
+        <Link href="/paia" className="hover:underline">PAIA manual</Link>
+        <span className="mx-2">·</span>
         <LinkButton href="/login" variant="ghost" className="h-auto px-0">Sign in</LinkButton>
       </footer>
     </div>

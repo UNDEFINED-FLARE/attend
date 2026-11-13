@@ -58,6 +58,9 @@ Not processed: ID numbers, biometric data (fingerprint/face unlock is checked by
 - Rotating, signed QR codes; rate limits on check-in; device-reuse detection.
 - Audit log of administrative changes and attendance corrections.
 - No service-role credentials in the web app; secrets held in the hosting provider's environment settings.
+- Retention clean-up built in: deletion of records past the Institution's period, by its admins or nightly, logged (`docs/legal/retention-schedule.md`).
+- Data-subject tools: "Download my data" for every user; correction, deletion and objection requests routed to the Institution's admins, with a 30-day clock.
+- Breach response procedure (`docs/legal/breach-response-plan.md`) and an information security policy (`docs/legal/information-security-policy.md`).
 - [Daily backups with point-in-time recovery: requires the paid database plan.]
 - [Error monitoring and uptime alerts: being set up.]
 - Optional on-device app lock (fingerprint/face) and bot protection on sign-up and sign-in.
