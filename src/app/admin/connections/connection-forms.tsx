@@ -2,7 +2,7 @@
 import { useActionState, useState } from "react";
 import { Submit } from "@/components/form";
 import { Field, Input, Notice, Select } from "@/components/ui";
-import { connectionAction, saveConnection } from "./actions";
+import { connectionAction, saveConnection, testConnection } from "./actions";
 
 type S = { error?: string; ok?: string; key?: string } | undefined;
 type Kind = "moodle" | "feed" | "api";
@@ -108,6 +108,7 @@ export function ConnectionForm({ existing }: { existing?: ConnectionRow }) {
 
 export function ConnectionButtons({ id, kind, status }: { id: string; kind: Kind; status: string }) {
   const [state, run] = useActionState(connectionAction, undefined as S);
+  const [tested, test] = useActionState(testConnection, undefined as S);
   const Btn = ({ action, label, tone = "" }: { action: string; label: string; tone?: string }) => (
     <button name="action" value={action} className={`h-9 rounded-xl border border-line px-3 text-sm font-medium hover:bg-bg ${tone}`}>{label}</button>
   );
@@ -119,6 +120,13 @@ export function ConnectionButtons({ id, kind, status }: { id: string; kind: Kind
         {status === "active" ? <Btn action="pause" label="Pause" /> : <Btn action="resume" label="Resume" />}
         {kind === "api" && <Btn action="new_key" label="New key" />}
       </form>
+      {kind !== "api" && (
+        <form action={test}>
+          <input type="hidden" name="id" value={id} />
+          <Submit label="Test connection" pending="Testing…" variant="secondary" />
+        </form>
+      )}
+      <Result s={tested} />
       <details className="text-sm">
         <summary className="cursor-pointer text-xs font-medium text-bad">Remove this connection</summary>
         <form action={run} className="mt-2 space-y-2">

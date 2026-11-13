@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { DB_SCHEMA, env } from "@/lib/env";
 import { dispatchSecret } from "@/lib/push";
 import { chunkRoster, courseCode, moodlePeople, parseOptions, type Roster } from "./roster";
+import { decryptSecret } from "./secrets";
 import { fetchRosterFeed, moodleCourses, moodleEnrolled } from "./sources";
 
 // The sync worker. The database decides what is due and hands over one connection
@@ -38,6 +39,8 @@ export async function runDueIntegrations(budgetMs = 40_000): Promise<{ ran: numb
 
     try {
       const o = parseOptions(job.options);
+      // Stored encrypted; decrypted only here, in memory, for this run.
+      job.token = decryptSecret(job.token);
       if (job.kind === "feed") {
         const roster = await fetchRosterFeed(job.base_url, job.token);
         for (const piece of chunkRoster(roster, PEOPLE_PER_CALL)) await apply(piece, 0);

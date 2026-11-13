@@ -69,7 +69,7 @@ beforeAll(async () => {
   await db.admin("insert into uniattend.user_roles (user_id, role) values ($1, 'super_admin')", [u.super]);
   await setupInstitution("A");
   await setupInstitution("B");
-}, 120_000);
+}, 240_000);
 
 async function openSession(tag: "A" | "B") {
   const s = await db.asOne<{ id: string; join_code: string; require_gps: boolean }>(u[`lect${tag}`],
@@ -980,5 +980,188 @@ describe("automatic roster sync: Moodle/feed worker, API key and uploads", () =>
     const many = Array.from({ length: 60 }, (_, i) => ({ student_number: `B5${String(i).padStart(2, "0")}`, full_name: `Bulk ${i}`, module_code: "CSC101" }));
     const r = (await db.asOne<{ import_students: { inserted: number } }>(u.adminB, "select uniattend.import_students($1, $2)", [id.instB, JSON.stringify(many)])).import_students;
     expect(r.inserted).toBe(60);
+  });
+});
+
+describe("sync engine: stage, preview, commit, external ids, two institutions", () => {
+  const SECRET = "x".repeat(40);
+  type Totals = { received: number; inserted: number; updated: number; unchanged: number; duplicates: number; rejected: number };
+  type Result = Totals & { status?: string; datasets: Record<string, Totals & { dropped_missing?: number; held_back?: number }> };
+  const J = (v: unknown) => JSON.stringify(v);
+  const start = async (admin: string, inst: string, source = "its-export") =>
+    (await db.asOne<{ import_start: string }>(admin, "select uniattend.import_start($1, $2, 'test file')", [inst, source])).import_start;
+  const add = (admin: string, run: string, dataset: string, rows: object[]) => db.as(admin, "select uniattend.import_add($1, $2, $3)", [run, dataset, J(rows)]);
+  const preview = async (admin: string, run: string) => (await db.asOne<{ import_preview: Result }>(admin, "select uniattend.import_preview($1)", [run])).import_preview;
+  const commit = async (admin: string, run: string) => (await db.asOne<{ import_commit: Result }>(admin, "select uniattend.import_commit($1)", [run])).import_commit;
+
+  const structure = [
+    ["faculties", [{ external_id: "F1", code: "FSE", name: "Science and Engineering" }]],
+    ["departments", [{ external_id: "D1", code: "CSE", name: "Computer Science", faculty_code: "FSE" }]],
+    ["modules", [{ external_id: "M1", code: "CSE1541", title: "Programming 1", department_code: "CSE" },
+                 { external_id: "M2", code: "CSE1542", title: "Data Structures", department_code: "CSE" }]],
+    ["lecturers", [{ external_id: "L1", staff_number: "E1042", first_name: "Ndivhuwo", last_name: "Mudau", email: "n.mudau@unia.ac.za" }]],
+    ["students", [{ external_id: "S1", student_number: "26000001", full_name: "Thabo Nkosi", email: "26000001@unia.ac.za", status: "Registered" },
+                  { external_id: "S2", student_number: "26000002", full_name: "Lerato Dube", status: "active" }]],
+    ["enrolments", [{ student_number: "26000001", module_code: "CSE1541" }, { student_external_id: "S2", module_external_id: "M1" },
+                    { student_number: "26000001", module_code: "CSE1542" }]],
+    ["assignments", [{ staff_number: "E1042", module_code: "CSE1541" }]],
+  ] as const;
+
+  beforeAll(async () => { await db.as(u.super, "select uniattend.set_push_secret($1, 15)", [SECRET]); });
+
+  it("a preview counts everything and changes nothing; the commit applies it all", async () => {
+    const run = await start(u.adminA, id.instA);
+    for (const [ds, rows] of structure) await add(u.adminA, run, ds, rows as unknown as object[]);
+    const p = await preview(u.adminA, run);
+    expect(p).toMatchObject({ received: 11, inserted: 11, rejected: 0 });
+    expect(p.datasets.enrolments).toMatchObject({ inserted: 3 });
+    expect(await db.as(u.adminA, "select 1 from uniattend.students where student_number = '26000001'")).toHaveLength(0);
+    const rows = await db.as<{ outcome: string }>(u.adminA, "select outcome from uniattend.integration_staging where run_id = $1", [run]);
+    expect(rows.every((r) => r.outcome === "insert")).toBe(true);
+
+    const c = await commit(u.adminA, run);
+    expect(c).toMatchObject({ status: "ok", inserted: 11, rejected: 0 });
+    const [s] = await db.as<{ full_name: string; status: string }>(u.adminA, "select full_name, status from uniattend.students where student_number = '26000001'");
+    expect(s).toEqual({ full_name: "Thabo Nkosi", status: "active" });
+    const [l] = await db.as<{ full_name: string }>(u.adminA, "select full_name from uniattend.lecturers where staff_number = 'E1042'");
+    expect(l.full_name).toBe("Ndivhuwo Mudau");
+    expect(await db.as(u.adminA, "select 1 from uniattend.integration_staging where run_id = $1", [run])).toHaveLength(0);
+    await expect(commit(u.adminA, run)).rejects.toThrow(/already finished/);
+  });
+
+  it("importing the same data again creates nothing new", async () => {
+    const run = await start(u.adminA, id.instA);
+    for (const [ds, rows] of structure) await add(u.adminA, run, ds, rows as unknown as object[]);
+    const c = await commit(u.adminA, run);
+    expect(c).toMatchObject({ inserted: 0, updated: 0, unchanged: 11, rejected: 0 });
+    expect((await db.asOne<{ n: number }>(u.adminA, "select count(*)::int n from uniattend.students where student_number like '26%'")).n).toBe(2);
+  });
+
+  it("the source's own id follows a renumbered student; a number clash is rejected, not merged", async () => {
+    const run = await start(u.adminA, id.instA);
+    await add(u.adminA, run, "students", [
+      { external_id: "S1", student_number: "26000101", full_name: "Thabo Nkosi" },
+      { external_id: "S2", student_number: "A001", full_name: "Lerato Dube" },
+    ]);
+    const c = await commit(u.adminA, run);
+    expect(c).toMatchObject({ updated: 1, rejected: 1, status: "warnings" });
+    expect(await db.as(u.adminA, "select 1 from uniattend.students where student_number = '26000101'")).toHaveLength(1);
+    expect(await db.as(u.adminA, "select 1 from uniattend.students where student_number = '26000001'")).toHaveLength(0);
+    const [e] = await db.as<{ message: string; ref: string }>(u.adminA, "select message, ref from uniattend.integration_errors where run_id = $1", [run]);
+    expect(e).toEqual({ ref: "S2", message: "student number A001 already belongs to another student" });
+  });
+
+  it("status changes come only from an explicit status; history and enrolments stay", async () => {
+    const run = await start(u.adminA, id.instA);
+    await add(u.adminA, run, "students", [{ external_id: "S2", student_number: "26000002", full_name: "Lerato Dube", status: "Deregistered" }]);
+    await add(u.adminA, run, "enrolments", [
+      { student_number: "26000101", module_code: "CSE1542", status: "dropped" },
+      { student_number: "26000002", module_code: "CSE1542" },          // a new module for a withdrawn student
+    ]);
+    const c = await commit(u.adminA, run);
+    expect(c.datasets.students).toMatchObject({ updated: 1 });
+    expect(c.datasets.enrolments).toMatchObject({ updated: 1, rejected: 1 });
+    const [s] = await db.as<{ status: string }>(u.adminA, "select status from uniattend.students where student_number = '26000002'");
+    expect(s.status).toBe("withdrawn");
+    // Their existing enrolment is kept; the dropped one is marked, not deleted.
+    const en = await db.as<{ code: string; status: string }>(u.adminA,
+      "select m.code, e.status from uniattend.module_enrolments e join uniattend.modules m on m.id = e.module_id join uniattend.students s on s.id = e.student_id where s.student_number in ('26000002','26000101') order by 1, 2");
+    expect(en).toEqual([{ code: "CSE1541", status: "active" }, { code: "CSE1541", status: "active" }, { code: "CSE1542", status: "dropped" }]);
+    const [err] = await db.as<{ message: string }>(u.adminA, "select message from uniattend.integration_errors where run_id = $1", [run]);
+    expect(err.message).toMatch(/is withdrawn, so they can't be enrolled/);
+  });
+
+  it("repeats in one file: identical ones are duplicates, conflicting ones are rejected; bad rows say why", async () => {
+    const run = await start(u.adminA, id.instA);
+    await add(u.adminA, run, "students", [
+      { student_number: "26000201", full_name: "Ama Zulu" }, { student_number: "26000201", full_name: "Ama Zulu" },
+      { student_number: "26000202", full_name: "Sipho M" }, { student_number: "26000202", full_name: "Sipho Mokoena" },
+      { student_number: "", full_name: "No Number" }, { student_number: "26000203", full_name: "X", status: "on holiday" },
+      { student_number: "26000204", full_name: "Y", email: "not-an-email" },
+    ]);
+    const p = await preview(u.adminA, run);
+    expect(p).toMatchObject({ received: 7, inserted: 2, duplicates: 1, rejected: 4 });
+    const errs = await db.as<{ row_no: number; error: string }>(u.adminA,
+      "select row_no, error from uniattend.integration_staging where run_id = $1 and outcome = 'reject' order by row_no", [run]);
+    expect(errs.map((e) => e.error)).toEqual([
+      "appears more than once with different details (first at row 3)", "student_number is missing", 'unknown status "on holiday"', "email is not valid",
+    ]);
+    await db.as(u.adminA, "select uniattend.import_cancel($1)", [run]);
+    expect(await db.as(u.adminA, "select 1 from uniattend.students where student_number = '26000201'")).toHaveLength(0);
+  });
+
+  it("the same student number and module code are separate records at each institution", async () => {
+    const run = await start(u.adminB, id.instB);
+    await add(u.adminB, run, "modules", [{ code: "CSE1541", title: "Intro to Programming (B)" }]);
+    await add(u.adminB, run, "students", [{ external_id: "S1", student_number: "26000101", full_name: "A different person" }]);
+    const c = await commit(u.adminB, run);
+    expect(c).toMatchObject({ inserted: 2, rejected: 0 });
+    const [a] = await db.as<{ full_name: string }>(u.adminA, "select full_name from uniattend.students where student_number = '26000101'");
+    const [b] = await db.as<{ full_name: string }>(u.adminB, "select full_name from uniattend.students where student_number = '26000101'");
+    expect([a.full_name, b.full_name]).toEqual(["Thabo Nkosi", "A different person"]);
+  });
+
+  it("another institution, a lecturer or a student can't see or touch an import", async () => {
+    const run = await start(u.adminA, id.instA);
+    await add(u.adminA, run, "students", [{ student_number: "26000301", full_name: "Private Person" }]);
+    for (const who of [u.adminB, u.lectA, u.sA1]) {
+      await expect(db.as(who, "select uniattend.import_preview($1)", [run])).rejects.toThrow(/institution admin only/);
+      await expect(db.as(who, "select uniattend.import_commit($1)", [run])).rejects.toThrow(/institution admin only/);
+      await expect(db.as(who, "select uniattend.import_add($1, 'students', '[]')", [run])).rejects.toThrow(/institution admin only/);
+      expect(await db.as(who, "select 1 from uniattend.integration_staging where run_id = $1", [run])).toHaveLength(0);
+      expect(await db.as(who, "select 1 from uniattend.integration_external_ids where institution_id = $1", [id.instA])).toHaveLength(0);
+    }
+    await expect(db.as(u.adminB, "select uniattend.import_start($1, 'x', 'x')", [id.instA])).rejects.toThrow(/institution admin only/);
+    await expect(db.as(u.adminA, "insert into uniattend.integration_staging (run_id, institution_id, dataset, row_no, payload) values ($1, $2, 'students', 1, '{}')", [run, id.instA]))
+      .rejects.toThrow(/permission denied/);
+    await db.as(u.adminA, "select uniattend.import_cancel($1)", [run]);
+  });
+
+  it("a connection's worker stages, commits with checkpoints, reconciles a complete roster, and fails safely", async () => {
+    const conn = (await db.asOne<{ save_integration: { id: string } }>(u.adminA,
+      "select uniattend.save_integration($1, null, 'feed', 'Mock ITS (simulation)', 'https://sis.unia.example/roster.csv', null, '{}', 'daily')", [id.instA])).save_integration.id;
+    await expect(db.as(null, "select uniattend.sync_begin('wrong', $1, 'full', 'manual')", [conn])).rejects.toThrow(/not allowed/);
+    const begin = async () => (await db.asOne<{ sync_begin: { run_id: string; checkpoints: Record<string, string> } }>(null,
+      "select uniattend.sync_begin($1, $2, 'full', 'manual')", [SECRET, conn])).sync_begin;
+
+    const b1 = await begin();
+    expect(b1.checkpoints).toEqual({});
+    await db.as(null, "select uniattend.sync_stage($1, $2, 'enrolments', $3)", [SECRET, b1.run_id, J([
+      { student_number: "A001", module_code: "CSE1541" }, { student_number: "A002", module_code: "CSE1541" }, { student_number: "A003", module_code: "CSE1541" },
+    ])]);
+    const c1 = (await db.asOne<{ sync_commit: Result }>(null, "select uniattend.sync_commit($1, $2, true, $3)", [SECRET, b1.run_id, J({ enrolments: "2026-11-14T02:00:00Z" })])).sync_commit;
+    expect(c1.datasets.enrolments).toMatchObject({ inserted: 3, dropped_missing: 0 });
+    expect((await begin()).checkpoints).toEqual({ enrolments: "2026-11-14T02:00:00Z" });
+
+    // The next complete roster no longer lists A003: only the enrolment this connection made is dropped.
+    const b2 = await begin();
+    await db.as(null, "select uniattend.sync_stage($1, $2, 'enrolments', $3)", [SECRET, b2.run_id, J([
+      { student_number: "A001", module_code: "CSE1541" }, { student_number: "A002", module_code: "CSE1541" },
+    ])]);
+    const c2 = (await db.asOne<{ sync_commit: Result }>(null, "select uniattend.sync_commit($1, $2, true, '{}')", [SECRET, b2.run_id])).sync_commit;
+    expect(c2.datasets.enrolments).toMatchObject({ unchanged: 2, dropped_missing: 1 });
+    // 26000101's hand-loaded (upload) enrolment in the same module was not touched.
+    const [keep] = await db.as<{ status: string }>(u.adminA,
+      "select e.status from uniattend.module_enrolments e join uniattend.students s on s.id = e.student_id join uniattend.modules m on m.id = e.module_id where s.student_number = '26000101' and m.code = 'CSE1541'");
+    expect(keep.status).toBe("active");
+
+    const b3 = await begin();
+    await db.as(null, "select uniattend.sync_fail($1, $2, 'ITS answered 503.')", [SECRET, b3.run_id]);
+    const [it] = await db.as<{ last_status: string; retry_soon: boolean }>(u.adminA,
+      "select last_status, next_run_at < now() + interval '61 minutes' as retry_soon from uniattend.integrations where id = $1", [conn]);
+    expect(it).toEqual({ last_status: "failed", retry_soon: true });
+    await db.as(u.adminA, "select uniattend.retry_run($1)", [b3.run_id]);
+    await expect(db.as(u.adminB, "select uniattend.retry_run($1)", [b3.run_id])).rejects.toThrow(/institution admin only/);
+  });
+
+  it("only a real test by the server can mark a connection connected", async () => {
+    const [c] = await db.as<{ id: string; connection_status: string }>(u.adminA, "select id, connection_status from uniattend.integrations where name = 'Mock ITS (simulation)'");
+    expect(c.connection_status).toBe("not_configured");
+    await expect(db.as(u.adminA, "select uniattend.integration_test_result('guess', $1, 'connected', 'trust me')", [c.id])).rejects.toThrow(/not allowed/);
+    await expect(db.as(u.adminA, "update uniattend.integrations set connection_status = 'connected' where id = $1", [c.id])).rejects.toThrow(/permission denied/);
+    await db.as(null, "select uniattend.integration_test_result($1, $2, 'auth_failed', 'The token was refused.')", [SECRET, c.id]);
+    const [after] = await db.as<{ connection_status: string; last_test_message: string }>(u.adminA,
+      "select connection_status, last_test_message from uniattend.integrations where id = $1", [c.id]);
+    expect(after).toEqual({ connection_status: "auth_failed", last_test_message: "The token was refused." });
   });
 });

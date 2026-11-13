@@ -8,12 +8,17 @@ import { ConnectionButtons, ConnectionForm, type ConnectionRow } from "./connect
 
 export const metadata = { title: "Connections" };
 
-type Row = ConnectionRow & { status: string; key_hint: string | null; last_run_at: string | null; last_status: string | null;
+type Row = ConnectionRow & { status: string; connection_status?: string; last_tested_at?: string | null; last_test_message?: string | null; key_hint: string | null; last_run_at: string | null; last_status: string | null;
   last_summary: Record<string, number | string> | null; next_run_at: string; run_id: string | null; sync_requested_at: string | null };
 type Run = { id: string; integration_id: string | null; trigger: string; status: string; summary: Record<string, number>; unknown_modules: string[];
   errors: { who: string; error: string }[]; error: string | null; started_at: string };
 
 const KIND = { moodle: "Moodle", feed: "Roster link", api: "API" } as const;
+const CONN: Record<string, string> = {
+  not_configured: "Not tested yet", incomplete: "Configuration incomplete", testing: "Testing…", connected: "Connected",
+  auth_failed: "Authentication failed", connection_failed: "Connection failed", permission_denied: "Permission denied",
+  unavailable: "Service unavailable", suspended: "Suspended",
+};
 const at = (iso: string | null) => iso ? new Date(iso).toLocaleString("en-ZA", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Africa/Johannesburg" }) : "never";
 const n = (v: unknown) => Number(v ?? 0);
 const changed = (s: Record<string, number | string> | null) => !s ? "" : [
@@ -26,7 +31,7 @@ const changed = (s: Record<string, number | string> | null) => !s ? "" : [
 export default async function Connections() {
   const { supabase, institutionId, current } = await requireRole("institution_admin");
   const [{ data: rows, error }, { data: runRows }, students, lecturers, modules, enrolled, taught] = await Promise.all([
-    supabase.from("integrations").select("id, kind, name, base_url, schedule, options, status, key_hint, last_run_at, last_status, last_summary, next_run_at, run_id, sync_requested_at")
+    supabase.from("integrations").select("*")
       .eq("institution_id", institutionId).order("created_at"),
     supabase.from("integration_runs").select("id, integration_id, trigger, status, summary, unknown_modules, errors, error, started_at")
       .eq("institution_id", institutionId).order("started_at", { ascending: false }).limit(12),
@@ -69,6 +74,9 @@ export default async function Connections() {
               <dl className="mb-4 space-y-1 text-sm">
                 {c.base_url && <div className="flex gap-2"><dt className="w-24 shrink-0 text-muted">Source</dt><dd className="min-w-0 break-all">{c.base_url}</dd></div>}
                 <div className="flex gap-2"><dt className="w-24 shrink-0 text-muted">{c.kind === "api" ? "Key" : "Token"}</dt><dd>{c.key_hint ? `ends in …${c.key_hint}` : "none"}</dd></div>
+                {c.kind !== "api" && <div className="flex gap-2"><dt className="w-24 shrink-0 text-muted">Connection</dt>
+                  <dd>{CONN[c.connection_status ?? "not_configured"] ?? c.connection_status}{c.last_tested_at && <span className="text-muted"> · tested {at(c.last_tested_at)}</span>}
+                    {c.last_test_message && <span className="block text-xs text-muted">{c.last_test_message}</span>}</dd></div>}
                 <div className="flex gap-2"><dt className="w-24 shrink-0 text-muted">Last sync</dt><dd>{at(c.last_run_at)}{c.last_run_at && <> · {changed(c.last_summary)}</>}</dd></div>
                 {c.kind !== "api" && <div className="flex gap-2"><dt className="w-24 shrink-0 text-muted">Next</dt>
                   <dd>{c.run_id || c.sync_requested_at ? "Syncing now…" : c.status === "paused" ? "Paused" : c.schedule === "manual" ? "When you press Sync" : at(c.next_run_at)}</dd></div>}
