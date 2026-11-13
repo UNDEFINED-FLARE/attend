@@ -864,3 +864,121 @@ describe("retention, access to your own data, and data requests", () => {
     expect(n.title).toBe("Your request: done");
   });
 });
+
+describe("automatic roster sync: Moodle/feed worker, API key and uploads", () => {
+  const SECRET = "x".repeat(40);
+  const roster = (people: object[], modules: object[] = [{ code: "CSC101", title: "Intro to CS" }], extra: object = {}) =>
+    JSON.stringify({ modules, people, ...extra });
+  const stu = (n: number, codes = ["CSC101"]) => ({ role: "student", number: `A9${String(n).padStart(2, "0")}`, full_name: `Synced ${n}`, email: `syn${n}@unia.ac.za`, module_codes: codes });
+  const activeFrom = async (source: string) => (await db.asOne<{ n: number }>(u.adminA,
+    "select count(*)::int n from uniattend.module_enrolments where source = $1 and status = 'active'", [source])).n;
+  let apiId: string, apiKey: string, moodleId: string;
+
+  beforeAll(async () => { await db.as(u.super, "select uniattend.set_push_secret($1, 15)", [SECRET]); });
+
+  it("an admin's upload adds students, lecturers, enrolments and teaching assignments, and reports problems", async () => {
+    const r = (await db.asOne<{ import_roster: Record<string, number> & { errors: { error: string }[]; unknown_modules: string[] } }>(u.adminA,
+      "select uniattend.import_roster($1, $2)", [id.instA, roster([
+        stu(1), stu(2, ["CSC101", "NOPE999"]),
+        { role: "lecturer", number: "", full_name: "Dr New", email: "new.lect@unia.ac.za", module_codes: ["CSC101"] },
+        { role: "student", number: "", full_name: "No Number", module_codes: ["CSC101"] },
+      ])])).import_roster;
+    expect(r).toMatchObject({ students_added: 2, lecturers_added: 1, enrolments_added: 2, assignments_added: 1, skipped: 1 });
+    expect(r.unknown_modules).toEqual(["NOPE999"]);
+    expect(r.errors[0].error).toMatch(/student number is missing/);
+    // Running it again changes nothing.
+    const again = (await db.asOne<{ import_roster: Record<string, number> }>(u.adminA, "select uniattend.import_roster($1, $2)",
+      [id.instA, roster([stu(1), stu(2)])])).import_roster;
+    expect(again).toMatchObject({ students_added: 0, students_updated: 0, enrolments_added: 0 });
+    await expect(db.as(u.adminB, "select uniattend.import_roster($1, $2)", [id.instA, roster([stu(3)])])).rejects.toThrow(/institution admin only/);
+    await expect(db.as(u.lectA, "select uniattend.import_roster($1, $2)", [id.instA, roster([stu(3)])])).rejects.toThrow(/institution admin only/);
+  });
+
+  it("connections belong to one institution and their tokens can't be read back by anyone", async () => {
+    moodleId = (await db.asOne<{ save_integration: { id: string } }>(u.adminA,
+      "select uniattend.save_integration($1, null, 'moodle', 'Campus Moodle', 'https://moodle.unia.ac.za', 'tok-secret-1234', $2, 'daily')",
+      [id.instA, JSON.stringify({ drop_missing: true })])).save_integration.id;
+    const made = (await db.asOne<{ save_integration: { id: string; api_key: string } }>(u.adminA,
+      "select uniattend.save_integration($1, null, 'api', 'Student system', null, null, $2, null)",
+      [id.instA, JSON.stringify({ drop_missing: true })])).save_integration;
+    apiId = made.id; apiKey = made.api_key;
+    expect(apiKey).toMatch(/^ua_[0-9a-f]{48}$/);
+    expect(await db.as(u.adminA, "select 1 from uniattend.integrations")).toHaveLength(2);
+    expect(await db.as(u.adminB, "select 1 from uniattend.integrations")).toHaveLength(0);
+    expect(await db.as(u.lectA, "select 1 from uniattend.integrations")).toHaveLength(0);
+    for (const who of [u.adminA, u.super, null]) {
+      await expect(db.as(who, "select * from uniattend.integration_secrets")).rejects.toThrow(/permission denied/);
+    }
+    await expect(db.as(u.adminB, "select uniattend.integration_action($1, 'delete')", [moodleId])).rejects.toThrow(/institution admin only/);
+    await expect(db.as(u.adminB, "select uniattend.save_integration($1, null, 'feed', 'x feed', 'https://x.example/r.csv', null, '{}', 'daily')", [id.instA]))
+      .rejects.toThrow(/institution admin only/);
+    await expect(db.as(u.adminA, "select uniattend.save_integration($1, null, 'feed', 'bad', 'http://insecure.example/r.csv', null, '{}', 'daily')", [id.instA]))
+      .rejects.toThrow(/https/);
+  });
+
+  it("the institution's own system pushes a roster with its API key; a wrong key is refused", async () => {
+    await expect(db.as(null, "select uniattend.roster_push('ua_wrong', $1)", [roster([stu(10)])])).rejects.toThrow(/not valid/);
+    const r = (await db.asOne<{ roster_push: Record<string, number> }>(null, "select uniattend.roster_push($1, $2)",
+      [apiKey, roster([stu(10), stu(11), stu(12)], undefined, { complete: true })])).roster_push;
+    expect(r).toMatchObject({ students_added: 3, enrolments_added: 3 });
+    expect(await activeFrom(apiId)).toBe(3);
+    // Nothing reached University B.
+    expect(await db.as(u.adminB, "select 1 from uniattend.students where student_number like 'A9%'")).toHaveLength(0);
+  });
+
+  it("a complete roster drops enrolments it created that are gone, but never hand-made ones, and holds back a mass removal", async () => {
+    const before = await db.asOne<{ n: number }>(u.adminA, "select count(*)::int n from uniattend.module_enrolments where source is null and status = 'active'");
+    const r = (await db.asOne<{ roster_push: Record<string, number> }>(null, "select uniattend.roster_push($1, $2)",
+      [apiKey, roster([stu(10), stu(11)], undefined, { complete: true })])).roster_push;
+    expect(r.enrolments_dropped).toBe(1);
+    expect(await activeFrom(apiId)).toBe(2);
+    expect((await db.asOne<{ n: number }>(u.adminA, "select count(*)::int n from uniattend.module_enrolments where source is null and status = 'active'")).n).toBe(before.n);
+    // An empty roster looks like a broken source: nothing is dropped.
+    const empty = (await db.asOne<{ roster_push: Record<string, number> }>(null, "select uniattend.roster_push($1, $2)",
+      [apiKey, roster([], undefined, { complete: true })])).roster_push;
+    expect(empty).toMatchObject({ enrolments_dropped: 0, held_back: 2 });
+    expect(await activeFrom(apiId)).toBe(2);
+    // The student who came back is enrolled again.
+    await db.as(null, "select uniattend.roster_push($1, $2)", [apiKey, roster([stu(10), stu(11), stu(12)], undefined, { complete: true })]);
+    expect(await activeFrom(apiId)).toBe(3);
+  });
+
+  it("the worker needs the dispatch secret, gets the token, resumes where it stopped and records the run", async () => {
+    await expect(db.as(null, "select uniattend.integration_claim('nope')")).rejects.toThrow(/not allowed/);
+    await db.as(u.adminA, "select uniattend.integration_action($1, 'sync')", [moodleId]);
+    const job = (await db.asOne<{ integration_claim: { id: string; token: string; run_id: string; cursor: number } }>(null,
+      "select uniattend.integration_claim($1)", [SECRET])).integration_claim;
+    expect(job).toMatchObject({ id: moodleId, token: "tok-secret-1234", cursor: 0 });
+    // While one worker has it, another gets nothing.
+    expect((await db.asOne<{ integration_claim: unknown }>(null, "select uniattend.integration_claim($1)", [SECRET])).integration_claim).toBeNull();
+    await db.as(null, "select uniattend.integration_apply($1, $2, $3, 1)", [SECRET, job.run_id, roster([stu(20), stu(21)])]);
+    await db.as(null, "select uniattend.integration_done($1, $2, 'later', null, false)", [SECRET, job.run_id]);
+    const next = (await db.asOne<{ integration_claim: { run_id: string; cursor: number } }>(null, "select uniattend.integration_claim($1)", [SECRET])).integration_claim;
+    expect(next).toMatchObject({ run_id: job.run_id, cursor: 1 });
+    await db.as(null, "select uniattend.integration_apply($1, $2, $3, 2)", [SECRET, job.run_id, roster([stu(22)])]);
+    await db.as(null, "select uniattend.integration_done($1, $2, 'ok', null, true)", [SECRET, job.run_id]);
+    const [run] = await db.as<{ status: string; summary: { students_added: number; enrolments_added: number } }>(u.adminA,
+      "select status, summary from uniattend.integration_runs where id = $1", [job.run_id]);
+    expect(run.status).toBe("ok");
+    expect(run.summary).toMatchObject({ students_added: 3, enrolments_added: 3 });
+    const [it] = await db.as<{ last_status: string; next_due: boolean }>(u.adminA,
+      "select last_status, next_run_at > now() + interval '23 hours' as next_due from uniattend.integrations where id = $1", [moodleId]);
+    expect(it).toEqual({ last_status: "ok", next_due: true });
+    expect((await db.asOne<{ integration_claim: unknown }>(null, "select uniattend.integration_claim($1)", [SECRET])).integration_claim).toBeNull();
+  });
+
+  it("a failed sync tells the admins and retries in an hour", async () => {
+    await db.as(u.adminA, "select uniattend.integration_action($1, 'sync')", [moodleId]);
+    const job = (await db.asOne<{ integration_claim: { run_id: string } }>(null, "select uniattend.integration_claim($1)", [SECRET])).integration_claim;
+    await db.as(null, "select uniattend.integration_done($1, $2, 'failed', 'Moodle refused the token.', false)", [SECRET, job.run_id]);
+    const [n] = await db.as<{ title: string; body: string }>(u.adminA, "select title, body from uniattend.notifications where kind = 'integration' order by created_at desc limit 1");
+    expect(n.title).toBe("Campus Moodle: sync failed");
+    expect(n.body).toMatch(/refused the token/);
+  });
+
+  it("a trial can import a full class list", async () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({ student_number: `B5${String(i).padStart(2, "0")}`, full_name: `Bulk ${i}`, module_code: "CSC101" }));
+    const r = (await db.asOne<{ import_students: { inserted: number } }>(u.adminB, "select uniattend.import_students($1, $2)", [id.instB, JSON.stringify(many)])).import_students;
+    expect(r.inserted).toBe(60);
+  });
+});

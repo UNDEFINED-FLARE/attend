@@ -15,6 +15,9 @@ const VAPID_PUBLIC = () => clean(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY);
 const VAPID_PRIVATE = () => clean(process.env.VAPID_PRIVATE_KEY);
 const DISPATCH_SECRET = () => clean(process.env.PUSH_DISPATCH_SECRET);
 
+/** The shared secret the database checks for server-to-database work (push, roster sync). Server only. */
+export const dispatchSecret = () => DISPATCH_SECRET();
+
 export const pushConfigured = () => !!(VAPID_PUBLIC() && VAPID_PRIVATE() && DISPATCH_SECRET());
 /** Which settings the server is missing, by name only (never values). */
 export const missingPushSettings = () => [

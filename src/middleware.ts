@@ -6,7 +6,7 @@ import { getUserWithRetry } from "@/lib/supabase/resilient";
 
 const PUBLIC = ["/", "/login", "/signup", "/forgot-password", "/auth/callback", "/privacy", "/terms", "/paia"];
 // Machine endpoints that check their own secret.
-const PUBLIC_PREFIX = ["/api/push/", "/api/health"];
+const PUBLIC_PREFIX = ["/api/push/", "/api/health", "/api/roster"];
 
 // Refreshes the Supabase session cookie on every request and sends signed-out
 // users to /login. This is navigation only; authorization is enforced by RLS

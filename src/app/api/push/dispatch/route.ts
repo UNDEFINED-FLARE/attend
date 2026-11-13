@@ -1,7 +1,10 @@
+import { after } from "next/server";
+import { kickIntegrations } from "@/lib/integrations/runner";
 import { dispatchPush, missingPushSettings, pushConfigured, secretMatches } from "@/lib/push";
 
 // Called every minute by pg_cron (supabase/push-schedule.sql) to send class
-// reminders and anything else queued. Protected by the shared dispatch secret.
+// reminders and anything else queued, and to run any roster sync that is due
+// (Moodle, roster links). Protected by the shared dispatch secret.
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
@@ -11,6 +14,8 @@ async function handle(req: Request) {
   const missing = missingPushSettings();
   if (missing.includes("PUSH_DISPATCH_SECRET")) return Response.json({ error: "not configured on the server", missing }, { status: 503 });
   if (!secretMatches(auth.replace(/^Bearer\s+/i, ""))) return Response.json({ error: "not allowed" }, { status: 401 });
+  // Roster syncs run after the response, within this function's time limit.
+  after(kickIntegrations);
   if (!pushConfigured()) return Response.json({ error: "not configured on the server", missing }, { status: 503 });
   try {
     return Response.json(await dispatchPush());
