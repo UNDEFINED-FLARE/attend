@@ -36,7 +36,7 @@ export default async function Activity({ searchParams }: { searchParams: Promise
 
   return (
     <>
-      <Link href="/admin/integrations" className="text-sm text-info hover:underline">← Integration Centre</Link>
+      <Link href="/admin/integrations" className="text-sm text-info underline underline-offset-2 hover:decoration-2">← Integration Centre</Link>
       <PageHeader title="Sync activity" subtitle="Every sync and import: what came in, what changed, what was rejected and why." />
       {error && <div className="mb-6"><Notice tone="warn">Activity needs the latest database updates (migrations 0024 and 0025).</Notice></div>}
 

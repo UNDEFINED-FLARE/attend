@@ -51,7 +51,7 @@ export default async function Connections() {
 
   return (
     <>
-      <Link href="/admin/integrations" className="text-sm text-info hover:underline">← Integration Centre</Link>
+      <Link href="/admin/integrations" className="text-sm text-info underline underline-offset-2 hover:decoration-2">← Integration Centre</Link>
       <PageHeader title="Connections"
         subtitle="Keep students, lecturers, modules and enrolments in step with your own systems automatically, instead of typing or uploading them." />
       {error && <div className="mb-6"><Notice tone="warn">Connections need the latest database update (migration 0024).</Notice></div>}

@@ -47,8 +47,8 @@ export function DashboardView({ d }: { d: DashboardData }) {
   const cards: Record<StudentCard, ReactNode> = {
     hero: <TrendCard title={title("hero") === "Attendance summary" ? "Attendance performance" : title("hero")} series={series} />,
 
-    // Attendance open: a plain card with the module's colour along the top, what and where,
-    // and one clear "Check in" button (the way iClicker shows a running session).
+    // Attendance open: a plain card with what and where, and one clear "Check in" button
+    // (the way iClicker shows a running session).
     live: live.length > 0 ? (() => {
       const s = live[0];
       const m = s.modules as unknown as { code: string; title: string };
@@ -56,7 +56,6 @@ export function DashboardView({ d }: { d: DashboardData }) {
       const late = new Date(s.late_after).getTime() < Date.now();
       return (
         <section aria-labelledby="open-title" className="overflow-hidden rounded-3xl bg-surface shadow-card">
-          <div aria-hidden className="h-1.5" style={{ background: colorFor(m.code) }} />
           <div className="p-4 sm:p-5">
             <p className="flex items-center gap-2 text-sm font-semibold text-ok">
               <span className="size-2 rounded-full bg-ok motion-safe:animate-pulse" />Attendance is open
@@ -74,11 +73,9 @@ export function DashboardView({ d }: { d: DashboardData }) {
         </section>
       );
     })() : (() => {
-      const zone = nextSlot ? colorFor(nextSlot.code) : "var(--line)";
       const inClass = nextSlot && hhmm(nextSlot.starts_at) <= now;
       return (
         <section className="overflow-hidden rounded-3xl bg-surface shadow-card">
-          <div aria-hidden className="h-1.5" style={{ background: zone }} />
           <div className="p-4 sm:p-5">
             <p className="text-sm font-semibold text-muted">{nextSlot ? (inClass ? "In class now" : "Next class") : "No class open right now"}</p>
             {nextSlot ? (
@@ -232,7 +229,9 @@ export function DashboardView({ d }: { d: DashboardData }) {
   };
 
   // Cards in the institution's order (Design page); the trend and the live card pair up on wide screens.
+  // While a class is open, its check-in card comes first: that is the one thing the student needs then.
   const order = theme.student.cards.filter((c) => c.show).map((c) => c.id);
+  if (live.length > 0 && order.includes("live")) order.unshift(...order.splice(order.indexOf("live"), 1));
   const blocks: ReactNode[] = [];
   for (let i = 0; i < order.length; i++) {
     const id = order[i], next = order[i + 1];

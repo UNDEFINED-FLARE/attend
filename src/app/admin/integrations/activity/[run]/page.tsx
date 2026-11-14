@@ -32,7 +32,7 @@ export default async function RunDetail({ params }: { params: Promise<{ run: str
 
   return (
     <>
-      <Link href="/admin/integrations/activity" className="text-sm text-info hover:underline">← Sync activity</Link>
+      <Link href="/admin/integrations/activity" className="text-sm text-info underline underline-offset-2 hover:decoration-2">← Sync activity</Link>
       <PageHeader title={conn?.name ?? "Removed connection"} subtitle={`Reference ${run}`} action={<Badge status={tone}>{label}</Badge>} />
 
       <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">

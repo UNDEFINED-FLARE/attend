@@ -27,7 +27,7 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
 
   return (
     <>
-      <Link href="/admin/integrations" className="text-sm text-info hover:underline">← Integration Centre</Link>
+      <Link href="/admin/integrations" className="text-sm text-info underline underline-offset-2 hover:decoration-2">← Integration Centre</Link>
       <PageHeader title={p ? `Connect ${p.name}` : "Set up a connection"} subtitle={p?.about} />
       <ol className="mb-6 flex flex-wrap gap-2 text-xs font-semibold">
         {STEPS.map((s, i) => (

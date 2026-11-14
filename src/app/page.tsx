@@ -129,7 +129,6 @@ function PhoneShot() {
         <p className="mt-4 text-xs text-muted">Good morning, Thabo</p>
         <p className="text-xl font-bold">Home</p>
         <div className="mt-3 overflow-hidden rounded-2xl bg-surface shadow-card">
-          <div className="h-1.5 bg-brand" />
           <div className="p-3">
             <p className="flex items-center gap-1.5 text-[11px] font-semibold text-ok"><span className="size-1.5 rounded-full bg-ok" />Attendance is open</p>
             <p className="mt-2 text-[11px] font-semibold text-muted">CSC111</p>
