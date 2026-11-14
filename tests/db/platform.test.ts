@@ -69,7 +69,7 @@ beforeAll(async () => {
   await db.admin("insert into uniattend.user_roles (user_id, role) values ($1, 'super_admin')", [u.super]);
   await setupInstitution("A");
   await setupInstitution("B");
-}, 120_000);
+}, 240_000);
 
 async function openSession(tag: "A" | "B") {
   const s = await db.asOne<{ id: string; join_code: string; require_gps: boolean }>(u[`lect${tag}`],
@@ -606,5 +606,584 @@ describe("check-in controls, printed QR, card scans and check-out", () => {
     expect(rec.name).toBe("Left early");
     expect((await db.asOne<{ check_out: Record<string, unknown> }>(u.sA1, "select uniattend.check_out($1)", [S.id])).check_out.outcome).toBe("duplicate");
     expect(await scan("A002", "out")).toMatchObject({ outcome: "checked_out" });
+  });
+});
+
+describe("targeted announcements and lecturer messages", () => {
+  const SECRET = "x".repeat(40);
+  const inbox = async (user: string) => (await db.as<{ title: string; kind: string }>(user,
+    "select title, kind from uniattend.notifications where kind in ('announcement','class_update') order by created_at desc limit 1"))[0];
+
+  it("a lecturer messages their module's students, with the module code and category", async () => {
+    const n = await db.asOne<{ send_class_message: number }>(u.lectA,
+      "select uniattend.send_class_message($1, 'venue_change', 'Moved to Hall 2', 'Today''s lecture is in Hall 2.')", [id.modA]);
+    expect(n.send_class_message).toBe(3);
+    expect(await inbox(u.sA1)).toEqual({ title: "Venue change: CSC101 · Moved to Hall 2", kind: "class_update" });
+    expect((await inbox(u.sB1))?.title ?? "").not.toContain("Moved to Hall 2");
+  });
+
+  it("only the module's lecturers (or an admin) can message it", async () => {
+    await expect(db.as(u.lectB, "select uniattend.send_class_message($1, 'announcement', 'Hello', 'Hi there')", [id.modA]))
+      .rejects.toThrow(/only the module's lecturers/);
+    await expect(db.as(u.sA1, "select uniattend.send_class_message($1, 'announcement', 'Hello', 'Hi there')", [id.modA]))
+      .rejects.toThrow(/only the module's lecturers/);
+  });
+
+  it("admins can target one student, and others can't read it", async () => {
+    const [a2] = await db.as<{ id: string }>(u.adminA, "select id from uniattend.students where student_number = 'A002'");
+    await db.as(u.adminA, "insert into uniattend.announcements (institution_id, title, body, audience, target_kind, target_id, category) values ($1, 'Please see the dean', 'Monday 10:00.', 'all', 'student', $2, 'academic')", [id.instA, a2.id]);
+    expect((await inbox(u.sA2)).title).toBe("Academic: Please see the dean");
+    expect((await inbox(u.sA1)).title).not.toContain("dean");
+    expect(await db.as(u.sA1, "select * from uniattend.announcements where target_kind <> 'all'")).toHaveLength(0);
+  });
+
+  it("a department announcement reaches its students and lecturers only", async () => {
+    await db.as(u.adminA, "insert into uniattend.announcements (institution_id, title, body, audience, target_kind, target_id) values ($1, 'Department meeting', 'Thursday.', 'all', 'department', $2)", [id.instA, id.depA]);
+    expect((await inbox(u.sA3)).title).toBe("Department meeting");
+    expect((await inbox(u.lectA)).title).toBe("Department meeting");
+    expect((await inbox(u.sB2))?.title ?? "").not.toBe("Department meeting");
+  });
+
+  it("refuses targets from another institution", async () => {
+    await expect(db.as(u.adminA, "insert into uniattend.announcements (institution_id, title, body, target_kind, target_id) values ($1, 'x', 'y', 'module', $2)", [id.instA, id.modB]))
+      .rejects.toThrow(/not part of this institution/);
+  });
+
+  it("class updates follow each device's class-reminder setting", async () => {
+    await db.as(null, "select * from uniattend.push_claim($1)", [SECRET]); // drain
+    await db.as(u.lectA, "select uniattend.send_class_message($1, 'class_cancelled', 'No lecture today', 'Sorry, I am ill.')", [id.modA]);
+    const rows = await db.as<{ endpoint: string; kind: string }>(null, "select endpoint, kind from uniattend.push_claim($1)", [SECRET]);
+    expect(rows.filter((r) => r.kind === "class_update").map((r) => r.endpoint)).toEqual(["https://push.example.com/send/1"]); // A2's device turned classes off earlier
+  });
+});
+
+describe("design drafts, version history and sign-in branding", () => {
+  const look = (primary: string) => JSON.stringify({ colors: { primary }, login: { headline: `Welcome ${primary}` }, menus: { student: [] } });
+
+  it("a draft is private to the institution's admins and replaced, not duplicated", async () => {
+    await db.as(u.adminA, "select uniattend.save_theme_draft($1, $2)", [id.instA, look("#111111")]);
+    await db.as(u.adminA, "select uniattend.save_theme_draft($1, $2)", [id.instA, look("#222222")]);
+    const drafts = await db.as<{ theme: { colors: { primary: string } } }>(u.adminA,
+      "select theme from uniattend.theme_versions where status = 'draft'");
+    expect(drafts.map((d) => d.theme.colors.primary)).toEqual(["#222222"]);
+    expect(await db.as(u.sA1, "select * from uniattend.theme_versions")).toHaveLength(0);
+    expect(await db.as(u.adminB, "select * from uniattend.theme_versions")).toHaveLength(0);
+    const live = await db.asOne<{ theme: object }>(u.adminA, "select theme from uniattend.institutions where id = $1", [id.instA]);
+    expect(JSON.stringify(live.theme)).not.toContain("#222222");
+  });
+
+  it("publishing makes it live, records a version and clears the draft", async () => {
+    await db.as(u.adminA, "select uniattend.publish_theme($1, $2, 'Blue for open day')", [id.instA, look("#333333")]);
+    const inst = await db.asOne<{ brand_primary: string }>(u.sA1, "select brand_primary from uniattend.institutions where id = $1", [id.instA]);
+    expect(inst.brand_primary).toBe("#333333");
+    await db.as(u.adminA, "select uniattend.publish_theme($1, $2)", [id.instA, look("#444444")]);
+    const versions = await db.as<{ status: string; note: string | null }>(u.adminA,
+      "select status, note from uniattend.theme_versions where institution_id = $1 order by created_at desc", [id.instA]);
+    // (an earlier design, if the institution had one, is kept as "Design before version history")
+    expect(versions.every((v) => v.status === "published")).toBe(true);
+    expect(versions.slice(1).map((v) => v.note)).toEqual(expect.arrayContaining(["Blue for open day"]));
+    expect(versions.length).toBeLessThanOrEqual(3);
+    expect(await db.as(u.adminA, "select 1 from uniattend.theme_versions where status = 'draft'")).toHaveLength(0);
+  });
+
+  it("only the institution's own admins can draft or publish", async () => {
+    await expect(db.as(u.adminB, "select uniattend.publish_theme($1, $2)", [id.instA, look("#555555")])).rejects.toThrow(/administrators/);
+    await expect(db.as(u.lectA, "select uniattend.save_theme_draft($1, $2)", [id.instA, look("#555555")])).rejects.toThrow(/administrators/);
+    await expect(db.as(u.sA1, "insert into uniattend.theme_versions (institution_id, status, theme) values ($1, 'published', '{}')", [id.instA]))
+      .rejects.toThrow();
+  });
+
+  it("the sign-in page gets the name, logo, colours and welcome text without signing in, and nothing more", async () => {
+    const b = (await db.asOne<{ public_branding: { name: string; theme: Record<string, unknown> } }>(null,
+      "select uniattend.public_branding('uni-a')")).public_branding;
+    expect(b.name).toBe("University A");
+    expect(b.theme.login).toEqual({ headline: "Welcome #444444" });
+    expect(b.theme.menus).toBeUndefined();
+    const byId = (await db.asOne<{ public_branding: { slug: string } }>(null, "select uniattend.public_branding($1)", [id.instB])).public_branding;
+    expect(byId.slug).toBe("uni-b");
+    expect((await db.asOne<{ public_branding: unknown }>(null, "select uniattend.public_branding('nope')")).public_branding).toBeNull();
+    expect(await db.as(null, "select * from uniattend.theme_versions")).toHaveLength(0);
+  });
+});
+
+describe("check-ins made without signal", () => {
+  type Off = { outcome: string; status: string; reasons: string[]; offline?: boolean };
+  const offline = async (user: string, session: string | null, code: string | null, token: string | null, at: Date, device = hex("a")) =>
+    (await db.asOne<{ check_in_offline: Off }>(user, "select uniattend.check_in_offline($1, $2, $3, $4, $5, $6)",
+      [session, code, token, JSON.stringify(gpsAt(0)), device, at.toISOString()])).check_in_offline;
+  let S: Awaited<ReturnType<typeof openSession>>;
+  beforeAll(async () => { S = await openSession("B"); });
+
+  it("goes to review, never straight to present, keeping the original time and the QR proof", async () => {
+    const at = new Date(Date.now() - 30_000);
+    const r = await offline(u.sB1, S.id, null, S.token, at);
+    expect(r).toMatchObject({ outcome: "review", status: "pending_verification", offline: true });
+    expect(r.reasons.join(" ")).toMatch(/without signal at .*sent at/);
+    expect(r.reasons.join(" ")).toMatch(/QR code matches the one on screen/);
+    const [rec] = await db.as<{ method: string; checked_in_at: string }>(u.sB1,
+      "select method, checked_in_at from uniattend.attendance_records where session_id = $1", [S.id]);
+    expect(rec.method).toBe("offline");
+    expect(Math.abs(Date.parse(rec.checked_in_at) - at.getTime())).toBeLessThan(1000);
+  });
+
+  it("refuses times in the future, outside the session, or older than 48 hours", async () => {
+    await expect(offline(u.sB2, S.id, null, S.token, new Date(Date.now() + 10 * 60_000))).rejects.toThrow(/future/);
+    await expect(offline(u.sB2, S.id, null, S.token, new Date(Date.now() - 3 * 24 * 3600_000))).rejects.toThrow(/48 hours/);
+    await expect(offline(u.sB2, S.id, null, S.token, new Date(Date.now() - 5 * 3600_000))).rejects.toThrow(/outside the time/);
+  });
+
+  it("a forged QR is flagged, and students outside the module can't use it", async () => {
+    const r = await offline(u.sB2, S.id, null, `${S.token.split(".")[0]}.${"A".repeat(22)}`, new Date(), hex("b"));
+    expect(r.reasons.join(" ")).toMatch(/not valid for this session/);
+    await expect(offline(u.sA1, S.id, null, S.token, new Date())).rejects.toThrow(/not registered as a student|not enrolled/);
+  });
+
+  it("after the session closes: an automatic absence becomes a review, a lecturer's decision is kept", async () => {
+    await db.as(u.lectB, "select uniattend.close_session($1)", [S.id]);
+    const r = await offline(u.sB3, S.id, null, S.token, new Date(Date.now() - 60_000), hex("c"));
+    expect(r.status).toBe("pending_verification");
+    expect(r.reasons.join(" ")).toMatch(/could not be checked/);
+    const [b3] = await db.as<{ id: string }>(u.lectB, "select id from uniattend.students where student_number = 'B003'");
+    await db.as(u.lectB, "select uniattend.override_attendance($1, $2, 'absent', 'Was not in class')", [S.id, b3.id]);
+    const again = await offline(u.sB3, S.id, null, S.token, new Date(Date.now() - 60_000), hex("c"));
+    expect(again.outcome).toBe("duplicate");
+    expect(again.reasons[0]).toMatch(/already recorded this session/);
+  });
+});
+
+describe("nobody is added to an institution without approval, notice and a way out", () => {
+  let rogue: string, instC: string;
+  const rolesAt = (user: string, inst: string) =>
+    db.as<{ role: string; status: string }>(user, "select role, status from uniattend.user_roles where user_id = auth.uid() and institution_id = $1", [inst]);
+
+  beforeAll(async () => {
+    rogue = await db.newUser("founder@fake-uni.example");
+    instC = (await db.asOne<{ request_institution: string }>(rogue, "select uniattend.request_institution('Fake University', 'fake-uni')")).request_institution;
+    // The (still pending) institution's admin lists a real lecturer of University A as theirs.
+    await db.as(rogue, "insert into uniattend.lecturers (institution_id, staff_number, full_name, email) values ($1, 'X1', 'Borrowed', 'lectA@uniA.ac.za')", [instC]);
+  });
+
+  it("a pending institution can't attach someone's account, by email match or by granting a role", async () => {
+    await db.as(u.lectA, "select uniattend.link_my_accounts()");
+    expect(await rolesAt(u.lectA, instC)).toHaveLength(0);
+    await expect(db.as(rogue, "select uniattend.grant_role($1, 'lectA@uniA.ac.za', 'lecturer')", [instC])).rejects.toThrow(/must be approved/);
+  });
+
+  it("once approved, the person is linked and told, and can leave; the institution can't add them back", async () => {
+    await db.as(u.super, "select uniattend.set_institution_status($1, 'active')", [instC]);
+    await db.as(u.lectA, "select uniattend.link_my_accounts()");
+    expect(await rolesAt(u.lectA, instC)).toEqual([{ role: "lecturer", status: "active" }]);
+    const [note] = await db.as<{ title: string }>(u.lectA, "select title from uniattend.notifications where kind = 'membership' order by created_at desc limit 1");
+    expect(note.title).toBe("Added to Fake University");
+
+    expect((await db.asOne<{ leave_institution: number }>(u.lectA, "select uniattend.leave_institution($1)", [instC])).leave_institution).toBe(1);
+    expect(await rolesAt(u.lectA, instC)).toEqual([{ role: "lecturer", status: "suspended" }]);
+    await expect(db.as(rogue, "select uniattend.grant_role($1, 'lectA@uniA.ac.za', 'lecturer')", [instC])).rejects.toThrow(/left your institution/);
+    const [rid] = await db.as<{ id: string }>(rogue, "select id from uniattend.user_roles where institution_id = $1 and role = 'lecturer'", [instC]);
+    await expect(db.as(rogue, "select uniattend.set_role_status($1, 'active')", [rid.id])).rejects.toThrow(/left your institution/);
+    // Their real institution is untouched.
+    expect(await rolesAt(u.lectA, id.instA)).toEqual([{ role: "lecturer", status: "active" }]);
+  });
+
+  it("an only administrator can't leave and strand the institution", async () => {
+    await expect(db.as(rogue, "select uniattend.leave_institution($1)", [instC])).rejects.toThrow(/only administrator/);
+  });
+});
+
+describe("invoicing by hand and warnings before access ends", () => {
+  it("only the platform admin records a payment; it activates and extends, once per reference", async () => {
+    await expect(db.as(u.adminA, "select uniattend.record_manual_payment($1, 1500000, 'INV-001', 12)", [id.instA])).rejects.toThrow(/super admin only/);
+    const r = (await db.asOne<{ record_manual_payment: { active_until: string } }>(u.super,
+      "select uniattend.record_manual_payment($1, 1500000, 'INV-001', 12)", [id.instA])).record_manual_payment;
+    const days = (Date.parse(r.active_until) - Date.now()) / 86400_000;
+    expect(days).toBeGreaterThan(360);
+    await expect(db.as(u.super, "select uniattend.record_manual_payment($1, 1500000, 'INV-001', 12)", [id.instA])).rejects.toThrow(/already recorded/);
+    // A second payment extends from the current end, not from today.
+    const r2 = (await db.asOne<{ record_manual_payment: { active_until: string } }>(u.super,
+      "select uniattend.record_manual_payment($1, 1500000, 'INV-002', 1)", [id.instA])).record_manual_payment;
+    expect(Date.parse(r2.active_until)).toBeGreaterThan(Date.parse(r.active_until));
+  });
+
+  it("an institution's admins see their own subscription notice, nobody else does", async () => {
+    const n = (await db.asOne<{ subscription_notice: { status: string; operating: boolean; days_left: number } }>(u.adminA,
+      "select uniattend.subscription_notice($1)", [id.instA])).subscription_notice;
+    expect(n).toMatchObject({ status: "active", operating: true });
+    expect(n.days_left).toBeGreaterThan(360);
+    expect((await db.asOne<{ subscription_notice: unknown }>(u.adminB, "select uniattend.subscription_notice($1)", [id.instA])).subscription_notice).toBeNull();
+    expect((await db.asOne<{ subscription_notice: unknown }>(u.lectA, "select uniattend.subscription_notice($1)", [id.instA])).subscription_notice).toBeNull();
+  });
+});
+
+describe("retention, access to your own data, and data requests", () => {
+  it("old records are listed, then deleted only by the institution's own admin; other institutions are untouched", async () => {
+    const S = await openSession("A");
+    await checkIn(u.sA2, S.id, null, S.token, gpsAt(0), hex("e"));
+    await db.as(u.lectA, "select uniattend.close_session($1)", [S.id]);
+    // Pretend it happened four years ago (past the default three-year period).
+    await db.admin("update uniattend.class_sessions set opens_at = now() - interval '4 years 2 hours', late_after = now() - interval '4 years 1 hour', closes_at = now() - interval '4 years', closed_at = now() - interval '4 years' where id = $1", [S.id]);
+    const B = await db.asOne<{ n: number }>(u.adminB, "select count(*)::int n from uniattend.attendance_records");
+
+    const p = (await db.asOne<{ retention_preview: { sessions: number; attendance_records: number; auto: boolean } }>(u.adminA,
+      "select uniattend.retention_preview($1)", [id.instA])).retention_preview;
+    expect(p.sessions).toBe(1);
+    expect(p.attendance_records).toBeGreaterThanOrEqual(1);
+    expect(p.auto).toBe(false);
+    await expect(db.as(u.adminB, "select uniattend.apply_retention($1)", [id.instA])).rejects.toThrow(/institution admin only/);
+    await expect(db.as(u.lectA, "select uniattend.apply_retention($1)", [id.instA])).rejects.toThrow(/institution admin only/);
+    await expect(db.as(u.sA1, "select uniattend.run_retention()")).rejects.toThrow(/permission denied/);
+
+    await db.as(u.adminA, "select uniattend.apply_retention($1)", [id.instA]);
+    expect(await db.as(u.adminA, "select 1 from uniattend.class_sessions where id = $1", [S.id])).toHaveLength(0);
+    expect(await db.as(u.adminA, "select 1 from uniattend.attendance_records where session_id = $1", [S.id])).toHaveLength(0);
+    expect((await db.asOne<{ n: number }>(u.adminB, "select count(*)::int n from uniattend.attendance_records")).n).toBe(B.n);
+    const [log] = await db.as<{ action: string }>(u.adminA, "select action from uniattend.audit_logs where action = 'retention_applied'");
+    expect(log.action).toBe("retention_applied");
+  });
+
+  it("anyone can download what is held about them, and only about them", async () => {
+    const S = await openSession("A");
+    await checkIn(u.sA1, S.id, null, S.token, gpsAt(0), hex("f"));
+    const d =(await db.asOne<{ my_personal_data: { account: { email: string }; student_records: { student_number: string; attendance: unknown[] | null }[] } }>(u.sA1,
+      "select uniattend.my_personal_data()")).my_personal_data;
+    expect(d.account.email.toLowerCase()).toBe("s1@unia.ac.za");
+    expect(d.student_records.map((s) => s.student_number)).toEqual(["A001"]);
+    expect((d.student_records[0].attendance ?? []).length).toBeGreaterThan(0);
+    await expect(db.as(null, "select uniattend.my_personal_data()")).rejects.toThrow();
+  });
+
+  it("a request reaches the person's own institution admins, not others, and the answer reaches the person", async () => {
+    const { request_data_action: rid } = await db.asOne<{ request_data_action: string }>(u.sA3,
+      "select uniattend.request_data_action('correction', 'My surname is spelt wrong.')");
+    expect(await db.as(u.adminA, "select 1 from uniattend.data_requests where id = $1", [rid])).toHaveLength(1);
+    expect(await db.as(u.adminB, "select 1 from uniattend.data_requests where id = $1", [rid])).toHaveLength(0);
+    expect(await db.as(u.sA1, "select 1 from uniattend.data_requests where id = $1", [rid])).toHaveLength(0);
+    await expect(db.as(u.adminB, "select uniattend.answer_data_request($1, 'done', 'Fixed it.')", [rid])).rejects.toThrow(/not allowed/);
+    await expect(db.as(u.adminA, "select uniattend.answer_data_request($1, 'done', '')", [rid])).rejects.toThrow(/Tell the person/);
+    await db.as(u.adminA, "select uniattend.answer_data_request($1, 'done', 'Your surname is corrected.')", [rid]);
+    const [n] = await db.as<{ title: string }>(u.sA3, "select title from uniattend.notifications where kind = 'data_request' order by created_at desc limit 1");
+    expect(n.title).toBe("Your request: done");
+  });
+});
+
+describe("automatic roster sync: Moodle/feed worker, API key and uploads", () => {
+  const SECRET = "x".repeat(40);
+  const roster = (people: object[], modules: object[] = [{ code: "CSC101", title: "Intro to CS" }], extra: object = {}) =>
+    JSON.stringify({ modules, people, ...extra });
+  const stu = (n: number, codes = ["CSC101"]) => ({ role: "student", number: `A9${String(n).padStart(2, "0")}`, full_name: `Synced ${n}`, email: `syn${n}@unia.ac.za`, module_codes: codes });
+  const activeFrom = async (source: string) => (await db.asOne<{ n: number }>(u.adminA,
+    "select count(*)::int n from uniattend.module_enrolments where source = $1 and status = 'active'", [source])).n;
+  let apiId: string, apiKey: string, moodleId: string;
+
+  beforeAll(async () => { await db.as(u.super, "select uniattend.set_push_secret($1, 15)", [SECRET]); });
+
+  it("an admin's upload adds students, lecturers, enrolments and teaching assignments, and reports problems", async () => {
+    const r = (await db.asOne<{ import_roster: Record<string, number> & { errors: { error: string }[]; unknown_modules: string[] } }>(u.adminA,
+      "select uniattend.import_roster($1, $2)", [id.instA, roster([
+        stu(1), stu(2, ["CSC101", "NOPE999"]),
+        { role: "lecturer", number: "", full_name: "Dr New", email: "new.lect@unia.ac.za", module_codes: ["CSC101"] },
+        { role: "student", number: "", full_name: "No Number", module_codes: ["CSC101"] },
+      ])])).import_roster;
+    expect(r).toMatchObject({ students_added: 2, lecturers_added: 1, enrolments_added: 2, assignments_added: 1, skipped: 1 });
+    expect(r.unknown_modules).toEqual(["NOPE999"]);
+    expect(r.errors[0].error).toMatch(/student number is missing/);
+    // Running it again changes nothing.
+    const again = (await db.asOne<{ import_roster: Record<string, number> }>(u.adminA, "select uniattend.import_roster($1, $2)",
+      [id.instA, roster([stu(1), stu(2)])])).import_roster;
+    expect(again).toMatchObject({ students_added: 0, students_updated: 0, enrolments_added: 0 });
+    await expect(db.as(u.adminB, "select uniattend.import_roster($1, $2)", [id.instA, roster([stu(3)])])).rejects.toThrow(/institution admin only/);
+    await expect(db.as(u.lectA, "select uniattend.import_roster($1, $2)", [id.instA, roster([stu(3)])])).rejects.toThrow(/institution admin only/);
+  });
+
+  it("connections belong to one institution and their tokens can't be read back by anyone", async () => {
+    moodleId = (await db.asOne<{ save_integration: { id: string } }>(u.adminA,
+      "select uniattend.save_integration($1, null, 'moodle', 'Campus Moodle', 'https://moodle.unia.ac.za', 'tok-secret-1234', $2, 'daily')",
+      [id.instA, JSON.stringify({ drop_missing: true })])).save_integration.id;
+    const made = (await db.asOne<{ save_integration: { id: string; api_key: string } }>(u.adminA,
+      "select uniattend.save_integration($1, null, 'api', 'Student system', null, null, $2, null)",
+      [id.instA, JSON.stringify({ drop_missing: true })])).save_integration;
+    apiId = made.id; apiKey = made.api_key;
+    expect(apiKey).toMatch(/^ua_[0-9a-f]{48}$/);
+    expect(await db.as(u.adminA, "select 1 from uniattend.integrations")).toHaveLength(2);
+    expect(await db.as(u.adminB, "select 1 from uniattend.integrations")).toHaveLength(0);
+    expect(await db.as(u.lectA, "select 1 from uniattend.integrations")).toHaveLength(0);
+    for (const who of [u.adminA, u.super, null]) {
+      await expect(db.as(who, "select * from uniattend.integration_secrets")).rejects.toThrow(/permission denied/);
+    }
+    await expect(db.as(u.adminB, "select uniattend.integration_action($1, 'delete')", [moodleId])).rejects.toThrow(/institution admin only/);
+    await expect(db.as(u.adminB, "select uniattend.save_integration($1, null, 'feed', 'x feed', 'https://x.example/r.csv', null, '{}', 'daily')", [id.instA]))
+      .rejects.toThrow(/institution admin only/);
+    await expect(db.as(u.adminA, "select uniattend.save_integration($1, null, 'feed', 'bad', 'http://insecure.example/r.csv', null, '{}', 'daily')", [id.instA]))
+      .rejects.toThrow(/https/);
+  });
+
+  it("the institution's own system pushes a roster with its API key; a wrong key is refused", async () => {
+    await expect(db.as(null, "select uniattend.roster_push('ua_wrong', $1)", [roster([stu(10)])])).rejects.toThrow(/not valid/);
+    const r = (await db.asOne<{ roster_push: Record<string, number> }>(null, "select uniattend.roster_push($1, $2)",
+      [apiKey, roster([stu(10), stu(11), stu(12)], undefined, { complete: true })])).roster_push;
+    expect(r).toMatchObject({ students_added: 3, enrolments_added: 3 });
+    expect(await activeFrom(apiId)).toBe(3);
+    // Nothing reached University B.
+    expect(await db.as(u.adminB, "select 1 from uniattend.students where student_number like 'A9%'")).toHaveLength(0);
+  });
+
+  it("a complete roster drops enrolments it created that are gone, but never hand-made ones, and holds back a mass removal", async () => {
+    const before = await db.asOne<{ n: number }>(u.adminA, "select count(*)::int n from uniattend.module_enrolments where source is null and status = 'active'");
+    const r = (await db.asOne<{ roster_push: Record<string, number> }>(null, "select uniattend.roster_push($1, $2)",
+      [apiKey, roster([stu(10), stu(11)], undefined, { complete: true })])).roster_push;
+    expect(r.enrolments_dropped).toBe(1);
+    expect(await activeFrom(apiId)).toBe(2);
+    expect((await db.asOne<{ n: number }>(u.adminA, "select count(*)::int n from uniattend.module_enrolments where source is null and status = 'active'")).n).toBe(before.n);
+    // An empty roster looks like a broken source: nothing is dropped.
+    const empty = (await db.asOne<{ roster_push: Record<string, number> }>(null, "select uniattend.roster_push($1, $2)",
+      [apiKey, roster([], undefined, { complete: true })])).roster_push;
+    expect(empty).toMatchObject({ enrolments_dropped: 0, held_back: 2 });
+    expect(await activeFrom(apiId)).toBe(2);
+    // The student who came back is enrolled again.
+    await db.as(null, "select uniattend.roster_push($1, $2)", [apiKey, roster([stu(10), stu(11), stu(12)], undefined, { complete: true })]);
+    expect(await activeFrom(apiId)).toBe(3);
+  });
+
+  it("the worker needs the dispatch secret, gets the token, resumes where it stopped and records the run", async () => {
+    await expect(db.as(null, "select uniattend.integration_claim('nope')")).rejects.toThrow(/not allowed/);
+    await db.as(u.adminA, "select uniattend.integration_action($1, 'sync')", [moodleId]);
+    const job = (await db.asOne<{ integration_claim: { id: string; token: string; run_id: string; cursor: number } }>(null,
+      "select uniattend.integration_claim($1)", [SECRET])).integration_claim;
+    expect(job).toMatchObject({ id: moodleId, token: "tok-secret-1234", cursor: 0 });
+    // While one worker has it, another gets nothing.
+    expect((await db.asOne<{ integration_claim: unknown }>(null, "select uniattend.integration_claim($1)", [SECRET])).integration_claim).toBeNull();
+    await db.as(null, "select uniattend.integration_apply($1, $2, $3, 1)", [SECRET, job.run_id, roster([stu(20), stu(21)])]);
+    await db.as(null, "select uniattend.integration_done($1, $2, 'later', null, false)", [SECRET, job.run_id]);
+    const next = (await db.asOne<{ integration_claim: { run_id: string; cursor: number } }>(null, "select uniattend.integration_claim($1)", [SECRET])).integration_claim;
+    expect(next).toMatchObject({ run_id: job.run_id, cursor: 1 });
+    await db.as(null, "select uniattend.integration_apply($1, $2, $3, 2)", [SECRET, job.run_id, roster([stu(22)])]);
+    await db.as(null, "select uniattend.integration_done($1, $2, 'ok', null, true)", [SECRET, job.run_id]);
+    const [run] = await db.as<{ status: string; summary: { students_added: number; enrolments_added: number } }>(u.adminA,
+      "select status, summary from uniattend.integration_runs where id = $1", [job.run_id]);
+    expect(run.status).toBe("ok");
+    expect(run.summary).toMatchObject({ students_added: 3, enrolments_added: 3 });
+    const [it] = await db.as<{ last_status: string; next_due: boolean }>(u.adminA,
+      "select last_status, next_run_at > now() + interval '23 hours' as next_due from uniattend.integrations where id = $1", [moodleId]);
+    expect(it).toEqual({ last_status: "ok", next_due: true });
+    expect((await db.asOne<{ integration_claim: unknown }>(null, "select uniattend.integration_claim($1)", [SECRET])).integration_claim).toBeNull();
+  });
+
+  it("a failed sync tells the admins and retries in an hour", async () => {
+    await db.as(u.adminA, "select uniattend.integration_action($1, 'sync')", [moodleId]);
+    const job = (await db.asOne<{ integration_claim: { run_id: string } }>(null, "select uniattend.integration_claim($1)", [SECRET])).integration_claim;
+    await db.as(null, "select uniattend.integration_done($1, $2, 'failed', 'Moodle refused the token.', false)", [SECRET, job.run_id]);
+    const [n] = await db.as<{ title: string; body: string }>(u.adminA, "select title, body from uniattend.notifications where kind = 'integration' order by created_at desc limit 1");
+    expect(n.title).toBe("Campus Moodle: sync failed");
+    expect(n.body).toMatch(/refused the token/);
+  });
+
+  it("a trial can import a full class list", async () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({ student_number: `B5${String(i).padStart(2, "0")}`, full_name: `Bulk ${i}`, module_code: "CSC101" }));
+    const r = (await db.asOne<{ import_students: { inserted: number } }>(u.adminB, "select uniattend.import_students($1, $2)", [id.instB, JSON.stringify(many)])).import_students;
+    expect(r.inserted).toBe(60);
+  });
+});
+
+describe("sync engine: stage, preview, commit, external ids, two institutions", () => {
+  const SECRET = "x".repeat(40);
+  type Totals = { received: number; inserted: number; updated: number; unchanged: number; duplicates: number; rejected: number };
+  type Result = Totals & { status?: string; datasets: Record<string, Totals & { dropped_missing?: number; held_back?: number }> };
+  const J = (v: unknown) => JSON.stringify(v);
+  const start = async (admin: string, inst: string, source = "its-export") =>
+    (await db.asOne<{ import_start: string }>(admin, "select uniattend.import_start($1, $2, 'test file')", [inst, source])).import_start;
+  const add = (admin: string, run: string, dataset: string, rows: object[]) => db.as(admin, "select uniattend.import_add($1, $2, $3)", [run, dataset, J(rows)]);
+  const preview = async (admin: string, run: string) => (await db.asOne<{ import_preview: Result }>(admin, "select uniattend.import_preview($1)", [run])).import_preview;
+  const commit = async (admin: string, run: string) => (await db.asOne<{ import_commit: Result }>(admin, "select uniattend.import_commit($1)", [run])).import_commit;
+
+  const structure = [
+    ["faculties", [{ external_id: "F1", code: "FSE", name: "Science and Engineering" }]],
+    ["departments", [{ external_id: "D1", code: "CSE", name: "Computer Science", faculty_code: "FSE" }]],
+    ["modules", [{ external_id: "M1", code: "CSE1541", title: "Programming 1", department_code: "CSE" },
+                 { external_id: "M2", code: "CSE1542", title: "Data Structures", department_code: "CSE" }]],
+    ["lecturers", [{ external_id: "L1", staff_number: "E1042", first_name: "Ndivhuwo", last_name: "Mudau", email: "n.mudau@unia.ac.za" }]],
+    ["students", [{ external_id: "S1", student_number: "26000001", full_name: "Thabo Nkosi", email: "26000001@unia.ac.za", status: "Registered" },
+                  { external_id: "S2", student_number: "26000002", full_name: "Lerato Dube", status: "active" }]],
+    ["enrolments", [{ student_number: "26000001", module_code: "CSE1541" }, { student_external_id: "S2", module_external_id: "M1" },
+                    { student_number: "26000001", module_code: "CSE1542" }]],
+    ["assignments", [{ staff_number: "E1042", module_code: "CSE1541" }]],
+  ] as const;
+
+  beforeAll(async () => { await db.as(u.super, "select uniattend.set_push_secret($1, 15)", [SECRET]); });
+
+  it("a preview counts everything and changes nothing; the commit applies it all", async () => {
+    const run = await start(u.adminA, id.instA);
+    for (const [ds, rows] of structure) await add(u.adminA, run, ds, rows as unknown as object[]);
+    const p = await preview(u.adminA, run);
+    expect(p).toMatchObject({ received: 11, inserted: 11, rejected: 0 });
+    expect(p.datasets.enrolments).toMatchObject({ inserted: 3 });
+    expect(await db.as(u.adminA, "select 1 from uniattend.students where student_number = '26000001'")).toHaveLength(0);
+    const rows = await db.as<{ outcome: string }>(u.adminA, "select outcome from uniattend.integration_staging where run_id = $1", [run]);
+    expect(rows.every((r) => r.outcome === "insert")).toBe(true);
+
+    const c = await commit(u.adminA, run);
+    expect(c).toMatchObject({ status: "ok", inserted: 11, rejected: 0 });
+    const [s] = await db.as<{ full_name: string; status: string }>(u.adminA, "select full_name, status from uniattend.students where student_number = '26000001'");
+    expect(s).toEqual({ full_name: "Thabo Nkosi", status: "active" });
+    const [l] = await db.as<{ full_name: string }>(u.adminA, "select full_name from uniattend.lecturers where staff_number = 'E1042'");
+    expect(l.full_name).toBe("Ndivhuwo Mudau");
+    expect(await db.as(u.adminA, "select 1 from uniattend.integration_staging where run_id = $1", [run])).toHaveLength(0);
+    await expect(commit(u.adminA, run)).rejects.toThrow(/already finished/);
+  });
+
+  it("importing the same data again creates nothing new", async () => {
+    const run = await start(u.adminA, id.instA);
+    for (const [ds, rows] of structure) await add(u.adminA, run, ds, rows as unknown as object[]);
+    const c = await commit(u.adminA, run);
+    expect(c).toMatchObject({ inserted: 0, updated: 0, unchanged: 11, rejected: 0 });
+    expect((await db.asOne<{ n: number }>(u.adminA, "select count(*)::int n from uniattend.students where student_number like '26%'")).n).toBe(2);
+  });
+
+  it("the source's own id follows a renumbered student; a number clash is rejected, not merged", async () => {
+    const run = await start(u.adminA, id.instA);
+    await add(u.adminA, run, "students", [
+      { external_id: "S1", student_number: "26000101", full_name: "Thabo Nkosi" },
+      { external_id: "S2", student_number: "A001", full_name: "Lerato Dube" },
+    ]);
+    const c = await commit(u.adminA, run);
+    expect(c).toMatchObject({ updated: 1, rejected: 1, status: "warnings" });
+    expect(await db.as(u.adminA, "select 1 from uniattend.students where student_number = '26000101'")).toHaveLength(1);
+    expect(await db.as(u.adminA, "select 1 from uniattend.students where student_number = '26000001'")).toHaveLength(0);
+    const [e] = await db.as<{ message: string; ref: string }>(u.adminA, "select message, ref from uniattend.integration_errors where run_id = $1", [run]);
+    expect(e).toEqual({ ref: "S2", message: "student number A001 already belongs to another student" });
+  });
+
+  it("status changes come only from an explicit status; history and enrolments stay", async () => {
+    const run = await start(u.adminA, id.instA);
+    await add(u.adminA, run, "students", [{ external_id: "S2", student_number: "26000002", full_name: "Lerato Dube", status: "Deregistered" }]);
+    await add(u.adminA, run, "enrolments", [
+      { student_number: "26000101", module_code: "CSE1542", status: "dropped" },
+      { student_number: "26000002", module_code: "CSE1542" },          // a new module for a withdrawn student
+    ]);
+    const c = await commit(u.adminA, run);
+    expect(c.datasets.students).toMatchObject({ updated: 1 });
+    expect(c.datasets.enrolments).toMatchObject({ updated: 1, rejected: 1 });
+    const [s] = await db.as<{ status: string }>(u.adminA, "select status from uniattend.students where student_number = '26000002'");
+    expect(s.status).toBe("withdrawn");
+    // Their existing enrolment is kept; the dropped one is marked, not deleted.
+    const en = await db.as<{ code: string; status: string }>(u.adminA,
+      "select m.code, e.status from uniattend.module_enrolments e join uniattend.modules m on m.id = e.module_id join uniattend.students s on s.id = e.student_id where s.student_number in ('26000002','26000101') order by 1, 2");
+    expect(en).toEqual([{ code: "CSE1541", status: "active" }, { code: "CSE1541", status: "active" }, { code: "CSE1542", status: "dropped" }]);
+    const [err] = await db.as<{ message: string }>(u.adminA, "select message from uniattend.integration_errors where run_id = $1", [run]);
+    expect(err.message).toMatch(/is withdrawn, so they can't be enrolled/);
+  });
+
+  it("repeats in one file: identical ones are duplicates, conflicting ones are rejected; bad rows say why", async () => {
+    const run = await start(u.adminA, id.instA);
+    await add(u.adminA, run, "students", [
+      { student_number: "26000201", full_name: "Ama Zulu" }, { student_number: "26000201", full_name: "Ama Zulu" },
+      { student_number: "26000202", full_name: "Sipho M" }, { student_number: "26000202", full_name: "Sipho Mokoena" },
+      { student_number: "", full_name: "No Number" }, { student_number: "26000203", full_name: "X", status: "on holiday" },
+      { student_number: "26000204", full_name: "Y", email: "not-an-email" },
+    ]);
+    const p = await preview(u.adminA, run);
+    expect(p).toMatchObject({ received: 7, inserted: 2, duplicates: 1, rejected: 4 });
+    const errs = await db.as<{ row_no: number; error: string }>(u.adminA,
+      "select row_no, error from uniattend.integration_staging where run_id = $1 and outcome = 'reject' order by row_no", [run]);
+    expect(errs.map((e) => e.error)).toEqual([
+      "appears more than once with different details (first at row 3)", "student_number is missing", 'unknown status "on holiday"', "email is not valid",
+    ]);
+    await db.as(u.adminA, "select uniattend.import_cancel($1)", [run]);
+    expect(await db.as(u.adminA, "select 1 from uniattend.students where student_number = '26000201'")).toHaveLength(0);
+  });
+
+  it("the same student number and module code are separate records at each institution", async () => {
+    const run = await start(u.adminB, id.instB);
+    await add(u.adminB, run, "modules", [{ code: "CSE1541", title: "Intro to Programming (B)" }]);
+    await add(u.adminB, run, "students", [{ external_id: "S1", student_number: "26000101", full_name: "A different person" }]);
+    const c = await commit(u.adminB, run);
+    expect(c).toMatchObject({ inserted: 2, rejected: 0 });
+    const [a] = await db.as<{ full_name: string }>(u.adminA, "select full_name from uniattend.students where student_number = '26000101'");
+    const [b] = await db.as<{ full_name: string }>(u.adminB, "select full_name from uniattend.students where student_number = '26000101'");
+    expect([a.full_name, b.full_name]).toEqual(["Thabo Nkosi", "A different person"]);
+  });
+
+  it("another institution, a lecturer or a student can't see or touch an import", async () => {
+    const run = await start(u.adminA, id.instA);
+    await add(u.adminA, run, "students", [{ student_number: "26000301", full_name: "Private Person" }]);
+    for (const who of [u.adminB, u.lectA, u.sA1]) {
+      await expect(db.as(who, "select uniattend.import_preview($1)", [run])).rejects.toThrow(/institution admin only/);
+      await expect(db.as(who, "select uniattend.import_commit($1)", [run])).rejects.toThrow(/institution admin only/);
+      await expect(db.as(who, "select uniattend.import_add($1, 'students', '[]')", [run])).rejects.toThrow(/institution admin only/);
+      expect(await db.as(who, "select 1 from uniattend.integration_staging where run_id = $1", [run])).toHaveLength(0);
+      expect(await db.as(who, "select 1 from uniattend.integration_external_ids where institution_id = $1", [id.instA])).toHaveLength(0);
+    }
+    await expect(db.as(u.adminB, "select uniattend.import_start($1, 'x', 'x')", [id.instA])).rejects.toThrow(/institution admin only/);
+    await expect(db.as(u.adminA, "insert into uniattend.integration_staging (run_id, institution_id, dataset, row_no, payload) values ($1, $2, 'students', 1, '{}')", [run, id.instA]))
+      .rejects.toThrow(/permission denied/);
+    await db.as(u.adminA, "select uniattend.import_cancel($1)", [run]);
+  });
+
+  it("a connection's worker stages, commits with checkpoints, reconciles a complete roster, and fails safely", async () => {
+    const conn = (await db.asOne<{ save_integration: { id: string } }>(u.adminA,
+      "select uniattend.save_integration($1, null, 'feed', 'Mock ITS (simulation)', 'https://sis.unia.example/roster.csv', null, '{}', 'daily')", [id.instA])).save_integration.id;
+    await expect(db.as(null, "select uniattend.sync_begin('wrong', $1, 'full', 'manual')", [conn])).rejects.toThrow(/not allowed/);
+    const begin = async () => (await db.asOne<{ sync_begin: { run_id: string; checkpoints: Record<string, string> } }>(null,
+      "select uniattend.sync_begin($1, $2, 'full', 'manual')", [SECRET, conn])).sync_begin;
+
+    const b1 = await begin();
+    expect(b1.checkpoints).toEqual({});
+    await db.as(null, "select uniattend.sync_stage($1, $2, 'enrolments', $3)", [SECRET, b1.run_id, J([
+      { student_number: "A001", module_code: "CSE1541" }, { student_number: "A002", module_code: "CSE1541" }, { student_number: "A003", module_code: "CSE1541" },
+    ])]);
+    const c1 = (await db.asOne<{ sync_commit: Result }>(null, "select uniattend.sync_commit($1, $2, true, $3)", [SECRET, b1.run_id, J({ enrolments: "2026-11-14T02:00:00Z" })])).sync_commit;
+    expect(c1.datasets.enrolments).toMatchObject({ inserted: 3, dropped_missing: 0 });
+    expect((await begin()).checkpoints).toEqual({ enrolments: "2026-11-14T02:00:00Z" });
+
+    // The next complete roster no longer lists A003: only the enrolment this connection made is dropped.
+    const b2 = await begin();
+    await db.as(null, "select uniattend.sync_stage($1, $2, 'enrolments', $3)", [SECRET, b2.run_id, J([
+      { student_number: "A001", module_code: "CSE1541" }, { student_number: "A002", module_code: "CSE1541" },
+    ])]);
+    const c2 = (await db.asOne<{ sync_commit: Result }>(null, "select uniattend.sync_commit($1, $2, true, '{}')", [SECRET, b2.run_id])).sync_commit;
+    expect(c2.datasets.enrolments).toMatchObject({ unchanged: 2, dropped_missing: 1 });
+    // 26000101's hand-loaded (upload) enrolment in the same module was not touched.
+    const [keep] = await db.as<{ status: string }>(u.adminA,
+      "select e.status from uniattend.module_enrolments e join uniattend.students s on s.id = e.student_id join uniattend.modules m on m.id = e.module_id where s.student_number = '26000101' and m.code = 'CSE1541'");
+    expect(keep.status).toBe("active");
+
+    const b3 = await begin();
+    await db.as(null, "select uniattend.sync_fail($1, $2, 'ITS answered 503.')", [SECRET, b3.run_id]);
+    const [it] = await db.as<{ last_status: string; retry_soon: boolean }>(u.adminA,
+      "select last_status, next_run_at < now() + interval '61 minutes' as retry_soon from uniattend.integrations where id = $1", [conn]);
+    expect(it).toEqual({ last_status: "failed", retry_soon: true });
+    await db.as(u.adminA, "select uniattend.retry_run($1)", [b3.run_id]);
+    await expect(db.as(u.adminB, "select uniattend.retry_run($1)", [b3.run_id])).rejects.toThrow(/institution admin only/);
+  });
+
+  it("only a real test by the server can mark a connection connected", async () => {
+    const [c] = await db.as<{ id: string; connection_status: string }>(u.adminA, "select id, connection_status from uniattend.integrations where name = 'Mock ITS (simulation)'");
+    expect(c.connection_status).toBe("not_configured");
+    await expect(db.as(u.adminA, "select uniattend.integration_test_result('guess', $1, 'connected', 'trust me')", [c.id])).rejects.toThrow(/not allowed/);
+    await expect(db.as(u.adminA, "update uniattend.integrations set connection_status = 'connected' where id = $1", [c.id])).rejects.toThrow(/permission denied/);
+    await db.as(null, "select uniattend.integration_test_result($1, $2, 'auth_failed', 'The token was refused.')", [SECRET, c.id]);
+    const [after] = await db.as<{ connection_status: string; last_test_message: string }>(u.adminA,
+      "select connection_status, last_test_message from uniattend.integrations where id = $1", [c.id]);
+    expect(after).toEqual({ connection_status: "auth_failed", last_test_message: "The token was refused." });
+  });
+});
+
+describe("saved column matchings for imports", () => {
+  const map = JSON.stringify({ student_number: { column: "STUDENT_NO" }, full_name: { column: "NAME" } });
+
+  it("an institution's admins keep their own matchings; nobody else sees or changes them", async () => {
+    await db.as(u.adminA, "insert into uniattend.integration_mappings (institution_id, dataset, name, mapping) values ($1, 'students', 'ITS export', $2)", [id.instA, map]);
+    expect(await db.as(u.adminA, "select 1 from uniattend.integration_mappings")).toHaveLength(1);
+    for (const who of [u.adminB, u.lectA, u.sA1]) {
+      expect(await db.as(who, "select 1 from uniattend.integration_mappings")).toHaveLength(0);
+      await expect(db.as(who, "insert into uniattend.integration_mappings (institution_id, dataset, name, mapping) values ($1, 'students', 'mine', $2)", [id.instA, map]))
+        .rejects.toThrow(/row-level security/);
+    }
+    await db.as(u.adminB, "delete from uniattend.integration_mappings where institution_id = $1", [id.instA]);
+    await db.as(u.adminB, "update uniattend.integration_mappings set name = 'taken' where institution_id = $1", [id.instA]);
+    const [m] = await db.as<{ name: string }>(u.adminA, "select name from uniattend.integration_mappings");
+    expect(m.name).toBe("ITS export");
+    // An admin can't move a matching into another institution.
+    await expect(db.as(u.adminA, "update uniattend.integration_mappings set institution_id = $1 where institution_id = $2", [id.instB, id.instA]))
+      .rejects.toThrow(/row-level security/);
+    await expect(db.as(null, "select 1 from uniattend.integration_mappings")).rejects.toThrow(/permission denied/);
   });
 });

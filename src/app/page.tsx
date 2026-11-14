@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CompanyMark } from "@/components/company-mark";
 import { LinkButton } from "@/components/ui";
 
 const LAYERS = [
@@ -44,7 +45,12 @@ export default function Home() {
       <footer className="mx-auto max-w-6xl px-4 pb-10 text-sm text-muted">
         <Link href="/privacy" className="hover:underline">Privacy notice</Link>
         <span className="mx-2">·</span>
+        <Link href="/terms" className="hover:underline">Terms of service</Link>
+        <span className="mx-2">·</span>
+        <Link href="/paia" className="hover:underline">PAIA manual</Link>
+        <span className="mx-2">·</span>
         <LinkButton href="/login" variant="ghost" className="h-auto px-0">Sign in</LinkButton>
+        <CompanyMark className="mt-3" />
       </footer>
     </div>
   );

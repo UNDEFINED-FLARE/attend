@@ -9,6 +9,7 @@ export default async function SuperLayout({ children }: { children: React.ReactN
       { href: "/super", label: "Institutions", icon: "building" },
       { href: "/super/directory", label: "Directory", icon: "map" },
       { href: "/super/plans", label: "Plans & pricing", icon: "card" },
+      { href: "/super/requests", label: "Data requests", icon: "shield" },
       { href: "/notifications", label: "Alerts", icon: "bell" },
     ]}>{children}</Shell>
   );

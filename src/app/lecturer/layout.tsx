@@ -1,16 +1,12 @@
 import { Shell } from "@/components/shell";
 import { requireRole } from "@/lib/auth";
+import { menuFor } from "@/lib/nav-config";
 import { shellData } from "@/lib/shell-data";
 
 export default async function LecturerLayout({ children }: { children: React.ReactNode }) {
   const s = await requireRole("lecturer");
+  const shell = await shellData(s);
   return (
-    <Shell area="Lecturer" current={s.current} choices={s.choices} {...await shellData(s)} nav={[
-      { href: "/lecturer", label: "Home", icon: "dashboard" },
-      { href: "/lecturer/timetable", label: "Timetable", icon: "calendar" },
-      { href: "/lecturer/disputes", label: "Reviews", icon: "flag" },
-      { href: "/lecturer/early-warning", label: "Early warning", icon: "alert" },
-      { href: "/notifications", label: "Alerts", icon: "bell" },
-    ]}>{children}</Shell>
+    <Shell area="Lecturer" current={s.current} choices={s.choices} {...shell} nav={menuFor("lecturer", shell.theme)}>{children}</Shell>
   );
 }

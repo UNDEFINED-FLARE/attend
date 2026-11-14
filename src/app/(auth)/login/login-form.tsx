@@ -1,6 +1,7 @@
 "use client";
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
+import { Captcha } from "@/components/captcha";
 import { Button, Field, Input, Notice } from "@/components/ui";
 import { signIn, type SignInState } from "../actions";
 
@@ -16,6 +17,9 @@ export function LoginForm({ next }: { next: string }) {
   const form = useRef<HTMLFormElement>(null);
   const [show, setShow] = useState(false);
 
+  // Pages kept for offline use belong to whoever was signed in before: drop them here.
+  useEffect(() => { if (typeof caches !== "undefined") void caches.delete("ua-pages-v1").catch(() => {}); }, []);
+
   useEffect(() => {
     if (!state?.next) return;
     void (async () => {
@@ -23,6 +27,8 @@ export function LoginForm({ next }: { next: string }) {
         const PC = (window as unknown as { PasswordCredential?: PasswordCredentialCtor }).PasswordCredential;
         if (PC && form.current) await navigator.credentials.store(new PC(form.current));
       } catch { /* saving the password is optional */ }
+      // Signing in with the password counts as unlocking the app lock for this session.
+      try { sessionStorage.setItem("ua_unlocked", "1"); sessionStorage.removeItem("ua_hidden_at"); } catch { /* storage blocked */ }
       // A full load, so every page sees the new session cookies straight away.
       window.location.assign(state.next!);
     })();
@@ -46,6 +52,7 @@ export function LoginForm({ next }: { next: string }) {
         <input type="checkbox" name="remember" defaultChecked className="mt-0.5 size-4 accent-[var(--accent)]" />
         <span><span className="font-medium">Keep me signed in</span><span className="block text-xs text-muted">Untick on a shared or lab computer.</span></span>
       </label>
+      <Captcha />
       {state?.error && <Notice tone="bad">{state.error}</Notice>}
       <SubmitButton done={!!state?.next} />
     </form>

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ActionForm, Submit } from "@/components/form";
 import { Badge, Card, CardTitle, Input, PageHeader, Select, Stat, Table, Td, Textarea, when } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
-import { announce, changePlan, setStatus } from "./actions";
+import { announce, changePlan, recordPayment, setStatus } from "./actions";
 
 export const metadata = { title: "Platform" };
 
@@ -59,7 +59,7 @@ export default async function SuperHome() {
               <tr key={i.id}>
                 <Td><Link href={`/super/institutions/${i.id}`} className="font-semibold hover:text-accent">{i.name}</Link><div className="text-xs text-muted">/{i.slug} · <Link href={`/super/institutions/${i.id}`} className="text-accent">set up</Link></div></Td>
                 <Td><Badge status={i.status} /></Td>
-                <Td className="text-sm">{plan ? <>{plan.name} <Badge status={s?.status} /><div className="text-xs text-muted">to {when(s?.current_period_end)}</div></> : "—"}</Td>
+                <Td className="text-sm">{plan ? <>{plan.name} <Badge status={s?.status} /><div className="text-xs text-muted">to {when(s?.current_period_end)}</div>{s?.current_period_end && <DaysLeft end={s.current_period_end} />}</> : "—"}</Td>
                 <Td>
                   <ActionForm action={changePlan} submit="Apply" className="flex flex-wrap items-center gap-1 [&>[role]]:w-full [&>button]:h-8">
                     <input type="hidden" name="id" value={i.id} />
@@ -68,6 +68,15 @@ export default async function SuperHome() {
                       {["trialing", "active", "past_due", "suspended", "cancelled"].map((x) => <option key={x}>{x}</option>)}</Select>
                     <Input name="until" type="date" defaultValue={s?.current_period_end?.slice(0, 10) ?? inYear} className="h-8 w-36" />
                   </ActionForm>
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-xs font-medium text-accent">Record a payment</summary>
+                    <ActionForm action={recordPayment} submit="Record" pending="Recording…" className="mt-2 flex flex-wrap items-center gap-1 [&>[role]]:w-full [&>button]:h-8">
+                      <input type="hidden" name="id" value={i.id} />
+                      <Input name="amount" type="number" min={0} step="0.01" placeholder="Amount (R)" required className="h-8 w-28" />
+                      <Input name="reference" placeholder="Invoice / EFT ref" required maxLength={80} className="h-8 w-36" />
+                      <Select name="months" defaultValue="12" className="h-8 w-28">{[1, 3, 6, 12, 24].map((m) => <option key={m} value={m}>{m} month{m === 1 ? "" : "s"}</option>)}</Select>
+                    </ActionForm>
+                  </details>
                 </Td>
                 <Td>
                   {i.status === "active" && <form action={setStatus}><input type="hidden" name="id" value={i.id} /><input type="hidden" name="status" value="suspended" /><Submit label="Suspend" variant="secondary" /></form>}
@@ -89,4 +98,11 @@ export default async function SuperHome() {
       </Card>
     </>
   );
+}
+
+/** Days until a subscription ends, in red when it's close. */
+function DaysLeft({ end }: { end: string }) {
+  const d = Math.floor((Date.parse(end) - Date.now()) / 86400_000);
+  if (d > 30) return null;
+  return <div className={`text-xs font-semibold ${d < 0 ? "text-bad" : d <= 14 ? "text-warn" : "text-muted"}`}>{d < 0 ? `ended ${-d} day${d === -1 ? "" : "s"} ago` : `${d} day${d === 1 ? "" : "s"} left`}</div>;
 }

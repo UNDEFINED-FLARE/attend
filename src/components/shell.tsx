@@ -2,10 +2,12 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { signOut, switchInstitution } from "@/app/actions";
 import { AppProvider, AppTabBar } from "@/components/app-chrome";
+import { AppLock } from "@/components/app-lock";
+import { OfflineSync } from "@/components/offline-sync";
 import { Icon } from "@/components/icons";
 import { SideNav, TabBar, type NavItem } from "@/components/nav";
 import type { RoleRow } from "@/lib/auth";
-import { DEFAULT_THEME, inkOn, themeStyle, type Theme } from "@/lib/theme";
+import { DEFAULT_THEME, themeStyle, type Theme } from "@/lib/theme";
 
 export type { NavItem };
 
@@ -33,7 +35,7 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
   current: RoleRow;
   choices: RoleRow[];
   area: string;
-  user: { email?: string | null; name?: string | null };
+  user: { id?: string; email?: string | null; name?: string | null };
   unread?: number;
   theme?: Theme;
   /** Phone-app layout (students): page titles carry the avatar, and a floating tab bar raises this item. */
@@ -46,18 +48,22 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
 
   // Sidebar and header styles chosen on the Design page.
   const side = theme.sidebar.style;
-  const sideBg = side === "dark" ? "#0f172a" : side === "brand" ? theme.colors.primary : theme.colors.surface;
+  // Colours come from CSS variables so a dark or "follow the device" design applies here too.
+  const sideBg = side === "dark" ? "#16171a" : side === "brand" ? "var(--brand)" : "var(--surface)";
   const sideDark = side !== "light";
+  const sideInk = side === "dark" ? "#ffffff" : side === "brand" ? "var(--brand-ink)" : undefined;
   const head = theme.header.style;
-  const headBg = head === "solid" ? theme.colors.primary
-    : head === "gradient" ? `linear-gradient(90deg, ${theme.colors.primary}, ${theme.header.gradientTo})` : undefined;
-  const headInk = head === "light" ? undefined : inkOn(theme.colors.primary);
+  const headBg = head === "solid" ? "var(--brand)"
+    : head === "gradient" ? `linear-gradient(90deg, var(--brand), ${theme.header.gradientTo})` : undefined;
+  const headInk = head === "light" ? undefined : "var(--brand-ink)";
 
   return (
-    <div style={themeStyle(theme)} className="min-h-dvh font-sans">
+    <>
+    {user.id && <div style={themeStyle(theme)} className="font-sans"><AppLock userId={user.id} name={who || "you"} institution={theme.header.title || instName} logo={theme.header.logoUrl || null} /><OfflineSync userId={user.id} /></div>}
+    <div data-lockable style={themeStyle(theme)} className="min-h-dvh font-sans">
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 flex-col print:!hidden border-r border-line px-4 py-5 lg:flex"
-        style={{ background: sideBg, color: sideDark ? inkOn(sideBg) : undefined, ["--muted" as string]: sideDark ? "rgb(255 255 255 / 0.7)" : undefined }}>
+        style={{ background: sideBg, color: sideInk, ["--muted" as string]: sideDark ? "color-mix(in srgb, currentColor 70%, transparent)" : undefined }}>
         <Logo name={instName} theme={theme} onDark={sideDark} />
         <p className="mt-8 mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted">{area}</p>
         <SideNav items={nav} dark={sideDark} />
@@ -78,7 +84,7 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
       <div className="flex min-h-dvh flex-col lg:pl-64 print:!pl-0">
         {/* Top bar */}
         <header className={`sticky top-0 z-10 border-b print:hidden ${app ? "hidden lg:block" : ""} ${head === "light" ? "border-line bg-surface/90 backdrop-blur" : "border-transparent"}`}
-          style={{ background: headBg, color: headInk, ["--muted" as string]: headInk ? "rgb(255 255 255 / 0.75)" : undefined }}>
+          style={{ background: headBg, color: headInk, ["--muted" as string]: headInk ? "color-mix(in srgb, currentColor 75%, transparent)" : undefined }}>
           <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 lg:px-8">
             <div className="lg:hidden"><Logo name={instName} theme={theme} onDark={!!headInk} /></div>
             {theme.header.showDate && (
@@ -96,6 +102,9 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
                   <button className="h-9 rounded-xl border border-line px-3 text-sm hover:opacity-80">Switch</button>
                 </form>
               )}
+              <Link href="/settings" className="grid size-10 place-items-center rounded-xl hover:bg-black/5" aria-label="Security and app lock">
+                <Icon name="lock" />
+              </Link>
               <Link href="/notifications" className="relative grid size-10 place-items-center rounded-xl hover:bg-black/5" aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}>
                 <Icon name="bell" />
                 {unread > 0 && <span className="absolute right-1.5 top-1.5 grid min-w-4 place-items-center rounded-full bg-bad px-1 text-[10px] font-semibold text-white">{unread > 9 ? "9+" : unread}</span>}
@@ -135,5 +144,6 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
 
       {app ? <AppTabBar items={nav} center={app.center} /> : <TabBar items={nav} />}
     </div>
+    </>
   );
 }

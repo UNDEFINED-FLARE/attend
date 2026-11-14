@@ -68,6 +68,7 @@ function AvatarMenu({ me }: { me: Me }) {
           <nav className="p-2 text-sm">
             <Link href="/notifications" className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-bg"><Icon name="bell" size={18} />Notifications</Link>
             <Link href="/student/history" className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-bg"><Icon name="flag" size={18} />Disputes</Link>
+            <Link href="/settings" className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-bg"><Icon name="lock" size={18} />Security &amp; app lock</Link>
             <Link href="/privacy" className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-bg"><Icon name="shield" size={18} />Privacy</Link>
             <form action={signOut}>
               <button className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-bad hover:bg-bad/5"><Icon name="logout" size={18} />Sign out</button>

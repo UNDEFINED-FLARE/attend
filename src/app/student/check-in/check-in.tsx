@@ -8,6 +8,7 @@ import { ArrivalTimeline, LateChip } from "@/components/late";
 import { VenueMap } from "@/components/map/venue-map";
 import { distanceM, insidePolygon, type LatLng } from "@/lib/campuses";
 import { collectGps, deviceHash, parseScan, type GpsSample } from "@/lib/evidence";
+import { enqueue, isNetworkError } from "@/lib/offline-queue";
 import { checkIn, type Verdict } from "../actions";
 
 type Phase = "idle" | "scanning" | "locating" | "sending" | "done";
@@ -16,10 +17,11 @@ const HEADLINE: Record<string, [string, string]> = {
   accepted: ["You're checked in", "bg-ok"],
   review: ["Sent for review", "bg-warn"],
   duplicate: ["Already recorded", "bg-info"],
+  queued: ["Saved on this phone", "bg-info"],
   rejected: ["Not recorded", "bg-bad"],
 };
 
-export function CheckIn({ initialSession, initialToken }: { initialSession: string | null; initialToken: string | null }) {
+export function CheckIn({ userId, initialSession, initialToken, liveClass = true }: { userId: string; initialSession: string | null; initialToken: string | null; liveClass?: boolean }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [code, setCode] = useState("");
   const [result, setResult] = useState<Verdict | null>(null);
@@ -32,21 +34,45 @@ export function CheckIn({ initialSession, initialToken }: { initialSession: stri
     setError(null);
     setResult(null);
     setPhase("locating");
+    // The moment of the scan: kept if this has to wait for signal.
+    const captured_at = new Date().toISOString();
     // Location and device hash in parallel; the token is only ~20–40 s fresh.
     const [samples, device] = await Promise.all([collectGps(), deviceHash()]);
     setFix(samples ? meanFix(samples) : null);
     setPhase("sending");
-    const r = await checkIn({ ...scan, gps: samples ? { samples } : null, device });
+    const evidence = { ...scan, gps: samples ? { samples } : null, device };
+    // No signal: keep the evidence on the phone; it is sent for review when back online.
+    const save = () => {
+      enqueue({ userId, kind: "checkin", payload: { ...evidence, captured_at } });
+      const at = new Date(captured_at).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" });
+      setResult({ outcome: "queued", status: null, score: null, reasons: [
+        `No signal, so your check-in was saved on this phone at ${at}${samples ? ", with your location" : ""}.`,
+        "It will be sent automatically as soon as you're back online. Keep UniAttend installed and sign in as yourself.",
+        "Because it was made offline, your lecturer confirms it. It keeps the time you scanned, not the time it is sent.",
+      ] });
+      setPhase("done");
+    };
+    if (typeof navigator !== "undefined" && !navigator.onLine) { save(); return; }
+    let r: Awaited<ReturnType<typeof checkIn>>;
+    try { r = await checkIn(evidence); }
+    catch (e) {
+      if (isNetworkError(e)) { save(); return; }
+      setError("Something went wrong. Try again."); setPhase("idle"); return;
+    }
     if ("error" in r) { setError(r.error); setPhase("idle"); return; }
     setResult(r);
     setPhase("done");
-  }, []);
+  }, [userId]);
 
   // Opened from the QR's own link (phone camera app): check in straight away.
+  // (Offline, the page is the saved copy without them, so read them from the address too.)
   useEffect(() => {
-    if (!started.current && initialSession && initialToken) {
+    if (started.current) return;
+    const q = new URLSearchParams(window.location.search);
+    const session = initialSession ?? q.get("s"), token = initialToken ?? q.get("t");
+    if (session && token && /^[0-9a-f-]{36}$/i.test(session)) {
       started.current = true;
-      void submit({ session: initialSession, token: initialToken, code: null });
+      void submit({ session, token, code: null });
     }
   }, [initialSession, initialToken, submit]);
 
@@ -75,7 +101,7 @@ export function CheckIn({ initialSession, initialToken }: { initialSession: stri
   const busy = phase === "locating" || phase === "sending";
   const late = result?.status === "late_pending";
   const router = useRouter();
-  const liveUrl = result?.session_id && result.outcome !== "rejected" ? `/student/class/${result.session_id}` : null;
+  const liveUrl = liveClass && result?.session_id && result.outcome !== "rejected" ? `/student/class/${result.session_id}` : null;
   // After a successful check-in, go to the live class screen.
   useEffect(() => {
     if (!liveUrl || result?.outcome !== "accepted") return;
@@ -142,6 +168,7 @@ export function CheckIn({ initialSession, initialToken }: { initialSession: stri
               )}
               {result.status && !late && <p>Recorded as <b>{result.status.replace("_", " ")}</b>{result.minutes_late != null && <> <LateChip minutes={result.minutes_late} /></>}{result.score != null && <> · confidence {result.score}/100</>}</p>}
               {result.outcome === "review" && <p className="text-muted">Your lecturer will confirm this. It does not count against you while it is pending.</p>}
+              {result.outcome === "queued" && <p className="flex items-center gap-2 font-semibold"><Icon name="clock" size={18} />Waiting for signal</p>}
               {result.venue && (result.venue.polygon || result.venue.lat != null) && (
                 <div className="overflow-hidden rounded-2xl"><VenueMap venue={result.venue} height={200} me={fix ? { ...fix, inside: isInside(fix, result.venue) } : null} /></div>
               )}

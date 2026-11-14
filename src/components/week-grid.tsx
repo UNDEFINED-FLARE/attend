@@ -6,8 +6,8 @@ export type Slot = {
 };
 
 export const DAYS = ["", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const COLORS = ["#2f6fed", "#16a34a", "#d97706", "#7c3aed", "#db2777", "#0891b2", "#dc2626", "#4f46e5"];
-export const moduleColor = (code: string) => COLORS[[...code].reduce((a, c) => a + c.charCodeAt(0), 0) % COLORS.length];
+import { moduleShade } from "@/lib/palette";
+export const moduleColor = moduleShade;
 export const hhmm = (t: string) => t.slice(0, 5);
 
 /** Today as ISO weekday (1 = Monday) in South African time. */

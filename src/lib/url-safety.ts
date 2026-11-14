@@ -19,17 +19,17 @@ export function privateIp(ip: string): boolean {
 
 
 /** Throws unless the URL is https on a public host. */
-export async function assertPublicHttps(raw: string): Promise<URL> {
+export async function assertPublicHttps(raw: string, what = "Timetable links"): Promise<URL> {
   let u: URL;
   try { u = new URL(raw); } catch { throw new Error("That is not a valid web address."); }
-  if (u.protocol !== "https:") throw new Error("Timetable links must start with https://");
-  if (u.username || u.password) throw new Error("Timetable links can't contain a username or password.");
+  if (u.protocol !== "https:") throw new Error(`${what} must start with https://`);
+  if (u.username || u.password) throw new Error(`${what} can't contain a username or password.`);
   const host = u.hostname.replace(/^\[|\]$/g, "");
   if (isIP(host) || host === "localhost" || /\.(local|internal|localhost|lan|home)$/i.test(host) || !host.includes(".")) {
-    throw new Error("Timetable links must use a public web address.");
+    throw new Error(`${what} must use a public web address.`);
   }
   const addrs = await lookup(host, { all: true }).catch(() => []);
   if (!addrs.length) throw new Error(`Couldn't find ${host}.`);
-  if (addrs.some((a) => privateIp(a.address))) throw new Error("Timetable links must use a public web address.");
+  if (addrs.some((a) => privateIp(a.address))) throw new Error(`${what} must use a public web address.`);
   return u;
 }

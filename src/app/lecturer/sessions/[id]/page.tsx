@@ -1,3 +1,4 @@
+import { loadTheme } from "@/lib/shell-data";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Submit } from "@/components/form";
@@ -16,7 +17,8 @@ type Rec = { id: string; student_id: string; status: string; custom_status_id?: 
 
 export default async function SessionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { supabase } = await requireRole("lecturer");
+  const { supabase, institutionId, user } = await requireRole("lecturer");
+  const features = (await loadTheme(supabase, institutionId)).features;
   // allow_printed_qr needs database update 0016; older databases still load.
   const sessionSelect = (printed: boolean) => supabase.from("class_sessions")
     .select(`id, title, status, join_code, opens_at, closes_at, late_after, require_gps, module_id, modules(code, title), venues(name, lat, lng, radius_m, polygon)${printed ? ", allow_printed_qr" : ""}`)
@@ -75,7 +77,8 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
             ? <Card><p className="text-sm font-semibold text-warn">Check-in is paused.</p><p className="text-xs text-muted">Students can&apos;t check in until you resume it below.</p></Card>
             : <Card><Badge status={s.status} /> <span className="ml-2 text-sm text-muted">This session is {s.status}.</span></Card>}
           {(open || s.status === "scheduled") && (
-            <SessionControls session={id} status={s.status} requireGps={s.require_gps} printed={!!s.allow_printed_qr} closesAt={s.closes_at} lateAfter={s.late_after} />
+            <SessionControls session={id} status={s.status} requireGps={s.require_gps} printed={!!s.allow_printed_qr} closesAt={s.closes_at} lateAfter={s.late_after}
+              printedFeature={features.printedQr} scanFeature={features.cardScanning} />
           )}
           {venue && (venue.polygon || venue.lat != null) && <VenueMap venue={venue} height={220} />}
           <div className="grid grid-cols-2 gap-3">
@@ -88,7 +91,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
 
         <div className="min-w-0 space-y-6">
         <LateArrivals session={id} rows={lateRows} />
-        <Register session={id} open={open} statuses={(statusRows ?? []) as CustomStatus[]}
+        <Register session={id} open={open} userId={user.id} label={`${mod.code} · ${s.title}`} statuses={(statusRows ?? []) as CustomStatus[]}
           rows={roster.map((st): RegisterRow => {
             const r = byStudent.get(st.id);
             return { student_id: st.id, student_number: st.student_number, full_name: st.full_name, record_id: r?.id ?? null,

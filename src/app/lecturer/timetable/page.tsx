@@ -1,3 +1,4 @@
+import { loadTheme } from "@/lib/shell-data";
 import Link from "next/link";
 import { TimetableActions } from "@/components/timetable-actions";
 import { Card, CardTitle, PageHeader } from "@/components/ui";
@@ -12,7 +13,8 @@ export const metadata = { title: "Timetable" };
 export default async function LecturerTimetable({ searchParams }: { searchParams: Promise<{ all?: string }> }) {
   const all = (await searchParams).all === "1";
   const { supabase, institutionId, user } = await requireRole("lecturer");
-  const every = await teachingTimetable(supabase, institutionId, user.id);
+  const [every, theme] = await Promise.all([teachingTimetable(supabase, institutionId, user.id), loadTheme(supabase, institutionId)]);
+  const features = theme.features;
   const slots = all ? every : every.filter((s) => s.mine);
   const others = every.length - every.filter((s) => s.mine).length;
   const day = todayWeekday(), now = nowHHMM();
@@ -23,7 +25,7 @@ export default async function LecturerTimetable({ searchParams }: { searchParams
     <div className="space-y-6">
       <PageHeader title="My timetable"
         subtitle={`${slots.length} classes a week · ${hours.toFixed(1).replace(".0", "")} teaching hours${all ? " · including colleagues" : ""}`} />
-      <TimetableActions ics={`/lecturer/timetable/calendar.ics${all ? "?all=1" : ""}`}
+      <TimetableActions ics={features.calendarDownload ? `/lecturer/timetable/calendar.ics${all ? "?all=1" : ""}` : null}
         hint="Adds each class as a weekly event with a 15-minute reminder. Download it again when the timetable changes." />
       {others > 0 && (
         <p className="text-sm print:hidden">

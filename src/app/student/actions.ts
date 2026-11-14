@@ -4,7 +4,8 @@ import { z } from "zod";
 import { supabaseServer } from "@/lib/supabase/server";
 
 export type Verdict = {
-  outcome: "accepted" | "review" | "rejected" | "duplicate";
+  /** "queued": saved on the phone without signal, to be sent later (client only). */
+  outcome: "accepted" | "review" | "rejected" | "duplicate" | "queued";
   status: string | null;
   score: number | null;
   reasons: string[];
@@ -44,7 +45,29 @@ export async function checkIn(raw: z.input<typeof Input>): Promise<Verdict | { e
   return { ...(data as Verdict), venue: where.venue, session_id: where.id };
 }
 
-export type VenueShape = { name: string; lat: number | null; lng: number | null; radius_m: number | null; polygon: [number, number][] | null };
+/**
+ * A check-in saved on the phone without signal, sent now. Never accepted by itself:
+ * the database records it for the lecturer to review, with the original time.
+ * `retry` is false when the answer is final (sent, already recorded, or refused).
+ */
+export async function checkInOffline(raw: unknown): Promise<{ ok?: Verdict; error?: string; retry: boolean }> {
+  const p = Input.extend({ captured_at: z.string().datetime({ offset: true }) }).safeParse(raw);
+  if (!p.success) return { error: "This saved check-in could not be read.", retry: false };
+  const supabase = await supabaseServer();
+  const { data, error } = await supabase.rpc("check_in_offline", {
+    p_session: p.data.session, p_code: p.data.code, p_token: p.data.token,
+    p_gps: p.data.gps, p_device_hash: p.data.device, p_captured_at: p.data.captured_at,
+  });
+  if (error) {
+    // Missing function (update not run yet) or rate limit: keep it and try later.
+    const later = error.code === "PGRST202" || /Too many attempts|unavailable/i.test(error.message);
+    return { error: later && error.code === "PGRST202" ? "Waiting for a server update before it can be sent." : error.message, retry: later };
+  }
+  revalidatePath("/student");
+  return { ok: data as Verdict, retry: false };
+}
+
+export type VenueShape ={ name: string; lat: number | null; lng: number | null; radius_m: number | null; polygon: [number, number][] | null };
 
 // For the result map only. RLS lets an enrolled student read their session and venue.
 async function venueFor(supabase: Awaited<ReturnType<typeof supabaseServer>>, session: string | null, code: string | null) {

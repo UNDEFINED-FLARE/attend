@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 222 222" role="img" aria-label="Webbex Solutions">
+  <g fill="#101a2c">
+    <rect x="0" y="0" width="96" height="96" rx="22"/>
+    <rect x="0" y="126" width="96" height="60" rx="22"/>
+    <rect x="126" y="0" width="96" height="60" rx="22"/>
+    <rect x="126" y="91" width="96" height="131" rx="22"/>
+  </g>
+</svg>
