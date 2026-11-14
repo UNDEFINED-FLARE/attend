@@ -30,7 +30,7 @@ export default function Signup() {
         </label>
         <Captcha />
       </ActionForm>
-      <p className="text-sm">Already registered? <Link className="text-info hover:underline" href="/login">Sign in</Link></p>
+      <p className="text-sm">Already registered? <Link className="text-info underline underline-offset-2 hover:decoration-2" href="/login">Sign in</Link></p>
     </div>
   );
 }

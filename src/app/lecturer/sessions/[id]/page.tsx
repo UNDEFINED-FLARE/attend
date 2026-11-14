@@ -60,7 +60,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
   return (
     <>
       <RealtimeRefresh session={id} />
-      <Link href={`/lecturer/modules/${s.module_id}`} className="text-sm text-info hover:underline">← {mod.code}</Link>
+      <Link href={`/lecturer/modules/${s.module_id}`} className="text-sm text-info underline underline-offset-2 hover:decoration-2">← {mod.code}</Link>
       <PageHeader title={`${mod.code} · ${s.title}`}
         subtitle={<>{venue?.name ?? "No venue"} · opened {when(s.opens_at)} · late after {when(s.late_after)}
           {!s.require_gps && " · location check off"}</>}

@@ -60,7 +60,7 @@ export default async function Disputes() {
                 <p className="text-muted">{p.class_sessions.modules.code} · {when(p.class_sessions.opens_at)}</p>
                 <p className="text-xs text-muted">{(p.explanation ?? []).join(" ")}</p>
               </div>
-              <Link href={`/lecturer/sessions/${p.session_id}`} className="text-info hover:underline">Review in register →</Link>
+              <Link href={`/lecturer/sessions/${p.session_id}`} className="text-info underline underline-offset-2 hover:decoration-2">Review in register →</Link>
             </li>
           ))}
         </ul>

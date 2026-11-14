@@ -37,7 +37,7 @@ export function AppTitle({ title, eyebrow, sub, action }: { title: string; eyebr
 function Bell({ unread }: { unread: number }) {
   return (
     <Link href="/notifications" aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}
-      className="relative grid size-11 place-items-center rounded-2xl bg-surface text-ink shadow-card">
+      className="relative grid size-11 place-items-center rounded-full bg-surface text-ink shadow-card">
       <Icon name="bell" size={20} />
       {unread > 0 && <span className="absolute -right-0.5 -top-0.5 grid min-w-5 place-items-center rounded-full border-2 border-bg bg-bad px-1 text-[10px] font-bold text-white">{unread > 9 ? "9+" : unread}</span>}
     </Link>
@@ -50,13 +50,16 @@ function AvatarMenu({ me }: { me: Me }) {
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    // Escape closes the menu too, as keyboard and screen-reader users expect.
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("click", close);
-    return () => document.removeEventListener("click", close);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("click", close); document.removeEventListener("keydown", esc); };
   }, [open]);
   return (
     <div ref={ref} className="relative">
-      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-label="Account"
-        className="grid size-11 place-items-center rounded-full bg-gradient-to-br from-accent to-brand text-sm font-bold text-white shadow-card ring-[3px] ring-surface">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-haspopup="true" aria-label="Account"
+        className="grid size-11 place-items-center rounded-full bg-brand text-sm font-semibold text-brand-ink">
         {me.initials}
       </button>
       {open && (
@@ -80,31 +83,27 @@ function AvatarMenu({ me }: { me: Me }) {
   );
 }
 
-/** Floating bottom bar; the scanner sits raised in the middle. */
-export function AppTabBar({ items, center }: { items: NavItem[]; center: string }) {
+/**
+ * Bottom navigation bar the way Android draws it (Material 3): full width, every destination
+ * labelled (an icon on its own is a guess), a soft pill behind the current one. Check in sits
+ * with the other tabs; the home screen's "Attendance is open" card is the main way in.
+ */
+export function AppTabBar({ items }: { items: NavItem[]; center?: string }) {
   const path = usePathname();
   const active = items.filter((i) => path === i.href || path.startsWith(i.href + "/")).sort((a, b) => b.href.length - a.href.length)[0]?.href;
   return (
-    <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 px-4 print:hidden pb-[max(12px,env(safe-area-inset-bottom))] lg:hidden">
-      <ul className="mx-auto flex max-w-md items-center justify-around rounded-[28px] bg-surface px-2 py-2 shadow-[0_10px_40px_rgb(15_27_45/0.14)]">
+    <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface print:hidden pb-[env(safe-area-inset-bottom)] lg:hidden">
+      <ul className="mx-auto flex max-w-xl">
         {items.map((i) => {
           const on = i.href === active;
-          if (i.href === center) {
-            return (
-              <li key={i.href} className="-mt-9">
-                <Link href={i.href} aria-label={i.label} aria-current={on ? "page" : undefined}
-                  className="grid size-16 place-items-center rounded-full bg-accent text-white shadow-[0_10px_24px_color-mix(in_srgb,var(--accent)_45%,transparent)] ring-[6px] ring-bg transition active:scale-95">
-                  <Icon name="scan" size={28} strokeWidth={2.2} />
-                </Link>
-              </li>
-            );
-          }
           return (
-            <li key={i.href}>
-              <Link href={i.href} aria-current={on ? "page" : undefined} aria-label={i.label}
-                className={`flex flex-col items-center gap-1 rounded-2xl px-3 py-1.5 text-[10px] font-semibold transition ${on ? "text-accent" : "text-muted"}`}>
-                <Icon name={i.icon} size={22} strokeWidth={on ? 2.3 : 1.8} />
-                <span className={on ? "" : "opacity-0"}>{i.label}</span>
+            <li key={i.href} className="min-w-0 flex-1">
+              <Link href={i.href} aria-current={on ? "page" : undefined}
+                className="flex flex-col items-center gap-1 px-1 pt-2.5 pb-3 text-xs">
+                <span className={`grid h-8 w-14 place-items-center rounded-full transition-colors ${on ? "bg-brand/12 text-brand" : "text-muted"}`}>
+                  <Icon name={i.icon} size={22} strokeWidth={on ? 2.2 : 1.8} />
+                </span>
+                <span className={`max-w-full truncate ${on ? "font-semibold text-ink" : "font-medium text-muted"}`}>{i.label}</span>
               </Link>
             </li>
           );

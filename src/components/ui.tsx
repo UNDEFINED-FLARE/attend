@@ -10,7 +10,8 @@ const VARIANTS: Record<Variant, string> = {
   danger: "bg-bad text-white hover:opacity-90",
   ghost: "text-ink hover:bg-bg",
 };
-const BTN = "inline-flex items-center justify-center gap-2 rounded-lg px-4 h-10 text-sm font-medium transition disabled:opacity-50 disabled:pointer-events-none";
+// 44 px tall: a comfortable thumb target on a phone (Apple and Google both ask for 44-48).
+const BTN = "inline-flex items-center justify-center gap-2 rounded-lg px-4 h-11 text-sm font-medium transition disabled:opacity-50 disabled:pointer-events-none";
 
 export function Button({ variant = "primary", className, ...p }: ComponentProps<"button"> & { variant?: Variant }) {
   return <button className={cx(BTN, VARIANTS[variant], className)} {...p} />;
@@ -43,7 +44,8 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
   );
 }
 
-const INPUT = "w-full rounded-lg border border-line bg-surface px-3 h-10 text-sm placeholder:text-muted/70 focus:border-info focus:outline-none";
+// Border over 3:1 against the surface (--line-strong), so an empty field can be seen.
+const INPUT = "w-full rounded-lg border border-line-strong bg-surface px-3 h-11 text-sm placeholder:text-muted focus:border-info focus:outline-none focus:ring-2 focus:ring-info/30";
 export function Input({ className, ...p }: ComponentProps<"input">) {
   return <input className={cx(INPUT, className)} {...p} />;
 }
@@ -73,7 +75,7 @@ const STATUS: Record<string, [string, string]> = {
 };
 export function Badge({ status, children }: { status?: string; children?: ReactNode }) {
   const [label, tone] = STATUS[status ?? ""] ?? [status ?? "", "bg-bg text-muted"];
-  return <span className={cx("inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium", tone)}>{children ?? label}</span>;
+  return <span className={cx("inline-flex whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium", tone)}>{children ?? label}</span>;
 }
 
 export function Stat({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {

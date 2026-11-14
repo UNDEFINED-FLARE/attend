@@ -39,7 +39,7 @@ export default async function ImportRun({ params }: { params: Promise<{ run: str
 
   return (
     <>
-      <Link href="/admin/integrations/import" className="text-sm text-info hover:underline">← Import data</Link>
+      <Link href="/admin/integrations/import" className="text-sm text-info underline underline-offset-2 hover:decoration-2">← Import data</Link>
       <PageHeader title={waiting ? "Check before importing" : "Import report"} subtitle={r.label ?? undefined} action={<Badge status={tone}>{label}</Badge>} />
 
       <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">

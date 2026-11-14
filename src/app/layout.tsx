@@ -10,7 +10,11 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
 };
 
-export const viewport: Viewport = { themeColor: "#2d2f33", width: "device-width", initialScale: 1 };
+// The phone status bar follows the device: Graphite in light mode, its dark background at night.
+export const viewport: Viewport = {
+  themeColor: [{ media: "(prefers-color-scheme: light)", color: "#2d2f33" }, { media: "(prefers-color-scheme: dark)", color: "#17181a" }],
+  width: "device-width", initialScale: 1,
+};
 
 // Runs before the page draws: if this device's app lock is due, hide the signed-in
 // pages (data-lockable) until <AppLock> asks for the fingerprint/face. Same rules as

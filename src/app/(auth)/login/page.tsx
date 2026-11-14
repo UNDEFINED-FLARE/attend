@@ -13,8 +13,8 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
       </div>
       <LoginForm next={next ?? "/dashboard"} />
       <div className="flex justify-between text-sm">
-        <Link className="text-info hover:underline" href="/signup">Create an account</Link>
-        <Link className="text-info hover:underline" href="/forgot-password">Forgot password?</Link>
+        <Link className="text-info underline underline-offset-2 hover:decoration-2" href="/signup">Create an account</Link>
+        <Link className="text-info underline underline-offset-2 hover:decoration-2" href="/forgot-password">Forgot password?</Link>
       </div>
     </div>
   );

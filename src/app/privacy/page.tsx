@@ -12,7 +12,7 @@ const H2 = ({ id, children }: { id?: string; children: React.ReactNode }) => <h2
 export default function Privacy() {
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 text-[15px] leading-relaxed">
-      <Link href="/" className="text-sm text-info hover:underline">← UniAttend</Link>
+      <Link href="/" className="text-sm text-info underline underline-offset-2 hover:decoration-2">← UniAttend</Link>
       <h1 className="mt-4 text-3xl font-semibold">Privacy notice</h1>
       <p className="mt-2 text-muted">Last updated {LEGAL.privacyUpdated}. Draft for review by each institution&apos;s Information Officer.</p>
 

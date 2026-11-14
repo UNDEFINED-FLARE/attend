@@ -60,11 +60,14 @@ export type Theme = z.infer<typeof ThemeSchema>;
 
 export const DEFAULT_THEME: Theme = {
   // Minimal graphite: light grey surfaces, dark grey ink and buttons, muted status colours.
-  colors: { primary: "#2d2f33", accent: "#45484d", background: "#e7e8ea", surface: "#f5f5f6", text: "#1d1e20", muted: "#6b6e74",
-            success: "#3d7a55", warning: "#9a6a1f", danger: "#a8443d" },
+  // Muted, success, warning and danger (and the dark accent) are a shade deeper than first
+  // drawn so small text passes WCAG AA (4.5:1) on the surface, the background and the
+  // 10% tints that badges use; the look is unchanged.
+  colors: { primary: "#2d2f33", accent: "#45484d", background: "#e7e8ea", surface: "#f5f5f6", text: "#1d1e20", muted: "#5d6065",
+            success: "#346949", warning: "#7e5719", danger: "#9e4039" },
   appearance: {
     mode: "light",
-    dark: { primary: "#d7dade", accent: "#7a808a", background: "#17181a", surface: "#222427", text: "#e6e7e9", muted: "#9a9ea5",
+    dark: { primary: "#d7dade", accent: "#8f96a1", background: "#17181a", surface: "#222427", text: "#e6e7e9", muted: "#9a9ea5",
             success: "#6fbf8b", warning: "#d9a94e", danger: "#e07a72" },
   },
   login: { headline: "Attendance you can stand behind.", message: "Sign in with your institution account to check in, see your timetable and follow your attendance." },
@@ -120,6 +123,8 @@ function paletteVars(c: Palette, prefix: "--" | "--d-"): Record<string, string> 
     v("brand", c.primary), v("brand-ink", inkOn(c.primary)), v("accent", c.accent), v("bg", c.background), v("surface", c.surface),
     v("ink", c.text), v("muted", c.muted), v("ok", c.success), v("warn", c.warning), v("bad", c.danger), v("info", c.accent),
     v("line", `color-mix(in srgb, ${c.text} ${isDark(c) ? 16 : 13}%, ${c.background})`),
+    // Form field borders: over 3:1 against the surface (WCAG 1.4.11), so empty fields can be seen.
+    v("line-strong", `color-mix(in srgb, ${c.text} 55%, ${c.surface})`),
     v("hi", isDark(c) ? "rgb(255 255 255 / 0.04)" : "rgb(255 255 255 / 0.7)"),
   ]);
 }

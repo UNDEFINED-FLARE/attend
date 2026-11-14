@@ -22,7 +22,7 @@ export default async function DirectoryEntry({ params }: { params: Promise<{ id:
 
   return (
     <>
-      <Link href="/super/directory" className="text-sm text-accent hover:underline">← Directory</Link>
+      <Link href="/super/directory" className="text-sm text-accent underline underline-offset-2 hover:decoration-2">← Directory</Link>
       <PageHeader title={isNew ? "Add an institution" : e.name} subtitle="Campus locations and the timetable link used when this institution is set up." />
       <ActionForm action={saveDirectoryEntry} submit={isNew ? "Add to directory" : "Save"} className="space-y-6">
         <input type="hidden" name="id" value={e.id ?? ""} />

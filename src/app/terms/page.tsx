@@ -12,7 +12,7 @@ const UPDATED = "13 November 2026";
 export default function Terms() {
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 text-[15px] leading-relaxed">
-      <Link href="/" className="text-sm text-info hover:underline">← UniAttend</Link>
+      <Link href="/" className="text-sm text-info underline underline-offset-2 hover:decoration-2">← UniAttend</Link>
       <h1 className="mt-4 text-3xl font-semibold">Terms of service</h1>
       <p className="mt-2 text-muted">Last updated {UPDATED}. Draft for legal review.</p>
 

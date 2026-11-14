@@ -14,7 +14,7 @@ export default function Forgot() {
         <Field label="Email"><Input name="email" type="email" autoComplete="email" required /></Field>
         <Captcha />
       </ActionForm>
-      <Link className="text-sm text-info hover:underline" href="/login">Back to sign in</Link>
+      <Link className="text-sm text-info underline underline-offset-2 hover:decoration-2" href="/login">Back to sign in</Link>
     </div>
   );
 }

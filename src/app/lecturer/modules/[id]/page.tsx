@@ -71,7 +71,7 @@ export default async function ModulePage({ params }: { params: Promise<{ id: str
               <tr key={s.id}>
                 <Td>{when(s.opens_at)}</Td><Td>{s.title}</Td><Td className="font-mono">{s.join_code}</Td>
                 <Td><Badge status={s.status} /></Td>
-                <Td className="text-right"><Link className="text-info hover:underline" href={`/lecturer/sessions/${s.id}`}>Register →</Link></Td>
+                <Td className="text-right"><Link className="text-info underline underline-offset-2 hover:decoration-2" href={`/lecturer/sessions/${s.id}`}>Register →</Link></Td>
               </tr>
             ))}
           </Table>

@@ -12,7 +12,7 @@ const H2 = ({ children }: { children: React.ReactNode }) => <h2 className="mt-10
 export default function Paia() {
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 text-[15px] leading-relaxed">
-      <Link href="/" className="text-sm text-info hover:underline">← UniAttend</Link>
+      <Link href="/" className="text-sm text-info underline underline-offset-2 hover:decoration-2">← UniAttend</Link>
       <h1 className="mt-4 text-3xl font-semibold">PAIA manual</h1>
       <p className="mt-2 text-muted">Prepared under section 51 of the Promotion of Access to Information Act 2 of 2000 (PAIA). Last updated {LEGAL.paiaUpdated}.</p>
 

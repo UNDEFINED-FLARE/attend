@@ -37,7 +37,7 @@ export default async function SetUpInstitution({ params }: { params: Promise<{ i
 
   return (
     <>
-      <Link href="/super" className="text-sm text-accent hover:underline">← Institutions</Link>
+      <Link href="/super" className="text-sm text-accent underline underline-offset-2 hover:decoration-2">← Institutions</Link>
       <PageHeader title={`Set up ${inst.name}`}
         subtitle={<>/{inst.slug} · {inst.contact_email ?? "no contact email"} · <Badge status={inst.status} /></>}
         action={inst.status === "pending" && (
