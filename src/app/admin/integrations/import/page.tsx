@@ -24,7 +24,7 @@ export default async function ImportCentre() {
     <>
       <PageHeader title="Import data"
         subtitle="Load students, lecturers, modules, enrolments and your academic structure from a file. You match the columns once, see exactly what will change, then confirm."
-        action={<Link href="/admin/connections" className="text-sm font-medium text-accent">Automatic connections →</Link>} />
+        action={<Link href="/admin/integrations" className="text-sm font-medium text-accent">Integration Centre →</Link>} />
       {error && <div className="mb-6"><Notice tone="warn">The Import Centre needs the latest database updates (migrations 0025 and 0026).</Notice></div>}
 
       {waiting.length > 0 && (
