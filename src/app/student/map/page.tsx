@@ -1,11 +1,12 @@
 import { AppTitle } from "@/components/app-chrome";
-import { LinkButton } from "@/components/ui";
+import Link from "next/link";
+import { Icon } from "@/components/icons";
 import { CampusMap, type MapClass, type MapVenue } from "@/components/map/campus-map";
 import { todayWeekday } from "@/components/week-grid";
 import { requireRole } from "@/lib/auth";
 import type { LatLng } from "@/lib/campuses";
 import { timeOf } from "@/lib/stats";
-import { loadCampuses } from "@/lib/shell-data";
+import { loadCampuses, loadTheme } from "@/lib/shell-data";
 import { nowHHMM } from "@/lib/student-data";
 
 export const metadata = { title: "Campus map" };
@@ -15,6 +16,7 @@ type Row = { venue_id: string | null; module_id: string; weekday: number; kind: 
 
 export default async function StudentMap() {
   const { supabase, institutionId } = await requireRole("student");
+  const directions = (await loadTheme(supabase, institutionId)).features.directions;
   const today = todayWeekday(), tomorrow = (today % 7) + 1;
 
   // Lecturer names need database update 0008; without it, load classes without them.
@@ -58,10 +60,9 @@ export default async function StudentMap() {
   return (
     <div className="mx-auto max-w-7xl space-y-4">
       <AppTitle title="Campus map" eyebrow="What's on now" sub="Every venue's classes today, and where your next class is. Tap a venue for details." />
-      <div className="flex flex-wrap gap-2">
-        <LinkButton href="/student/navigate">Directions to my next class</LinkButton>
-        <LinkButton href="/student/location" variant="secondary">Location sharing</LinkButton>
-      </div>
+      {directions && <Link href="/student/navigate" className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-accent px-5 text-sm font-semibold text-white shadow-[0_8px_20px_color-mix(in_srgb,var(--accent)_35%,transparent)] sm:inline-flex">
+        <Icon name="pin" size={18} />Find my class
+      </Link>}
       {venues.length === 0
         ? <p className="rounded-[28px] bg-surface p-8 text-center text-sm text-muted shadow-card">Your institution hasn&apos;t mapped its venues yet.</p>
         : <CampusMap venues={venues} classes={classes} upcoming={upcoming} campuses={campuses} now={nowHHMM()} />}

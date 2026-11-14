@@ -35,7 +35,7 @@ export function TabBar({ items }: { items: NavItem[] }) {
   const tabs = items.filter((i) => i.mobile !== false).slice(0, 5);
   const active = useActive(items);
   return (
-    <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
+    <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 print:hidden pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
       <ul className="mx-auto flex max-w-md justify-around">
         {tabs.map((i) => {
           const on = i.href === active;

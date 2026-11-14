@@ -1,5 +1,7 @@
+import { loadTheme } from "@/lib/shell-data";
 import Link from "next/link";
 import { AppTitle } from "@/components/app-chrome";
+import { TimetableActions } from "@/components/timetable-actions";
 import { Icon } from "@/components/icons";
 import { Card, CardTitle } from "@/components/ui";
 import { hhmm, moduleColor, todayWeekday, WeekGrid } from "@/components/week-grid";
@@ -10,6 +12,7 @@ export const metadata = { title: "Timetable" };
 
 export default async function StudentTimetable() {
   const { supabase, institutionId } = await requireRole("student");
+  const features = (await loadTheme(supabase, institutionId)).features;
   const slots = await myTimetable(supabase, institutionId);
   const day = todayWeekday(), now = nowHHMM();
   const today = slots.filter((s) => s.weekday === day);
@@ -21,7 +24,10 @@ export default async function StudentTimetable() {
       <AppTitle title="Timetable" eyebrow={new Date().toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long", timeZone: "Africa/Johannesburg" })}
         action={<Link href="/student/map" aria-label="Campus map" className="hidden h-11 items-center gap-2 rounded-2xl bg-surface px-4 text-sm font-semibold shadow-card sm:inline-flex"><Icon name="map" size={18} />Campus map</Link>} />
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <TimetableActions ics={features.calendarDownload ? "/student/timetable/calendar.ics" : null}
+        hint="The calendar file adds every class as a weekly event with a 15-minute reminder in Google Calendar, Outlook or your phone's calendar. Download it again if your timetable changes." />
+
+      <div className="grid gap-4 md:grid-cols-2 print:hidden">
         <NowCard label="Now" slot={current} empty="No class right now" tone="bg-gradient-to-br from-accent to-brand text-white" />
         <NowCard label="Next today" slot={next} empty={today.length ? "No more classes today" : "No classes today"} tone="bg-surface" />
       </div>

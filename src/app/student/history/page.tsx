@@ -11,7 +11,7 @@ import { dispute } from "../actions";
 export const metadata = { title: "History & disputes" };
 
 type Rec = {
-  id: string; status: string; minutes_late?: number | null; checked_in_at: string | null; created_at: string; score: number | null; explanation: string[];
+  id: string; status: string; minutes_late?: number | null; attendance_statuses?: { name: string; color: string } | null; checked_in_at: string | null; created_at: string; score: number | null; explanation: string[];
   class_sessions: { title: string; opens_at: string; modules: { code: string; title: string } } | null;
 };
 
@@ -30,14 +30,14 @@ export default async function History({ searchParams }: { searchParams: Promise<
   const range = ((await searchParams).when ?? "all") as (typeof RANGES)[number][0];
   const { supabase, institutionId } = await requireRole("student");
   const select = (late: boolean) => supabase.from("attendance_records")
-    .select(`id, status, ${late ? "minutes_late, " : ""}checked_in_at, created_at, score, explanation, class_sessions(title, opens_at, modules(code, title))`)
+    .select(`id, status, ${late ? "minutes_late, attendance_statuses(name, color), " : ""}checked_in_at, created_at, score, explanation, class_sessions(title, opens_at, modules(code, title))`)
     .eq("institution_id", institutionId).order("created_at", { ascending: false }).limit(200);
   const [recRes, { data: disputes }] = await Promise.all([
     select(true),
     supabase.from("attendance_disputes").select("id, record_id, status, reason, resolution_note, created_at")
       .eq("institution_id", institutionId).order("created_at", { ascending: false }),
   ]);
-  // minutes_late needs database update 0010.
+  // minutes_late and custom statuses need database updates 0010 and 0014.
   const all = ((recRes.error ? (await select(false)).data : recRes.data) ?? []) as unknown as Rec[];
   const from = range === "today" ? sastMidnight(0) : range === "week" ? sastMidnight(6) : null;
   const records = from ? all.filter((r) => r.created_at >= from) : all;
@@ -88,7 +88,9 @@ export default async function History({ searchParams }: { searchParams: Promise<
                         <span className="block truncate text-xs text-muted">{m?.title} · {timeOf(r.checked_in_at ?? r.created_at)}</span>
                       </span>
                       <span className="flex flex-col items-end gap-1">
-                        <span className={`text-xs font-bold ${tone.split(" ").find((x) => x.startsWith("text-"))}`}>{label}</span>
+                        {r.attendance_statuses
+                          ? <span className="text-xs font-bold" style={{ color: r.attendance_statuses.color }}>{r.attendance_statuses.name}</span>
+                          : <span className={`text-xs font-bold ${tone.split(" ").find((x) => x.startsWith("text-"))}`}>{label}</span>}
                         <LateChip minutes={r.minutes_late} />
                       </span>
                       <Icon name="arrowRight" size={16} className="shrink-0 text-muted transition group-open:rotate-90" />

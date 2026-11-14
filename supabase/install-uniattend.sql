@@ -3014,4 +3014,3243 @@ begin
   end loop;
 end $$;
 
+
+-- ===================================================== 20261111000014_attendance_register.sql
+-- UniAttend 0014 — the lecturer's register: configurable statuses, bulk save, change history.
+--
+-- * attendance_statuses: an institution's own statuses ("Left early", "Medical",
+--   "Field trip"...), each with a colour and a CATEGORY that decides how it counts:
+--     present/late → attended, absent → absent, excused → left out of the percentage.
+--   Records keep the category in attendance_records.status, so every existing
+--   report, dashboard and percentage keeps working unchanged.
+-- * save_register(): the lecturer saves many students at once, in one transaction.
+-- * Every manual change keeps its history (from, to, who, when, why) in
+--   attendance_evidence; record_history() returns it.
+
+-- ---------------------------------------------------------------- statuses
+create table uniattend.attendance_statuses (
+  id             uuid primary key default gen_random_uuid(),
+  institution_id uuid not null references uniattend.institutions(id) on delete cascade,
+  name           text not null check (length(trim(name)) between 2 and 40),
+  color          text not null default '#64748b' check (color ~ '^#[0-9a-fA-F]{6}$'),
+  description    text check (description is null or length(description) <= 200),
+  category       text not null check (category in ('present','late','absent','excused')),
+  sort_order     int not null default 100,
+  active         boolean not null default true,
+  created_at     timestamptz not null default now(),
+  unique (institution_id, id)
+);
+create unique index attendance_statuses_name on uniattend.attendance_statuses(institution_id, lower(name));
+alter table uniattend.attendance_statuses enable row level security;
+create policy attendance_statuses_select on uniattend.attendance_statuses for select to authenticated
+  using (uniattend.is_member(institution_id) or uniattend.is_super_admin());
+create policy attendance_statuses_write on uniattend.attendance_statuses for all to authenticated
+  using (uniattend.is_inst_admin(institution_id)) with check (uniattend.is_inst_admin(institution_id));
+
+alter table uniattend.attendance_records add column if not exists custom_status_id uuid;
+alter table uniattend.attendance_records
+  add constraint attendance_records_custom_status_fk foreign key (institution_id, custom_status_id)
+  references uniattend.attendance_statuses(institution_id, id) on delete set null (custom_status_id);
+
+-- Every institution starts with "Left early" (counts as attended, shown amber).
+create or replace function uniattend.seed_attendance_statuses()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  insert into uniattend.attendance_statuses (institution_id, name, color, description, category, sort_order)
+  values (new.id, 'Left early', '#d97706', 'Attended but left before the end of the class.', 'present', 10)
+  on conflict do nothing;
+  return new;
+end $$;
+create trigger institutions_seed_statuses after insert on uniattend.institutions
+  for each row execute function uniattend.seed_attendance_statuses();
+insert into uniattend.attendance_statuses (institution_id, name, color, description, category, sort_order)
+select i.id, 'Left early', '#d97706', 'Attended but left before the end of the class.', 'present', 10
+from uniattend.institutions i
+on conflict do nothing;
+
+-- ---------------------------------------------------------------- bulk save
+-- p_entries: [{"student": uuid, "status": "present|late|absent|excused", "custom": uuid|null, "note": text|null}, ...]
+-- Unchanged entries are skipped. Corrections after the session has closed need a reason.
+create or replace function uniattend.save_register(p_session uuid, p_entries jsonb, p_note text default null)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+  s uniattend.class_sessions; e jsonb; v_student uuid; v_status text; v_custom uuid; v_note text;
+  prev uniattend.attendance_records; r uniattend.attendance_records; v_by text; uid uuid; changed int := 0; skipped int := 0;
+begin
+  select * into s from uniattend.class_sessions where id = p_session;
+  if s is null or not (uniattend.teaches_module(s.module_id) or uniattend.is_inst_admin(s.institution_id)) then
+    raise exception 'only the module lecturer or an administrator may take the register' using errcode = '42501';
+  end if;
+  if jsonb_typeof(p_entries) <> 'array' or jsonb_array_length(p_entries) = 0 or jsonb_array_length(p_entries) > 3000 then
+    raise exception 'nothing to save';
+  end if;
+  if s.status <> 'open' and length(trim(coalesce(p_note, ''))) < 3 then
+    raise exception 'This session is closed: give a reason for the changes.' using errcode = 'P0001';
+  end if;
+  select coalesce(nullif(p.full_name, ''), p.email, 'Lecturer') into v_by from uniattend.profiles p where p.id = auth.uid();
+
+  for e in select value from jsonb_array_elements(p_entries) loop
+    v_student := (e->>'student')::uuid;
+    v_status := e->>'status';
+    v_custom := nullif(e->>'custom', '')::uuid;
+    v_note := coalesce(nullif(trim(e->>'note'), ''), nullif(trim(p_note), ''));
+    if v_status not in ('present','late','absent','excused') then raise exception 'not a status a person may set: %', v_status; end if;
+    if v_custom is not null then
+      -- A custom status must belong to this institution and decides the category.
+      select category into v_status from uniattend.attendance_statuses
+       where id = v_custom and institution_id = s.institution_id and active;
+      if v_status is null then raise exception 'unknown attendance status'; end if;
+    end if;
+    if not exists (select 1 from uniattend.module_enrolments where module_id = s.module_id and student_id = v_student) then
+      raise exception 'a student in the list is not enrolled in this module';
+    end if;
+
+    select * into prev from uniattend.attendance_records where session_id = s.id and student_id = v_student;
+    if prev.id is not null and prev.status = v_status and prev.custom_status_id is not distinct from v_custom then
+      skipped := skipped + 1; continue;
+    end if;
+
+    insert into uniattend.attendance_records as ar (institution_id, session_id, module_id, student_id, status, custom_status_id, method,
+                                                    checked_in_at, overridden_by, overridden_at, override_note)
+    values (s.institution_id, s.id, s.module_id, v_student, v_status, v_custom, 'manual',
+            case when v_status in ('present','late') then now() end, auth.uid(), now(), coalesce(v_note, 'Register taken by the lecturer.'))
+    on conflict (session_id, student_id) do update
+      set status = excluded.status, custom_status_id = excluded.custom_status_id,
+          overridden_by = excluded.overridden_by, overridden_at = excluded.overridden_at, override_note = excluded.override_note
+    returning * into r;
+
+    insert into uniattend.attendance_evidence (institution_id, record_id, kind, data)
+    values (s.institution_id, r.id, 'manual', jsonb_build_object(
+      'from', prev.status, 'from_custom', prev.custom_status_id, 'to', v_status, 'to_custom', v_custom,
+      'note', coalesce(v_note, 'Register taken by the lecturer.'), 'by', auth.uid(), 'by_name', v_by, 'session_open', s.status = 'open'));
+
+    -- Tell the student when a closed record is corrected (not for the live register).
+    if s.status <> 'open' then
+      select user_id into uid from uniattend.students where id = v_student;
+      if uid is not null then
+        insert into uniattend.notifications (institution_id, user_id, kind, title, body, link)
+        values (s.institution_id, uid, 'attendance_corrected', 'Attendance updated',
+                'Your attendance for ' || s.title || ' was set to ' ||
+                coalesce((select name from uniattend.attendance_statuses where id = v_custom), v_status) || '.', '/student/history');
+      end if;
+    end if;
+    changed := changed + 1;
+  end loop;
+
+  perform uniattend.write_audit(s.institution_id, 'register', 'class_sessions', s.id::text,
+                             jsonb_build_object('changed', changed, 'unchanged', skipped));
+  return jsonb_build_object('changed', changed, 'unchanged', skipped);
+end $$;
+
+-- ---------------------------------------------------------------- history
+-- Everything that happened to one record: check-in attempts and manual changes, oldest first.
+create or replace function uniattend.record_history(p_record uuid)
+returns table (at timestamptz, kind text, summary text, by_name text, note text)
+language plpgsql stable security definer set search_path = '' as $$
+declare r uniattend.attendance_records;
+begin
+  select * into r from uniattend.attendance_records where id = p_record;
+  if r is null or not (uniattend.teaches_module(r.module_id) or uniattend.is_inst_admin(r.institution_id)
+                       or uniattend.is_own_student(r.student_id)) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return query
+  select v.created_at, 'check_in'::text,
+         initcap(v.outcome) || ' · score ' || v.score, null::text,
+         nullif(array_to_string(array(select jsonb_array_elements_text(v.reasons)), ' '), '')
+  from uniattend.attendance_verification_events v
+  where v.session_id = r.session_id and v.student_id = r.student_id
+  union all
+  select ev.created_at, 'change'::text,
+         case when ev.data ? 'from' then coalesce(
+                (select name from uniattend.attendance_statuses where id = (ev.data->>'from_custom')::uuid), ev.data->>'from', 'none')
+              || ' → ' ||
+              coalesce((select name from uniattend.attendance_statuses where id = (ev.data->>'to_custom')::uuid), ev.data->>'to')
+              else 'Set to ' || coalesce(ev.data->>'status', '?') end,
+         coalesce(ev.data->>'by_name', 'Staff'), ev.data->>'note'
+  from uniattend.attendance_evidence ev
+  where ev.record_id = r.id and ev.kind = 'manual'
+  union all
+  select d.created_at, 'dispute'::text, 'Dispute ' || d.status, null::text, d.reason
+  from uniattend.attendance_disputes d where d.record_id = r.id
+  order by 1;
+end $$;
+
+-- ------------------------------------------------------------------ grants
+revoke all on function uniattend.save_register(uuid, jsonb, text) from public, anon;
+revoke all on function uniattend.record_history(uuid) from public, anon;
+revoke all on function uniattend.seed_attendance_statuses() from public, anon;
+grant execute on function uniattend.save_register(uuid, jsonb, text) to authenticated;
+grant execute on function uniattend.record_history(uuid) to authenticated;
+
+
+-- ===================================================== 20261111000015_early_warning.sql
+-- UniAttend 0015 — early warning: automatic attendance alerts with case follow-up.
+--
+-- What attendance platforms such as SEAtS and Edusign sell as "early alerts":
+-- * An alert opens when a student's attendance in a module falls below the
+--   required percentage (worst case, the same rule as module_report().at_risk),
+--   or when they miss several classes in a row. The student is notified, and the
+--   module's lecturers and the institution's admins see it.
+-- * Staff follow it up as a case: open → contacted → resolved / dismissed, with
+--   notes, an assignee and a full history (student_alert_events).
+-- * Alerts re-check by themselves when a class closes or a record is corrected,
+--   and close by themselves when attendance recovers, the student attends again,
+--   or the student is no longer enrolled.
+-- * Students never see the case or its notes, only their own notification.
+-- * Nobody writes the tables directly: only the functions below do.
+
+-- ------------------------------------------------------------------ settings
+alter table uniattend.institution_settings
+  add column if not exists alerts_enabled boolean not null default true,
+  add column if not exists alert_min_sessions int not null default 3 check (alert_min_sessions between 1 and 50),
+  add column if not exists alert_consecutive_absences int not null default 3 check (alert_consecutive_absences between 2 and 20);
+
+-- -------------------------------------------------------------------- tables
+create table uniattend.student_alerts (
+  id              uuid primary key default gen_random_uuid(),
+  institution_id  uuid not null references uniattend.institutions(id) on delete cascade,
+  student_id      uuid not null,
+  module_id       uuid not null,
+  kind            text not null check (kind in ('low_attendance', 'missed_in_a_row')),
+  status          text not null default 'open' check (status in ('open', 'contacted', 'resolved', 'dismissed')),
+  percent         numeric(5,1),   -- worst-case attendance % when last checked
+  missed_in_a_row int,
+  required_pct    int,
+  assigned_to     uuid references auth.users(id) on delete set null,
+  resolved_at     timestamptz,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  unique (institution_id, id),
+  foreign key (institution_id, student_id) references uniattend.students(institution_id, id) on delete cascade,
+  foreign key (institution_id, module_id)  references uniattend.modules(institution_id, id) on delete cascade
+);
+-- At most one live (open or contacted) alert per student, module and kind.
+create unique index student_alerts_live on uniattend.student_alerts(student_id, module_id, kind)
+  where status in ('open', 'contacted');
+create index student_alerts_inst on uniattend.student_alerts(institution_id, status, created_at desc);
+create trigger student_alerts_touch before update on uniattend.student_alerts
+  for each row execute function uniattend.touch_updated_at();
+
+create table uniattend.student_alert_events (
+  id             uuid primary key default gen_random_uuid(),
+  institution_id uuid not null references uniattend.institutions(id) on delete cascade,
+  alert_id       uuid not null,
+  actor_id       uuid references auth.users(id) on delete set null,   -- null = automatic
+  action         text not null check (action in
+                   ('opened', 'contacted', 'resolved', 'dismissed', 'reopened', 'assigned', 'unassigned', 'note', 'auto_resolved')),
+  note           text check (note is null or length(note) <= 2000),
+  created_at     timestamptz not null default now(),
+  foreign key (institution_id, alert_id) references uniattend.student_alerts(institution_id, id) on delete cascade
+);
+create index student_alert_events_alert on uniattend.student_alert_events(alert_id, created_at);
+
+alter table uniattend.student_alerts enable row level security;
+alter table uniattend.student_alert_events enable row level security;
+create policy student_alerts_select on uniattend.student_alerts for select to authenticated
+  using (uniattend.is_inst_admin(institution_id) or uniattend.teaches_module(module_id));
+create policy student_alert_events_select on uniattend.student_alert_events for select to authenticated
+  using (exists (select 1 from uniattend.student_alerts a where a.id = alert_id
+                 and (uniattend.is_inst_admin(a.institution_id) or uniattend.teaches_module(a.module_id))));
+revoke insert, update, delete, truncate on uniattend.student_alerts, uniattend.student_alert_events from anon, authenticated;
+revoke select on uniattend.student_alerts, uniattend.student_alert_events from anon;
+
+-- --------------------------------------------------------------- evaluation
+-- Re-checks one module. Called by the triggers below and by recheck_alerts().
+-- Counting matches module_report(): present/late = attended, absent = absent,
+-- excused is left out, unresolved (pending_verification/disputed) counts against
+-- the student in the worst case. "Missed in a row" counts the latest closed
+-- classes marked absent, back to the last one attended; excused and unresolved
+-- records neither add to nor break the run.
+create or replace function uniattend.evaluate_module_alerts(p_module uuid)
+returns int language plpgsql security definer set search_path = '' as $$
+declare
+  m uniattend.modules; st uniattend.institution_settings; v_min int; n_new int := 0;
+  r record; v_alert uuid; v_status text;
+begin
+  select * into m from uniattend.modules where id = p_module and deleted_at is null;
+  if m is null then return 0; end if;
+  select * into st from uniattend.institution_settings where institution_id = m.institution_id;
+  if st is null or not st.alerts_enabled then return 0; end if;
+  v_min := coalesce(m.min_attendance_pct, st.min_attendance_pct);
+
+  -- live alerts for students no longer enrolled close by themselves
+  for r in
+    select a.id from uniattend.student_alerts a
+    where a.module_id = p_module and a.status in ('open', 'contacted')
+      and not exists (select 1 from uniattend.module_enrolments e
+                      where e.module_id = p_module and e.student_id = a.student_id and e.status = 'active')
+  loop
+    update uniattend.student_alerts set status = 'resolved', resolved_at = now() where id = r.id;
+    insert into uniattend.student_alert_events (institution_id, alert_id, action, note)
+    values (m.institution_id, r.id, 'auto_resolved', 'The student is no longer enrolled in this module.');
+  end loop;
+
+  for r in
+    with t as (
+      select e.student_id,
+        count(a.id) filter (where a.status in ('present', 'late')) as n_att,
+        count(a.id) filter (where a.status = 'absent') as n_abs,
+        count(a.id) filter (where a.status in ('pending_verification', 'disputed')) as n_unr
+      from uniattend.module_enrolments e
+      left join uniattend.class_sessions cs on cs.module_id = e.module_id and cs.status = 'closed'
+      left join uniattend.attendance_records a on a.session_id = cs.id and a.student_id = e.student_id
+      where e.module_id = p_module and e.status = 'active'
+      group by e.student_id
+    ), runs as (
+      select x.student_id, count(*)::int as n
+      from (
+        select a.student_id, a.status,
+               sum(case when a.status in ('present', 'late') then 1 else 0 end)
+                 over (partition by a.student_id order by cs.opens_at desc rows unbounded preceding) as attended_since
+        from uniattend.attendance_records a
+        join uniattend.class_sessions cs on cs.id = a.session_id and cs.status = 'closed'
+        where a.module_id = p_module and a.status in ('present', 'late', 'absent')
+      ) x
+      where x.attended_since = 0 and x.status = 'absent'
+      group by x.student_id
+    )
+    select t.student_id, s.user_id, (t.n_att + t.n_abs + t.n_unr)::int as counted,
+           case when t.n_att + t.n_abs + t.n_unr = 0 then null
+                else round(100.0 * t.n_att / (t.n_att + t.n_abs + t.n_unr), 1) end as pct,
+           coalesce(runs.n, 0) as missed
+    from t
+    join uniattend.students s on s.id = t.student_id
+    left join runs on runs.student_id = t.student_id
+  loop
+    -- low attendance --------------------------------------------------------
+    select id, status into v_alert, v_status from uniattend.student_alerts
+     where student_id = r.student_id and module_id = p_module and kind = 'low_attendance' and status in ('open', 'contacted');
+    if r.counted >= st.alert_min_sessions and r.pct < v_min then
+      if v_alert is null then
+        insert into uniattend.student_alerts (institution_id, student_id, module_id, kind, percent, required_pct)
+        values (m.institution_id, r.student_id, p_module, 'low_attendance', r.pct, v_min)
+        returning id into v_alert;
+        insert into uniattend.student_alert_events (institution_id, alert_id, action, note)
+        values (m.institution_id, v_alert, 'opened', format('Attendance %s%%, required %s%%.', trim_scale(r.pct), v_min));
+        n_new := n_new + 1;
+        if r.user_id is not null then
+          insert into uniattend.notifications (institution_id, user_id, kind, title, body, link)
+          values (m.institution_id, r.user_id, 'attendance_alert', m.code || ': your attendance is ' || trim_scale(r.pct) || '%',
+                  format('You need %s%% to meet the requirement for %s. Speak to your lecturer if something is keeping you away.', v_min, m.title),
+                  '/student/history');
+        end if;
+      elsif v_alert is not null then
+        update uniattend.student_alerts set percent = r.pct, required_pct = v_min
+         where id = v_alert and (percent is distinct from r.pct or required_pct is distinct from v_min);
+      end if;
+    elsif v_alert is not null and r.pct is not null and r.pct >= v_min then
+      update uniattend.student_alerts set status = 'resolved', resolved_at = now(), percent = r.pct where id = v_alert;
+      insert into uniattend.student_alert_events (institution_id, alert_id, action, note)
+      values (m.institution_id, v_alert, 'auto_resolved', format('Attendance back to %s%% (required %s%%).', trim_scale(r.pct), v_min));
+      if r.user_id is not null then
+        insert into uniattend.notifications (institution_id, user_id, kind, title, body, link)
+        values (m.institution_id, r.user_id, 'attendance_recovered', m.code || ': attendance back to ' || trim_scale(r.pct) || '%',
+                'You meet the attendance requirement again. Keep it up.', '/student/history');
+      end if;
+    end if;
+
+    -- missed classes in a row ----------------------------------------------
+    v_alert := null;
+    select id into v_alert from uniattend.student_alerts
+     where student_id = r.student_id and module_id = p_module and kind = 'missed_in_a_row' and status in ('open', 'contacted');
+    if r.missed >= st.alert_consecutive_absences then
+      if v_alert is null then
+        insert into uniattend.student_alerts (institution_id, student_id, module_id, kind, missed_in_a_row, percent, required_pct)
+        values (m.institution_id, r.student_id, p_module, 'missed_in_a_row', r.missed, r.pct, v_min)
+        returning id into v_alert;
+        insert into uniattend.student_alert_events (institution_id, alert_id, action, note)
+        values (m.institution_id, v_alert, 'opened', format('Missed the last %s classes.', r.missed));
+        n_new := n_new + 1;
+        if r.user_id is not null then
+          insert into uniattend.notifications (institution_id, user_id, kind, title, body, link)
+          values (m.institution_id, r.user_id, 'attendance_alert', m.code || ': you missed ' || r.missed || ' classes in a row',
+                  'Is everything all right? Speak to your lecturer if something is keeping you away.', '/student/history');
+        end if;
+      else
+        update uniattend.student_alerts set missed_in_a_row = r.missed, percent = r.pct
+         where id = v_alert and (missed_in_a_row is distinct from r.missed or percent is distinct from r.pct);
+      end if;
+    elsif v_alert is not null and r.missed = 0 then
+      update uniattend.student_alerts set status = 'resolved', resolved_at = now(), missed_in_a_row = 0 where id = v_alert;
+      insert into uniattend.student_alert_events (institution_id, alert_id, action, note)
+      values (m.institution_id, v_alert, 'auto_resolved', 'Attended again.');
+    end if;
+  end loop;
+
+  -- one summary per check for the module's lecturers, not one per student
+  if n_new > 0 then
+    insert into uniattend.notifications (institution_id, user_id, kind, title, body, link)
+    select m.institution_id, l.user_id, 'attendance_alert',
+           m.code || ': ' || n_new || ' new early-warning alert' || case when n_new = 1 then '' else 's' end,
+           'Students whose attendance needs follow-up. Open Early warning to contact them and record what happened.',
+           '/lecturer/early-warning'
+    from uniattend.lecturer_assignments la join uniattend.lecturers l on l.id = la.lecturer_id
+    where la.module_id = p_module and l.user_id is not null and l.status = 'active';
+  end if;
+  return n_new;
+end $$;
+
+-- ----------------------------------------------------------------- triggers
+-- On close: deferred to the end of the transaction, so the absences that
+-- close_session() writes after changing the status are already there.
+create or replace function uniattend.alerts_on_session_closed()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  perform uniattend.evaluate_module_alerts(new.module_id);
+  return null;
+end $$;
+create constraint trigger class_sessions_alerts_on_close after update of status on uniattend.class_sessions
+  deferrable initially deferred
+  for each row when (old.status is distinct from 'closed' and new.status = 'closed')
+  execute function uniattend.alerts_on_session_closed();
+
+-- On corrections (register saves, overrides, resolved disputes, late decisions)
+-- for classes that have closed. Check-ins during an open class exit at once.
+create or replace function uniattend.alerts_on_records_changed()
+returns trigger language plpgsql security definer set search_path = '' as $$
+declare v_module uuid;
+begin
+  for v_module in
+    select distinct c.module_id from changed c
+    join uniattend.class_sessions cs on cs.id = c.session_id and cs.status = 'closed'
+  loop
+    perform uniattend.evaluate_module_alerts(v_module);
+  end loop;
+  return null;
+end $$;
+create trigger attendance_records_alerts after update on uniattend.attendance_records
+  referencing new table as changed for each statement
+  execute function uniattend.alerts_on_records_changed();
+
+-- ------------------------------------------------------------- staff actions
+-- Admin: re-check every module now (e.g. after changing the settings).
+create or replace function uniattend.recheck_alerts(p_inst uuid)
+returns int language plpgsql security definer set search_path = '' as $$
+declare v_module uuid; n int := 0;
+begin
+  if not uniattend.is_inst_admin(p_inst) then raise exception 'institution admin only' using errcode = '42501'; end if;
+  for v_module in select id from uniattend.modules where institution_id = p_inst and deleted_at is null loop
+    n := n + uniattend.evaluate_module_alerts(v_module);
+  end loop;
+  return n;
+end $$;
+
+-- The institution's alerts that the caller may see: admins all, lecturers their modules.
+create or replace function uniattend.list_student_alerts(p_inst uuid, p_live_only boolean default true)
+returns table (id uuid, kind text, status text, percent numeric, missed_in_a_row int, required_pct int,
+               created_at timestamptz, updated_at timestamptz, student_id uuid, student_number text,
+               student_name text, module_id uuid, module_code text, module_title text,
+               assigned_to uuid, assignee_name text, last_note text)
+language sql stable security definer set search_path = '' as $$
+  select a.id, a.kind, a.status, a.percent, a.missed_in_a_row, a.required_pct, a.created_at, a.updated_at,
+         s.id, s.student_number, s.full_name, m.id, m.code, m.title, a.assigned_to,
+         coalesce(nullif(p.full_name, ''), p.email),
+         (select e.note from uniattend.student_alert_events e
+           where e.alert_id = a.id and e.note is not null and e.actor_id is not null
+           order by e.created_at desc limit 1)
+  from uniattend.student_alerts a
+  join uniattend.students s on s.id = a.student_id
+  join uniattend.modules m on m.id = a.module_id
+  left join uniattend.profiles p on p.id = a.assigned_to
+  where a.institution_id = p_inst
+    and (uniattend.is_inst_admin(p_inst) or uniattend.teaches_module(a.module_id))
+    and (not p_live_only or a.status in ('open', 'contacted'))
+  order by case a.status when 'open' then 0 when 'contacted' then 1 else 2 end,
+           a.percent nulls last, a.created_at desc
+  limit 500;
+$$;
+
+-- Follow up an alert. p_action: contacted | resolved | dismissed | reopened | assign_me | unassign | note.
+-- Dismissing needs a reason; adding a note needs the note.
+create or replace function uniattend.update_student_alert(p_alert uuid, p_action text, p_note text default null)
+returns uniattend.student_alerts language plpgsql security definer set search_path = '' as $$
+declare a uniattend.student_alerts; uid uuid := auth.uid(); v_note text := nullif(trim(p_note), '');
+begin
+  select * into a from uniattend.student_alerts where id = p_alert for update;
+  if a is null or uid is null or not (uniattend.is_inst_admin(a.institution_id) or uniattend.teaches_module(a.module_id)) then
+    raise exception 'not your alert' using errcode = '42501';
+  end if;
+  if v_note is not null and length(v_note) > 2000 then raise exception 'note is too long (2000 characters at most)'; end if;
+
+  if p_action = 'contacted' then
+    if a.status <> 'open' then raise exception 'only an open alert can be marked contacted'; end if;
+    update uniattend.student_alerts set status = 'contacted' where id = a.id returning * into a;
+  elsif p_action in ('resolved', 'dismissed') then
+    if a.status not in ('open', 'contacted') then raise exception 'this alert is already closed'; end if;
+    if p_action = 'dismissed' and v_note is null then raise exception 'say why you are dismissing it'; end if;
+    update uniattend.student_alerts set status = p_action, resolved_at = now() where id = a.id returning * into a;
+  elsif p_action = 'reopened' then
+    if a.status not in ('resolved', 'dismissed') then raise exception 'this alert is still open'; end if;
+    if exists (select 1 from uniattend.student_alerts x where x.student_id = a.student_id and x.module_id = a.module_id
+               and x.kind = a.kind and x.status in ('open', 'contacted')) then
+      raise exception 'there is already an open alert like this for the student';
+    end if;
+    update uniattend.student_alerts set status = 'open', resolved_at = null where id = a.id returning * into a;
+  elsif p_action = 'assign_me' then
+    update uniattend.student_alerts set assigned_to = uid where id = a.id returning * into a;
+    p_action := 'assigned';
+  elsif p_action = 'unassign' then
+    update uniattend.student_alerts set assigned_to = null where id = a.id returning * into a;
+    p_action := 'unassigned';
+  elsif p_action = 'note' then
+    if v_note is null then raise exception 'write the note first'; end if;
+  else
+    raise exception 'unknown action %', p_action;
+  end if;
+
+  insert into uniattend.student_alert_events (institution_id, alert_id, actor_id, action, note)
+  values (a.institution_id, a.id, uid, p_action, v_note);
+  perform uniattend.write_audit(a.institution_id, p_action, 'student_alerts', a.id::text,
+                                jsonb_build_object('kind', a.kind, 'status', a.status));
+  return a;
+end $$;
+
+-- An alert's history with names, for the case view.
+create or replace function uniattend.alert_history(p_alert uuid)
+returns table (at timestamptz, action text, note text, actor_name text)
+language plpgsql stable security definer set search_path = '' as $$
+declare a uniattend.student_alerts;
+begin
+  select * into a from uniattend.student_alerts where id = p_alert;
+  if a is null or not (uniattend.is_inst_admin(a.institution_id) or uniattend.teaches_module(a.module_id)) then
+    raise exception 'not your alert' using errcode = '42501';
+  end if;
+  return query
+  select e.created_at, e.action, e.note,
+         case when e.actor_id is null then 'Automatic' else coalesce(nullif(p.full_name, ''), p.email, 'Staff') end
+  from uniattend.student_alert_events e
+  left join uniattend.profiles p on p.id = e.actor_id
+  where e.alert_id = p_alert
+  order by e.created_at, e.id;
+end $$;
+
+-- ------------------------------------------------------------------ grants
+revoke all on function uniattend.evaluate_module_alerts(uuid) from public, anon, authenticated;
+revoke all on function uniattend.alerts_on_session_closed() from public, anon, authenticated;
+revoke all on function uniattend.alerts_on_records_changed() from public, anon, authenticated;
+revoke all on function uniattend.recheck_alerts(uuid) from public, anon;
+revoke all on function uniattend.list_student_alerts(uuid, boolean) from public, anon;
+revoke all on function uniattend.update_student_alert(uuid, text, text) from public, anon;
+revoke all on function uniattend.alert_history(uuid) from public, anon;
+grant execute on function uniattend.recheck_alerts(uuid) to authenticated;
+grant execute on function uniattend.list_student_alerts(uuid, boolean) to authenticated;
+grant execute on function uniattend.update_student_alert(uuid, text, text) to authenticated;
+grant execute on function uniattend.alert_history(uuid) to authenticated;
+
+
+-- ===================================================== 20261111000016_checkin_controls.sql
+-- UniAttend 0016 — check-in controls, printed QR, card scanning and check-out.
+--
+-- * Printed QR: a FIXED code for a session, for printing or showing without a
+--   laptop. A fixed code can be photographed and shared, so it is only accepted
+--   when the session requires GPS (the location check does the real work), and
+--   regenerating the session's key cancels it.
+-- * Controls: pause/resume check-in, regenerate the QR key and join code, change
+--   the check-in window.
+-- * Card scanning: a lecturer or scan station reads a student card (barcode or
+--   QR holding the student number) and records the student in or out.
+-- * Check-out: card scan or the student's own "I'm leaving"; time present is
+--   kept, and leaving more than 10 minutes before the end marks "Left early".
+
+alter table uniattend.class_sessions add column if not exists allow_printed_qr boolean not null default false;
+alter table uniattend.attendance_records add column if not exists checked_out_at timestamptz;
+alter table uniattend.attendance_records drop constraint if exists attendance_records_method_check;
+alter table uniattend.attendance_records add constraint attendance_records_method_check
+  check (method in ('qr','code','manual','acoustic','system','card'));
+
+-- ------------------------------------------------------------ printed QR
+-- Live tokens are "<step>.<sig>"; the printed one is "P.<sig>" signed for step -1,
+-- which no live 20-second step can ever equal.
+create or replace function uniattend.qr_verify(p_session uuid, p_token text)
+returns bigint language plpgsql stable security definer set search_path = '' as $$
+declare m text[]; step bigint; now_step bigint := uniattend.qr_step();
+begin
+  m := regexp_match(coalesce(p_token, ''), '^P\.([A-Za-z0-9_-]{22})$');
+  if m is not null then
+    if not exists (select 1 from uniattend.class_sessions s
+                   where s.id = p_session and s.allow_printed_qr and s.require_gps) then
+      return null;
+    end if;
+    return case when uniattend.qr_sign(p_session, -1) = m[1] then -1 end;
+  end if;
+  m := regexp_match(coalesce(p_token, ''), '^([0-9]{1,12})\.([A-Za-z0-9_-]{22})$');
+  if m is null then return null; end if;
+  step := m[1]::bigint;
+  if step not between now_step - 1 and now_step then return null; end if;
+  if uniattend.qr_sign(p_session, step) is distinct from m[2] then return null; end if;
+  return step;
+end $$;
+
+create or replace function uniattend.printed_qr_token(p_session uuid)
+returns text language plpgsql security definer set search_path = '' as $$
+declare s uniattend.class_sessions;
+begin
+  select * into s from uniattend.class_sessions where id = p_session;
+  if s is null or not (uniattend.teaches_module(s.module_id) or uniattend.is_inst_admin(s.institution_id)) then
+    raise exception 'not your session' using errcode = '42501';
+  end if;
+  if not (s.allow_printed_qr and s.require_gps) then return null; end if;
+  return 'P.' || uniattend.qr_sign(p_session, -1);
+end $$;
+
+-- ------------------------------------------------------------ controls
+-- p_action: 'pause' | 'resume' | 'regenerate' | 'printed_on' | 'printed_off' | 'window'
+-- For 'window': p_closes_in_min (minutes from now the check-in closes) and/or p_late_in_min.
+create or replace function uniattend.session_control(p_session uuid, p_action text,
+                                                     p_closes_in_min int default null, p_late_in_min int default null)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare s uniattend.class_sessions; v_code text;
+begin
+  select * into s from uniattend.class_sessions where id = p_session for update;
+  if s is null or not (uniattend.teaches_module(s.module_id) or uniattend.is_inst_admin(s.institution_id)) then
+    raise exception 'not your session' using errcode = '42501';
+  end if;
+  if s.status not in ('open', 'scheduled') then raise exception 'This session is already %.', s.status using errcode = 'P0001'; end if;
+
+  case p_action
+  when 'pause' then
+    update uniattend.class_sessions set status = 'scheduled' where id = s.id;
+  when 'resume' then
+    v_code := s.join_code;
+    -- The join code must be unique among OPEN sessions; pick a new one if it was reused meanwhile.
+    if exists (select 1 from uniattend.class_sessions o where o.institution_id = s.institution_id
+               and o.join_code = v_code and o.status = 'open' and o.id <> s.id) then
+      v_code := uniattend.generate_join_code(s.institution_id);
+    end if;
+    update uniattend.class_sessions set status = 'open', join_code = v_code where id = s.id;
+  when 'regenerate' then
+    update uniattend.session_secrets set secret = extensions.gen_random_bytes(32) where session_id = s.id;
+    update uniattend.class_sessions set join_code = uniattend.generate_join_code(s.institution_id) where id = s.id;
+  when 'printed_on' then
+    if not s.require_gps then
+      raise exception 'A printed QR needs the location check: this session''s venue has no map position.' using errcode = 'P0001';
+    end if;
+    update uniattend.class_sessions set allow_printed_qr = true where id = s.id;
+  when 'printed_off' then
+    update uniattend.class_sessions set allow_printed_qr = false where id = s.id;
+  when 'window' then
+    if p_closes_in_min is not null and p_closes_in_min not between 1 and 480 then raise exception 'choose 1 to 480 minutes'; end if;
+    if p_late_in_min is not null and p_late_in_min not between 0 and 480 then raise exception 'choose 0 to 480 minutes'; end if;
+    update uniattend.class_sessions
+       set closes_at  = coalesce(now() + make_interval(mins => p_closes_in_min), closes_at),
+           late_after = coalesce(now() + make_interval(mins => p_late_in_min), late_after)
+     where id = s.id;
+  else
+    raise exception 'unknown action %', p_action;
+  end case;
+
+  perform uniattend.write_audit(s.institution_id, 'session_' || p_action, 'class_sessions', s.id::text, '{}'::jsonb);
+  return (select jsonb_build_object('status', status, 'join_code', join_code, 'closes_at', closes_at,
+                                    'late_after', late_after, 'allow_printed_qr', allow_printed_qr)
+          from uniattend.class_sessions where id = s.id);
+end $$;
+
+-- ------------------------------------------------------------ check-out (shared)
+create or replace function uniattend.apply_checkout(p_record uuid)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare r uniattend.attendance_records; s uniattend.class_sessions; v_left uuid; v_early boolean;
+begin
+  select * into r from uniattend.attendance_records where id = p_record for update;
+  select * into s from uniattend.class_sessions where id = r.session_id;
+  if r.status not in ('present','late','late_pending','pending_verification') then
+    raise exception 'Only someone who checked in can check out.' using errcode = 'P0001';
+  end if;
+  if r.checked_out_at is not null then
+    return jsonb_build_object('outcome', 'duplicate', 'checked_out_at', r.checked_out_at);
+  end if;
+  v_early := now() < s.closes_at - interval '10 minutes';
+  if v_early and r.custom_status_id is null and r.status in ('present','late') then
+    select id into v_left from uniattend.attendance_statuses
+     where institution_id = r.institution_id and lower(name) = 'left early' and active limit 1;
+  end if;
+  update uniattend.attendance_records
+     set checked_out_at = now(), custom_status_id = coalesce(v_left, custom_status_id)
+   where id = r.id;
+  insert into uniattend.attendance_evidence (institution_id, record_id, kind, data)
+  values (r.institution_id, r.id, 'manual', jsonb_build_object('checkout', now(), 'left_early', v_early, 'by', auth.uid(),
+          'note', case when v_early then 'Checked out early' else 'Checked out' end));
+  return jsonb_build_object('outcome', 'checked_out', 'left_early', v_early,
+    'minutes_present', case when r.checked_in_at is not null then floor(extract(epoch from now() - r.checked_in_at) / 60)::int end);
+end $$;
+
+-- The student's own "I'm leaving".
+create or replace function uniattend.check_out(p_session uuid)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare r uniattend.attendance_records;
+begin
+  select ar.* into r from uniattend.attendance_records ar
+  join uniattend.students st on st.id = ar.student_id and st.user_id = auth.uid()
+  where ar.session_id = p_session;
+  if r.id is null then raise exception 'You have not checked in to this session.' using errcode = 'P0002'; end if;
+  return uniattend.apply_checkout(r.id);
+end $$;
+
+-- ------------------------------------------------------------ card scanning
+create or replace function uniattend.scan_student(p_session uuid, p_code text, p_direction text default 'in')
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+  s uniattend.class_sessions; st uniattend.students; r uniattend.attendance_records; v_code text; v_late int; v_status text; res jsonb;
+begin
+  select * into s from uniattend.class_sessions where id = p_session;
+  if s is null or not (uniattend.teaches_module(s.module_id) or uniattend.is_inst_admin(s.institution_id)) then
+    raise exception 'not your session' using errcode = '42501';
+  end if;
+  -- Cards often print the number with spaces or a prefix letter case difference.
+  v_code := upper(regexp_replace(coalesce(p_code, ''), '\s', '', 'g'));
+  if length(v_code) not between 3 and 40 then
+    return jsonb_build_object('outcome', 'unknown', 'message', 'That card could not be read.');
+  end if;
+  select * into st from uniattend.students
+   where institution_id = s.institution_id and upper(student_number) = v_code and deleted_at is null;
+  if st.id is null then
+    return jsonb_build_object('outcome', 'unknown', 'message', 'No student with number ' || v_code || ' at this institution.');
+  end if;
+  res := jsonb_build_object('student_number', st.student_number, 'full_name', st.full_name);
+  if not exists (select 1 from uniattend.module_enrolments where module_id = s.module_id and student_id = st.id and status = 'active') then
+    return res || jsonb_build_object('outcome', 'not_enrolled', 'message', st.full_name || ' is not enrolled in this module.');
+  end if;
+  select * into r from uniattend.attendance_records where session_id = s.id and student_id = st.id;
+
+  if p_direction = 'out' then
+    if r.id is null then return res || jsonb_build_object('outcome', 'not_in', 'message', st.full_name || ' never checked in.'); end if;
+    return res || uniattend.apply_checkout(r.id);
+  end if;
+
+  if s.status <> 'open' then
+    return res || jsonb_build_object('outcome', 'closed', 'message', 'Check-in is paused or closed for this session.');
+  end if;
+  if r.id is not null and r.status in ('present','late','excused') then
+    return res || jsonb_build_object('outcome', 'duplicate', 'status', r.status, 'message', st.full_name || ' is already recorded.');
+  end if;
+  v_late := case when now() > s.late_after then greatest(1, floor(extract(epoch from now() - s.late_after) / 60))::int end;
+  -- A card shown to the lecturer in person is direct evidence: late arrivals are simply late.
+  v_status := case when v_late is null then 'present' else 'late' end;
+  insert into uniattend.attendance_records as ar (institution_id, session_id, module_id, student_id, status, method,
+                                                  checked_in_at, minutes_late, overridden_by, overridden_at, override_note, explanation)
+  values (s.institution_id, s.id, s.module_id, st.id, v_status, 'card', now(), v_late, auth.uid(), now(),
+          'Student card scanned', '["Student card scanned by staff."]'::jsonb)
+  on conflict (session_id, student_id) do update
+    set status = excluded.status, method = 'card', checked_in_at = excluded.checked_in_at, minutes_late = excluded.minutes_late,
+        overridden_by = excluded.overridden_by, overridden_at = excluded.overridden_at, override_note = excluded.override_note
+  returning * into r;
+  insert into uniattend.attendance_evidence (institution_id, record_id, kind, data)
+  values (s.institution_id, r.id, 'manual', jsonb_build_object('to', v_status, 'note', 'Student card scanned', 'by', auth.uid(), 'via', 'card'));
+  return res || jsonb_build_object('outcome', 'checked_in', 'status', v_status, 'minutes_late', v_late);
+end $$;
+
+-- ------------------------------------------------------------ grants
+do $$
+declare f text;
+begin
+  foreach f in array array['printed_qr_token(uuid)', 'session_control(uuid,text,integer,integer)', 'apply_checkout(uuid)',
+                           'check_out(uuid)', 'scan_student(uuid,text,text)'] loop
+    execute format('revoke all on function uniattend.%s from public, anon', f);
+  end loop;
+end $$;
+grant execute on function uniattend.printed_qr_token(uuid) to authenticated;
+grant execute on function uniattend.session_control(uuid,text,integer,integer) to authenticated;
+grant execute on function uniattend.check_out(uuid) to authenticated;
+grant execute on function uniattend.scan_student(uuid,text,text) to authenticated;
+-- apply_checkout is internal only (called by check_out and scan_student).
+
+
+-- ===================================================== 20261111000017_remove_location_sharing.sql
+-- UniAttend 0017 — remove campus live location sharing (added in 0013).
+--
+-- PERMANENTLY deletes every stored live position and every location-sharing
+-- consent record, and the functions and settings behind them.
+-- Kept from 0013: campus boundaries and my_next_classes() for "Find my class",
+-- which uses the student's position only on their own phone and stores nothing.
+
+drop function if exists uniattend.campus_live_locations(uuid);
+drop function if exists uniattend.report_location(uuid, float8, float8, float8, boolean);
+drop function if exists uniattend.stop_location_sharing(uuid);
+drop function if exists uniattend.set_location_consent(uuid, boolean);
+
+drop table if exists uniattend.live_locations;
+drop table if exists uniattend.location_consents;
+
+alter table uniattend.institution_settings
+  drop column if exists location_sharing_enabled,
+  drop column if exists location_interval_s;
+
+
+-- ===================================================== 20261112000018_targeted_notifications.sql
+-- UniAttend 0018 — targeted announcements and lecturer messages to a class.
+--
+-- * Announcements can target everyone, one faculty, one department, one module,
+--   one student or one lecturer, and carry a category (general, academic, system,
+--   class cancelled, venue change, class reminder, timetable change).
+-- * Lecturers message the students of a module they teach (send_class_message),
+--   rate-limited; admins target anything in their institution.
+-- * Recipients get a notification (and a push, following their device settings:
+--   class updates follow "class reminders", others "announcements").
+-- * Announcements aimed at a group or a person are no longer readable by every
+--   member of the institution; only staff who manage them see the table.
+
+alter table uniattend.announcements
+  add column if not exists target_kind text not null default 'all'
+    check (target_kind in ('all','faculty','department','module','student','lecturer')),
+  add column if not exists target_id uuid,
+  add column if not exists category text not null default 'announcement'
+    check (category in ('announcement','academic','system','class_cancelled','venue_change','class_reminder','timetable_change')),
+  add column if not exists sender_name text;
+alter table uniattend.announcements drop constraint if exists announcements_target_check;
+alter table uniattend.announcements add constraint announcements_target_check
+  check ((target_kind = 'all') = (target_id is null));
+create index if not exists announcements_target on uniattend.announcements(institution_id, target_kind, target_id);
+
+-- Only general announcements to everyone are readable by all members; targeted ones
+-- reach people through their own notifications.
+drop policy if exists announcements_select on uniattend.announcements;
+create policy announcements_select on uniattend.announcements for select to authenticated
+  using (uniattend.is_super_admin()
+         or (institution_id is not null and uniattend.is_inst_admin(institution_id))
+         or (target_kind = 'all' and published_at <= now() and (expires_at is null or expires_at > now())
+             and (institution_id is null or uniattend.is_member(institution_id))));
+
+-- Who an announcement reaches.
+create or replace function uniattend.announcement_recipients(a uniattend.announcements)
+returns table (user_id uuid, institution_id uuid)
+language sql stable security definer set search_path = '' as $$
+  -- everyone (optionally by role)
+  select r.user_id, coalesce(a.institution_id, r.institution_id)
+  from uniattend.user_roles r
+  where a.target_kind = 'all' and r.status = 'active'
+    and (a.institution_id is null or r.institution_id = a.institution_id)
+    and case a.audience when 'students' then r.role = 'student' when 'lecturers' then r.role = 'lecturer'
+                        when 'admins' then r.role in ('institution_admin','super_admin') else true end
+  union
+  -- students of the targeted module / department / faculty
+  select s.user_id, s.institution_id
+  from uniattend.students s
+  join uniattend.module_enrolments e on e.student_id = s.id and e.status = 'active'
+  join uniattend.modules m on m.id = e.module_id and m.deleted_at is null
+  left join uniattend.departments d on d.id = m.department_id
+  where a.target_kind in ('module','department','faculty') and a.audience in ('all','students')
+    and s.institution_id = a.institution_id and s.user_id is not null and s.status = 'active' and s.deleted_at is null
+    and case a.target_kind when 'module' then m.id = a.target_id
+                           when 'department' then m.department_id = a.target_id
+                           else d.faculty_id = a.target_id end
+  union
+  -- lecturers teaching in the targeted module / department / faculty
+  select l.user_id, l.institution_id
+  from uniattend.lecturers l
+  left join uniattend.lecturer_assignments la on la.lecturer_id = l.id
+  left join uniattend.modules m on m.id = la.module_id and m.deleted_at is null
+  left join uniattend.departments dl on dl.id = l.department_id
+  left join uniattend.departments dm on dm.id = m.department_id
+  where a.target_kind in ('module','department','faculty') and a.audience in ('all','lecturers')
+    and l.institution_id = a.institution_id and l.user_id is not null and l.status = 'active' and l.deleted_at is null
+    and case a.target_kind when 'module' then m.id = a.target_id
+                           when 'department' then (m.department_id = a.target_id or l.department_id = a.target_id)
+                           else (dm.faculty_id = a.target_id or dl.faculty_id = a.target_id) end
+  union
+  select s.user_id, s.institution_id from uniattend.students s
+  where a.target_kind = 'student' and s.id = a.target_id and s.institution_id = a.institution_id and s.user_id is not null
+  union
+  select l.user_id, l.institution_id from uniattend.lecturers l
+  where a.target_kind = 'lecturer' and l.id = a.target_id and l.institution_id = a.institution_id and l.user_id is not null;
+$$;
+
+create or replace function uniattend.fan_out_announcement()
+returns trigger language plpgsql security definer set search_path = '' as $$
+declare v_kind text; v_title text;
+begin
+  if new.published_at > now() + interval '1 minute' then return new; end if;  -- scheduled ones are not supported yet
+  -- The target must belong to the announcement's institution.
+  if new.target_kind <> 'all' and not exists (
+       select 1 from uniattend.faculties where new.target_kind = 'faculty' and id = new.target_id and institution_id = new.institution_id
+       union all select 1 from uniattend.departments where new.target_kind = 'department' and id = new.target_id and institution_id = new.institution_id
+       union all select 1 from uniattend.modules where new.target_kind = 'module' and id = new.target_id and institution_id = new.institution_id
+       union all select 1 from uniattend.students where new.target_kind = 'student' and id = new.target_id and institution_id = new.institution_id
+       union all select 1 from uniattend.lecturers where new.target_kind = 'lecturer' and id = new.target_id and institution_id = new.institution_id) then
+    raise exception 'That recipient is not part of this institution.' using errcode = '42501';
+  end if;
+  v_kind := case when new.category in ('class_cancelled','venue_change','class_reminder','timetable_change') then 'class_update' else 'announcement' end;
+  v_title := case new.category
+               when 'class_cancelled' then 'Class cancelled: ' when 'venue_change' then 'Venue change: '
+               when 'timetable_change' then 'Timetable change: ' when 'class_reminder' then 'Reminder: '
+               when 'academic' then 'Academic: ' when 'system' then 'System: ' else '' end || new.title;
+  insert into uniattend.notifications (institution_id, user_id, kind, title, body, link, dedupe_key)
+  select distinct on (x.user_id) x.institution_id, x.user_id, v_kind, left(v_title, 200),
+         left(new.body, 500) || coalesce(E'\n— ' || new.sender_name, ''), '/notifications', 'ann:' || new.id || ':' || x.user_id
+  from uniattend.announcement_recipients(new) x
+  where x.user_id is not null
+  on conflict (dedupe_key) where dedupe_key is not null do nothing;
+  return new;
+end $$;
+
+-- A lecturer's message to the students of one of their modules.
+create or replace function uniattend.send_class_message(p_module uuid, p_category text, p_title text, p_body text)
+returns int language plpgsql security definer set search_path = '' as $$
+declare m uniattend.modules; v_id uuid; v_name text; n int;
+begin
+  select * into m from uniattend.modules where id = p_module and deleted_at is null;
+  if m is null or not (uniattend.teaches_module(m.id) or uniattend.is_inst_admin(m.institution_id)) then
+    raise exception 'only the module''s lecturers can message its students' using errcode = '42501';
+  end if;
+  if p_category not in ('announcement','class_cancelled','venue_change','class_reminder','timetable_change') then
+    raise exception 'unknown message type';
+  end if;
+  if length(trim(coalesce(p_title, ''))) < 3 or length(trim(coalesce(p_body, ''))) < 3 then
+    raise exception 'Write a title and a message.' using errcode = 'P0001';
+  end if;
+  if (select count(*) from uniattend.announcements where created_by = auth.uid() and created_at > now() - interval '1 hour') >= 20 then
+    raise exception 'You have sent 20 messages in the last hour. Wait a little before sending more.' using errcode = 'P0001';
+  end if;
+  select coalesce(nullif(l.full_name, ''), 'Your lecturer') into v_name from uniattend.lecturers l
+   where l.institution_id = m.institution_id and l.user_id = auth.uid();
+  insert into uniattend.announcements (institution_id, title, body, audience, target_kind, target_id, category, sender_name, created_by)
+  values (m.institution_id, m.code || ' · ' || left(trim(p_title), 150), left(trim(p_body), 2000), 'students', 'module', m.id,
+          p_category, coalesce(v_name, 'Your lecturer'), auth.uid())
+  returning id into v_id;
+  select count(*) into n from uniattend.notifications where dedupe_key like 'ann:' || v_id || ':%';
+  perform uniattend.write_audit(m.institution_id, 'class_message', 'modules', m.id::text, jsonb_build_object('category', p_category, 'recipients', n));
+  return n;
+end $$;
+
+create or replace function uniattend.push_claim(p_secret text, p_limit int default 500)
+returns table (notification_id uuid, kind text, title text, body text, link text, created_at timestamptz,
+               institution_name text, logo_url text, endpoint text, p256dh text, auth text)
+language plpgsql security definer set search_path = '' as $$
+declare v_minutes int; v_ids uuid[];
+begin
+  if not uniattend.push_secret_ok(p_secret) then raise exception 'not allowed' using errcode = '42501'; end if;
+  select reminder_minutes into v_minutes from uniattend.push_config where id = 1;
+  perform uniattend.queue_class_reminders(v_minutes);
+
+  update uniattend.notifications n set pushed_at = now()
+   where n.pushed_at is null and n.created_at < now() - interval '1 hour';
+
+  with picked as (
+    select n.id from uniattend.notifications n
+    where n.pushed_at is null
+    order by n.created_at
+    limit least(greatest(coalesce(p_limit, 500), 1), 2000)
+    for update skip locked),
+  claimed as (
+    update uniattend.notifications n set pushed_at = now()
+      from picked where n.id = picked.id
+    returning n.id)
+  select coalesce(array_agg(id), '{}') into v_ids from claimed;
+
+  return query
+  select n.id, n.kind, n.title, n.body, n.link, n.created_at,
+         coalesce(nullif(i.theme->'header'->>'title', ''), i.name),
+         nullif(i.theme->'header'->>'logoUrl', ''),
+         ps.endpoint, ps.p256dh, ps.auth
+  from uniattend.notifications n
+  join uniattend.push_subscriptions ps on ps.user_id = n.user_id
+  left join uniattend.institutions i on i.id = n.institution_id
+  where n.id = any(v_ids)
+    and coalesce((ps.prefs->>(case when n.kind in ('class_reminder', 'class_update') then 'classes'
+                                   when n.kind = 'announcement' then 'announcements'
+                                   else 'attendance' end))::boolean, true);
+end $$;
+
+revoke all on function uniattend.announcement_recipients(uniattend.announcements) from public, anon, authenticated;
+revoke all on function uniattend.send_class_message(uuid, text, text, text) from public, anon;
+grant execute on function uniattend.send_class_message(uuid, text, text, text) to authenticated;
+
+
+-- ===================================================== 20261112000019_theme_versions_branding.sql
+-- UniAttend 0019 — design drafts, version history, branded sign-in and logo upload.
+--
+-- * theme_versions: an institution's unpublished draft (one at most) and every
+--   published design (the newest 30 are kept), so admins can work on a design
+--   without everyone seeing it, and go back to an earlier one.
+-- * save_theme_draft / discard_theme_draft / publish_theme: the only way to
+--   write them; admins of that institution only, audited.
+-- * public_branding(key): the name, logo, colours and sign-in text of one
+--   institution, readable before signing in so the sign-in page carries the
+--   institution's look. Nothing else about the institution is exposed.
+-- * Storage bucket "branding" for uploaded logos (PNG, JPEG or WebP, 512 KB),
+--   public to read; only an institution's admins write in its own folder.
+
+create table if not exists uniattend.theme_versions (
+  id              uuid primary key default gen_random_uuid(),
+  institution_id  uuid not null references uniattend.institutions(id) on delete cascade,
+  status          text not null check (status in ('draft','published')),
+  theme           jsonb not null check (jsonb_typeof(theme) = 'object' and pg_column_size(theme) < 16384),
+  note            text check (length(note) <= 120),
+  created_by      uuid references auth.users(id) on delete set null,
+  created_by_name text,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+create unique index if not exists theme_versions_one_draft on uniattend.theme_versions(institution_id) where status = 'draft';
+create index if not exists theme_versions_history on uniattend.theme_versions(institution_id, created_at desc);
+
+alter table uniattend.theme_versions enable row level security;
+drop policy if exists theme_versions_select on uniattend.theme_versions;
+create policy theme_versions_select on uniattend.theme_versions for select to authenticated
+  using (uniattend.is_super_admin() or uniattend.is_inst_admin(institution_id));
+-- no insert/update/delete policies: writes go through the functions below
+grant select on uniattend.theme_versions to authenticated;
+
+create or replace function uniattend.theme_author()
+returns text language sql stable security definer set search_path = '' as $$
+  select nullif(trim(full_name), '') from uniattend.profiles where id = auth.uid();
+$$;
+
+create or replace function uniattend.save_theme_draft(p_institution uuid, p_theme jsonb)
+returns timestamptz language plpgsql security definer set search_path = '' as $$
+declare v_at timestamptz := now();
+begin
+  if not uniattend.is_inst_admin(p_institution) then
+    raise exception 'only the institution''s administrators can change its design' using errcode = '42501';
+  end if;
+  if jsonb_typeof(p_theme) is distinct from 'object' then raise exception 'not a design'; end if;
+  update uniattend.theme_versions
+     set theme = p_theme, updated_at = v_at, created_by = auth.uid(), created_by_name = uniattend.theme_author()
+   where institution_id = p_institution and status = 'draft';
+  if not found then
+    insert into uniattend.theme_versions (institution_id, status, theme, created_by, created_by_name)
+    values (p_institution, 'draft', p_theme, auth.uid(), uniattend.theme_author());
+  end if;
+  return v_at;
+end $$;
+
+create or replace function uniattend.discard_theme_draft(p_institution uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if not uniattend.is_inst_admin(p_institution) then
+    raise exception 'only the institution''s administrators can change its design' using errcode = '42501';
+  end if;
+  delete from uniattend.theme_versions where institution_id = p_institution and status = 'draft';
+end $$;
+
+create or replace function uniattend.publish_theme(p_institution uuid, p_theme jsonb, p_note text default null)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare v_id uuid; v_old jsonb;
+begin
+  if not uniattend.is_inst_admin(p_institution) then
+    raise exception 'only the institution''s administrators can change its design' using errcode = '42501';
+  end if;
+  if jsonb_typeof(p_theme) is distinct from 'object' then raise exception 'not a design'; end if;
+  select theme into v_old from uniattend.institutions where id = p_institution;
+  -- The first publish keeps the design that was live before history existed.
+  if v_old is not null and v_old <> '{}'::jsonb
+     and not exists (select 1 from uniattend.theme_versions where institution_id = p_institution and status = 'published') then
+    insert into uniattend.theme_versions (institution_id, status, theme, note, created_at)
+    values (p_institution, 'published', v_old, 'Design before version history', now() - interval '1 second');
+  end if;
+  update uniattend.institutions
+     set theme = p_theme,
+         brand_primary = case when p_theme->'colors'->>'primary' ~ '^#[0-9a-fA-F]{6}$' then p_theme->'colors'->>'primary' else brand_primary end
+   where id = p_institution;
+  insert into uniattend.theme_versions (institution_id, status, theme, note, created_by, created_by_name)
+  values (p_institution, 'published', p_theme, nullif(left(trim(coalesce(p_note, '')), 120), ''), auth.uid(), uniattend.theme_author())
+  returning id into v_id;
+  delete from uniattend.theme_versions where institution_id = p_institution and status = 'draft';
+  delete from uniattend.theme_versions where id in (
+    select id from uniattend.theme_versions where institution_id = p_institution and status = 'published'
+     order by created_at desc offset 30);
+  perform uniattend.write_audit(p_institution, 'theme_published', 'institutions', p_institution::text,
+    jsonb_build_object('version', v_id, 'note', p_note));
+  return v_id;
+end $$;
+
+-- What the sign-in page may show before anyone signs in: by slug or id.
+create or replace function uniattend.public_branding(p_key text)
+returns jsonb language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object(
+           'id', i.id, 'slug', i.slug, 'name', i.name,
+           'theme', jsonb_strip_nulls(jsonb_build_object(
+             'colors', i.theme->'colors', 'appearance', i.theme->'appearance', 'shape', i.theme->'shape',
+             'font', i.theme->'font', 'login', i.theme->'login',
+             'header', jsonb_build_object('title', i.theme->'header'->'title', 'subtitle', i.theme->'header'->'subtitle',
+                                          'logoUrl', i.theme->'header'->'logoUrl'))),
+           'brand_primary', i.brand_primary)
+    from uniattend.institutions i
+   where i.deleted_at is null and i.status in ('active','pending')
+     and (i.slug = lower(trim(p_key))
+          or (p_key ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' and i.id::text = lower(p_key)))
+   limit 1;
+$$;
+
+-- Storage folder check: '<institution id>/file' and the caller administers it.
+create or replace function uniattend.can_write_branding(p_name text)
+returns boolean language plpgsql stable security definer set search_path = '' as $$
+declare v_folder text := split_part(coalesce(p_name, ''), '/', 1);
+begin
+  if v_folder !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then return false; end if;
+  return uniattend.is_inst_admin(v_folder::uuid);
+end $$;
+
+revoke all on function uniattend.theme_author() from public, anon, authenticated;
+revoke all on function uniattend.save_theme_draft(uuid, jsonb) from public, anon;
+revoke all on function uniattend.discard_theme_draft(uuid) from public, anon;
+revoke all on function uniattend.publish_theme(uuid, jsonb, text) from public, anon;
+revoke all on function uniattend.can_write_branding(text) from public, anon;
+grant execute on function uniattend.save_theme_draft(uuid, jsonb) to authenticated;
+grant execute on function uniattend.discard_theme_draft(uuid) to authenticated;
+grant execute on function uniattend.publish_theme(uuid, jsonb, text) to authenticated;
+grant execute on function uniattend.can_write_branding(text) to authenticated;
+grant execute on function uniattend.public_branding(text) to anon, authenticated;
+
+-- Logo bucket (only where Supabase Storage exists; local test databases have none).
+do $$
+begin
+  if to_regclass('storage.buckets') is null or to_regclass('storage.objects') is null then return; end if;
+  execute $sql$
+    insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+    values ('branding', 'branding', true, 524288, array['image/png','image/jpeg','image/webp'])
+    on conflict (id) do update set public = true, file_size_limit = 524288,
+      allowed_mime_types = array['image/png','image/jpeg','image/webp']
+  $sql$;
+  execute 'drop policy if exists branding_insert on storage.objects';
+  execute 'drop policy if exists branding_update on storage.objects';
+  execute 'drop policy if exists branding_delete on storage.objects';
+  execute $sql$create policy branding_insert on storage.objects for insert to authenticated
+    with check (bucket_id = 'branding' and uniattend.can_write_branding(name))$sql$;
+  execute $sql$create policy branding_update on storage.objects for update to authenticated
+    using (bucket_id = 'branding' and uniattend.can_write_branding(name))
+    with check (bucket_id = 'branding' and uniattend.can_write_branding(name))$sql$;
+  execute $sql$create policy branding_delete on storage.objects for delete to authenticated
+    using (bucket_id = 'branding' and uniattend.can_write_branding(name))$sql$;
+end $$;
+
+
+-- ===================================================== 20261112000020_offline_checkin.sql
+-- UniAttend 0020 — check-ins made without signal.
+--
+-- A phone with no signal keeps the evidence it collected at the moment of the
+-- check-in (the QR it scanned or the code typed, location samples, device check
+-- and the time) and sends it when it is back online. check_in_offline() never
+-- accepts such a check-in by itself: it goes to the lecturer as "pending review"
+-- with a plain explanation, and keeps the original time.
+--
+-- * While the session is still open, the QR is checked against the 20-second
+--   window it was shown in: proof the student saw the live code at that time.
+-- * After the session closed, the QR key is gone, so it can't be checked; the
+--   lecturer is told so. An automatic "absent" becomes "pending review"; a
+--   lecturer's own decision is never changed.
+-- * Sent within 48 hours of the check-in, for a time inside the session window.
+
+alter table uniattend.attendance_records drop constraint if exists attendance_records_method_check;
+alter table uniattend.attendance_records add constraint attendance_records_method_check
+  check (method in ('qr','code','manual','acoustic','system','card','offline'));
+alter table uniattend.attendance_evidence drop constraint if exists attendance_evidence_kind_check;
+alter table uniattend.attendance_evidence add constraint attendance_evidence_kind_check
+  check (kind in ('qr','gps','device','acoustic','manual','offline'));
+
+create or replace function uniattend.check_in_offline(p_session uuid, p_code text, p_token text,
+                                                     p_gps jsonb, p_device_hash text, p_captured_at timestamptz)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+  uid uuid := auth.uid();
+  s uniattend.class_sessions; st uniattend.institution_settings; v uniattend.venues; m uniattend.modules;
+  stu uniattend.students; existing uniattend.attendance_records; rec uniattend.attendance_records;
+  reasons jsonb := '[]'::jsonb; layers jsonb := '{}'::jsonb; points float8 := 0; possible float8 := 100;
+  m_tok text[]; step bigint; secret_left boolean; v_shown timestamptz; v_late int; v_tz text;
+  smp jsonb; n int := 0; wsum float8 := 0; lat float8 := 0; lng float8 := 0; acc_sum float8 := 0;
+  acc float8; best_acc float8 := 'infinity'; w float8; signed float8; p float8;
+  fmt text := 'HH24:MI';
+begin
+  if uid is null then raise exception 'not signed in' using errcode = '42501'; end if;
+  if p_captured_at is null then raise exception 'The time of the check-in is missing.' using errcode = 'P0001'; end if;
+
+  -- Which session: by id (from the QR) or by the typed code, among the student's own modules.
+  if p_session is not null then
+    select * into s from uniattend.class_sessions where id = p_session;
+  elsif p_code is not null then
+    select cs.* into s from uniattend.class_sessions cs
+    join uniattend.students x on x.institution_id = cs.institution_id and x.user_id = uid
+    join uniattend.module_enrolments e on e.module_id = cs.module_id and e.student_id = x.id and e.status = 'active'
+    where cs.join_code = upper(trim(p_code))
+      and p_captured_at between cs.opens_at - interval '10 minutes' and cs.closes_at + interval '10 minutes'
+    order by cs.opens_at desc limit 1;
+  end if;
+  if s is null then raise exception 'No session matches that check-in.' using errcode = 'P0002'; end if;
+
+  select * into stu from uniattend.students
+   where institution_id = s.institution_id and user_id = uid and status = 'active' and deleted_at is null;
+  if stu is null or not uniattend.has_role(s.institution_id, array['student']) then
+    raise exception 'You are not registered as a student at this institution.' using errcode = '42501';
+  end if;
+  if not exists (select 1 from uniattend.module_enrolments where module_id = s.module_id and student_id = stu.id and status = 'active') then
+    raise exception 'You are not enrolled in this module.' using errcode = '42501';
+  end if;
+  if not uniattend.institution_can_operate(s.institution_id) then
+    raise exception 'Attendance is unavailable for this institution right now.' using errcode = 'P0001';
+  end if;
+
+  -- The time must be believable: not in the future, inside the session, and sent within 48 hours.
+  if p_captured_at > now() + interval '2 minutes' then
+    raise exception 'The check-in time is in the future. Check the date and time on your phone.' using errcode = 'P0001';
+  end if;
+  if now() - p_captured_at > interval '48 hours' then
+    raise exception 'Check-ins saved without signal must be sent within 48 hours. Ask your lecturer to correct the register.' using errcode = 'P0001';
+  end if;
+  if p_captured_at not between s.opens_at - interval '10 minutes' and s.closes_at + interval '10 minutes' then
+    raise exception 'That check-in was made outside the time the session was open.' using errcode = 'P0001';
+  end if;
+
+  if (select count(*) from uniattend.attendance_verification_events
+      where student_id = stu.id and session_id = s.id and created_at > now() - interval '1 minute') >= 5 then
+    raise exception 'Too many attempts. Wait a minute and try again.' using errcode = 'P0001';
+  end if;
+
+  select * into st from uniattend.institution_settings where institution_id = s.institution_id;
+  select * into m from uniattend.modules where id = s.module_id;
+  if s.venue_id is not null then select * into v from uniattend.venues where id = s.venue_id; end if;
+  select coalesce(i.timezone, 'Africa/Johannesburg') into v_tz from uniattend.institutions i where i.id = s.institution_id;
+
+  -- Already recorded? Only an empty, pending or automatic "absent" record can become a review.
+  select * into existing from uniattend.attendance_records where session_id = s.id and student_id = stu.id;
+  if existing.id is not null and not (existing.status = 'pending_verification'
+       or (existing.status = 'absent' and existing.method = 'system' and existing.overridden_by is null)) then
+    insert into uniattend.attendance_verification_events (institution_id, session_id, student_id, outcome, score, layers, reasons)
+    values (s.institution_id, s.id, stu.id, 'duplicate', coalesce(existing.score, 0), '{"offline": true}', '["Already recorded"]');
+    return jsonb_build_object('outcome', 'duplicate', 'status', existing.status, 'score', existing.score,
+      'reasons', jsonb_build_array(case when existing.status = 'absent'
+        then 'Your lecturer has already recorded this session. If it is wrong, dispute it from your history.'
+        else 'You are already recorded for this session.' end));
+  end if;
+
+  reasons := reasons || to_jsonb(format('Checked in without signal at %s; sent at %s.',
+    to_char(p_captured_at at time zone v_tz, fmt), to_char(now() at time zone v_tz, fmt)));
+
+  -- The QR, against the window it was shown in.
+  secret_left := exists (select 1 from uniattend.session_secrets where session_id = s.id);
+  m_tok := regexp_match(coalesce(p_token, ''), '^([0-9]{1,12})\.([A-Za-z0-9_-]{22})$');
+  if p_session is not null and m_tok is not null and secret_left then
+    step := m_tok[1]::bigint;
+    if uniattend.qr_sign(s.id, step) is distinct from m_tok[2] then
+      reasons := reasons || '"The scanned QR code was not valid for this session."';
+      layers := layers || jsonb_build_object('qr', jsonb_build_object('points', 0, 'max', 40, 'valid', false));
+    else
+      v_shown := to_timestamp(step * 20);
+      if abs(extract(epoch from p_captured_at - v_shown)) > 120 then
+        points := points + 10;
+        reasons := reasons || to_jsonb(format('The QR code scanned was the one on screen at %s, but the phone says it checked in at %s.',
+          to_char(v_shown at time zone v_tz, fmt), to_char(p_captured_at at time zone v_tz, fmt)));
+      else
+        points := points + 40;
+        reasons := reasons || to_jsonb(format('The QR code matches the one on screen at %s.', to_char(v_shown at time zone v_tz, fmt)));
+      end if;
+      layers := layers || jsonb_build_object('qr', jsonb_build_object('points', case when abs(extract(epoch from p_captured_at - v_shown)) > 120 then 10 else 40 end,
+                                                                     'max', 40, 'step', step, 'shown_at', v_shown));
+    end if;
+  elsif p_session is not null and m_tok is not null then
+    points := points + 15;
+    reasons := reasons || '"The session had closed before this was sent, so the QR code could not be checked."';
+    layers := layers || jsonb_build_object('qr', jsonb_build_object('points', 15, 'max', 40, 'checkable', false));
+  elsif p_session is not null and p_token ~ '^P\.' then
+    points := points + case when uniattend.qr_verify(s.id, p_token) = -1 then 30 else 0 end;
+    reasons := reasons || to_jsonb(case when uniattend.qr_verify(s.id, p_token) = -1 then 'Scanned the printed QR code.' else 'The printed QR code could not be checked.' end);
+    layers := layers || jsonb_build_object('qr', jsonb_build_object('printed', true, 'max', 40));
+  elsif upper(trim(coalesce(p_code, ''))) = s.join_code then
+    points := points + 15;
+    reasons := reasons || '"Typed the session code instead of scanning the QR."';
+    layers := layers || jsonb_build_object('qr', jsonb_build_object('points', 15, 'max', 40, 'typed_code', true));
+  else
+    reasons := reasons || '"No valid session code was provided."';
+    layers := layers || jsonb_build_object('qr', jsonb_build_object('points', 0, 'max', 40));
+  end if;
+
+  -- Location at the time, if it was shared.
+  if p_gps is not null and jsonb_typeof(p_gps->'samples') = 'array' and (v.lat is not null or v.polygon is not null) then
+    for smp in select value from jsonb_array_elements(p_gps->'samples') limit 20 loop
+      if jsonb_typeof(smp->'lat') = 'number' and jsonb_typeof(smp->'lng') = 'number' and jsonb_typeof(smp->'accuracy') = 'number'
+         and (smp->>'lat')::float8 between -90 and 90 and (smp->>'lng')::float8 between -180 and 180 and (smp->>'accuracy')::float8 > 0 then
+        acc := (smp->>'accuracy')::float8; w := 1 / greatest(9, acc * acc);
+        lat := lat + w * (smp->>'lat')::float8; lng := lng + w * (smp->>'lng')::float8; wsum := wsum + w;
+        acc_sum := acc_sum + acc; best_acc := least(best_acc, acc); n := n + 1;
+      end if;
+    end loop;
+  end if;
+  if n > 0 then
+    lat := lat / wsum; lng := lng / wsum; acc := greatest(3, least(acc_sum / n, best_acc));
+    signed := case when v.polygon is not null then uniattend.polygon_signed_distance_m(lat, lng, v.polygon)
+                   else uniattend.geo_distance_m(lat, lng, v.lat, v.lng) - coalesce(v.radius_m, st.gps_default_radius_m) end;
+    p := 1 / (1 + exp(least(50, greatest(-50, 1.7 * signed / greatest(4, acc * 0.6)))));
+    points := points + 40 * p;
+    reasons := reasons || to_jsonb(case when p >= 0.5 then format('Location at the time was in the venue (±%s m).', round(acc))
+      else format('Location at the time was about %s m outside the venue (±%s m).', round(greatest(signed, 0)), round(acc)) end);
+    layers := layers || jsonb_build_object('gps', jsonb_build_object('points', round((40 * p)::numeric, 1), 'max', 40, 'samples', n,
+      'accuracy_m', round(acc::numeric, 0), 'outside_by_m', round(greatest(signed, 0)::numeric, 0), 'p_inside', round(p::numeric, 2)));
+  elsif s.require_gps then
+    reasons := reasons || '"Location was not available at the time."';
+    layers := layers || jsonb_build_object('gps', jsonb_build_object('points', 0, 'max', 40, 'shared', false));
+  else
+    possible := possible - 40;
+  end if;
+
+  -- Device.
+  if p_device_hash is null or p_device_hash !~ '^[0-9a-f]{64}$' then
+    points := points + 10; p_device_hash := null;
+  elsif exists (select 1 from uniattend.attendance_records where session_id = s.id and device_hash = p_device_hash and student_id <> stu.id) then
+    reasons := reasons || '"This device was also used to check in another student for this session."';
+  else
+    points := points + 20;
+  end if;
+
+  v_late := case when p_captured_at > s.late_after then greatest(1, floor(extract(epoch from p_captured_at - s.late_after) / 60))::int end;
+  if v_late is not null then reasons := reasons || to_jsonb(format('That was %s min after the grace period ended.', v_late)); end if;
+
+  insert into uniattend.attendance_records as ar (institution_id, session_id, module_id, student_id, status, method,
+                                                  score, checked_in_at, device_hash, explanation, minutes_late)
+  values (s.institution_id, s.id, s.module_id, stu.id, 'pending_verification', 'offline',
+          round(100 * points / possible), p_captured_at, p_device_hash, reasons, v_late)
+  on conflict (session_id, student_id) do update
+    set status = 'pending_verification', method = 'offline', score = excluded.score, checked_in_at = excluded.checked_in_at,
+        device_hash = excluded.device_hash, explanation = excluded.explanation, minutes_late = excluded.minutes_late
+    where (ar.status = 'pending_verification' and excluded.score > coalesce(ar.score, 0))
+       or (ar.status = 'absent' and ar.method = 'system' and ar.overridden_by is null)
+  returning * into rec;
+  if rec.id is null then select * into rec from uniattend.attendance_records where session_id = s.id and student_id = stu.id; end if;
+
+  insert into uniattend.attendance_evidence (institution_id, record_id, kind, data)
+  values (s.institution_id, rec.id, 'offline', layers || jsonb_build_object('captured_at', p_captured_at, 'sent_at', now()));
+  insert into uniattend.attendance_verification_events (institution_id, session_id, student_id, outcome, score, layers, reasons, token_step)
+  values (s.institution_id, s.id, stu.id, 'review', least(100, greatest(0, rec.score)), layers || '{"offline": true}', reasons, step);
+  insert into uniattend.notifications (institution_id, user_id, kind, title, body, link)
+  values (s.institution_id, uid, 'check_in_review', m.code || ': check-in sent for review',
+          'You checked in without signal at ' || to_char(p_captured_at at time zone v_tz, fmt) || '. Your lecturer will confirm it.', '/student/history');
+
+  return jsonb_build_object('outcome', 'review', 'status', rec.status, 'score', rec.score, 'reasons', reasons,
+                            'module_code', m.code, 'session_title', s.title, 'checked_in_at', rec.checked_in_at, 'offline', true);
+end $$;
+
+revoke all on function uniattend.check_in_offline(uuid, text, text, jsonb, text, timestamptz) from public, anon;
+grant execute on function uniattend.check_in_offline(uuid, text, text, jsonb, text, timestamptz) to authenticated;
+
+
+-- ===================================================== 20261113000021_membership_consent.sql
+-- UniAttend 0021 — nobody is added to an institution without it being approved,
+-- without being told, and without a way out.
+--
+-- * Accounts are linked to student/lecturer records (by confirmed email) only in
+--   ACTIVE institutions. Anyone can apply for an institution and administer it
+--   while it is pending; until the platform approves it, it can't attach other
+--   people's accounts. grant_role likewise needs an active institution.
+-- * Whoever is added gets a notification naming the institution and role.
+-- * leave_institution(): a person removes their own membership. The institution's
+--   admins can't add them back (grant_role / set_role_status refuse); only the
+--   platform administrator can, e.g. after the person asks.
+
+alter table uniattend.user_roles add column if not exists left_at timestamptz;
+
+create or replace function uniattend.notify_joined(p_user uuid, p_inst uuid, p_role text)
+returns void language sql security definer set search_path = '' as $$
+  insert into uniattend.notifications (institution_id, user_id, kind, title, body, link)
+  select p_inst, p_user, 'membership',
+         'Added to ' || i.name,
+         'You now have access to ' || i.name || ' as ' || replace(p_role, '_', ' ') ||
+         '. If this isn''t you or you don''t study or work there, open Security and choose Leave.', '/settings'
+  from uniattend.institutions i where i.id = p_inst;
+$$;
+
+create or replace function uniattend.link_my_accounts()
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+  uid uuid := auth.uid();
+  em text; confirmed timestamptz; localpart text; v_domain text;
+  n_students int := 0; n_lecturers int := 0; r record;
+begin
+  if uid is null then raise exception 'not signed in' using errcode = '42501'; end if;
+  perform uniattend.ensure_profile();
+  select lower(u.email), u.email_confirmed_at into em, confirmed from auth.users u where u.id = uid;
+  if em is null or confirmed is null then
+    return jsonb_build_object('linked', false, 'reason', 'Confirm your email address first.');
+  end if;
+  localpart := split_part(em, '@', 1);
+  v_domain := split_part(em, '@', 2);
+
+  for r in
+    with c as (
+      update uniattend.students s set user_id = uid
+      where s.user_id is null and s.deleted_at is null and s.status = 'active'
+        and exists (select 1 from uniattend.institutions i where i.id = s.institution_id and i.status = 'active' and i.deleted_at is null)
+        and not exists (select 1 from uniattend.user_roles x where x.user_id = uid and x.institution_id = s.institution_id and x.left_at is not null)
+        and (lower(s.email) = em
+             or (lower(s.student_number) = localpart and exists (
+                   select 1 from uniattend.institution_domains d
+                   where d.institution_id = s.institution_id and d.domain = v_domain and d.verified_at is not null)))
+        and not exists (select 1 from uniattend.students s2 where s2.institution_id = s.institution_id and s2.user_id = uid)
+      returning s.institution_id)
+    insert into uniattend.user_roles (user_id, institution_id, role)
+    select uid, institution_id, 'student' from c
+    on conflict (user_id, institution_id, role) do nothing
+    returning institution_id
+  loop
+    n_students := n_students + 1;
+    perform uniattend.notify_joined(uid, r.institution_id, 'student');
+  end loop;
+
+  for r in
+    with c as (
+      update uniattend.lecturers l set user_id = uid
+      where l.user_id is null and l.deleted_at is null and l.status = 'active' and lower(l.email) = em
+        and exists (select 1 from uniattend.institutions i where i.id = l.institution_id and i.status = 'active' and i.deleted_at is null)
+        and not exists (select 1 from uniattend.user_roles x where x.user_id = uid and x.institution_id = l.institution_id and x.left_at is not null)
+        and not exists (select 1 from uniattend.lecturers l2 where l2.institution_id = l.institution_id and l2.user_id = uid)
+      returning l.institution_id)
+    insert into uniattend.user_roles (user_id, institution_id, role)
+    select uid, institution_id, 'lecturer' from c
+    on conflict (user_id, institution_id, role) do nothing
+    returning institution_id
+  loop
+    n_lecturers := n_lecturers + 1;
+    perform uniattend.notify_joined(uid, r.institution_id, 'lecturer');
+  end loop;
+
+  return jsonb_build_object('linked', true, 'students', n_students, 'lecturers', n_lecturers);
+end $$;
+
+create or replace function uniattend.grant_role(p_inst uuid, p_email text, p_role text)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare target uuid; confirmed timestamptz; rid uuid; prev uniattend.user_roles;
+begin
+  if p_role = 'super_admin' then
+    if not uniattend.is_super_admin() then raise exception 'super admin only' using errcode = '42501'; end if;
+    p_inst := null;
+  else
+    if p_role not in ('institution_admin','lecturer','student') then raise exception 'bad role'; end if;
+    if not uniattend.is_inst_admin(p_inst) then raise exception 'institution admin only' using errcode = '42501'; end if;
+    if not uniattend.is_super_admin() and not exists (
+         select 1 from uniattend.institutions where id = p_inst and status = 'active' and deleted_at is null) then
+      raise exception 'Your institution must be approved before you can add people to it.' using errcode = '42501';
+    end if;
+  end if;
+  select id, email_confirmed_at into target, confirmed from auth.users where lower(email) = lower(trim(p_email));
+  if target is null then raise exception 'No account uses that email yet. Ask them to sign up first.'; end if;
+  if confirmed is null then
+    raise exception 'That account has not confirmed its email yet. Ask them to click the link in their confirmation email, then try again.';
+  end if;
+  select * into prev from uniattend.user_roles where user_id = target and institution_id is not distinct from p_inst and left_at is not null limit 1;
+  if prev.id is not null and not uniattend.is_super_admin() then
+    raise exception 'This person left your institution, so they can''t be added back from here. Ask them to contact UniAttend support.' using errcode = '42501';
+  end if;
+  insert into uniattend.user_roles (user_id, institution_id, role, granted_by)
+  values (target, p_inst, p_role, auth.uid())
+  on conflict (user_id, institution_id, role) do update set status = 'active', left_at = null
+  returning id into rid;
+  if p_inst is not null then perform uniattend.notify_joined(target, p_inst, p_role); end if;
+  return rid;
+end $$;
+
+create or replace function uniattend.set_role_status(p_role_id uuid, p_status text)
+returns void language plpgsql security definer set search_path = '' as $$
+declare r uniattend.user_roles;
+begin
+  select * into r from uniattend.user_roles where id = p_role_id;
+  if r is null then raise exception 'no such role'; end if;
+  if r.role = 'super_admin' or r.institution_id is null then
+    if not uniattend.is_super_admin() then raise exception 'super admin only' using errcode = '42501'; end if;
+  elsif not uniattend.is_inst_admin(r.institution_id) then
+    raise exception 'institution admin only' using errcode = '42501';
+  end if;
+  if r.user_id = auth.uid() and p_status <> 'active' then
+    raise exception 'you cannot suspend your own access';
+  end if;
+  if p_status not in ('active','suspended') then raise exception 'bad status'; end if;
+  if p_status = 'active' and r.left_at is not null and not uniattend.is_super_admin() then
+    raise exception 'This person left your institution, so they can''t be added back from here.' using errcode = '42501';
+  end if;
+  update uniattend.user_roles set status = p_status, left_at = case when p_status = 'active' then null else left_at end where id = p_role_id;
+end $$;
+
+-- A person leaves an institution: all their roles there stop, and it is recorded.
+create or replace function uniattend.leave_institution(p_inst uuid)
+returns int language plpgsql security definer set search_path = '' as $$
+declare uid uuid := auth.uid(); n int;
+begin
+  if uid is null then raise exception 'not signed in' using errcode = '42501'; end if;
+  if exists (select 1 from uniattend.user_roles where user_id = uid and institution_id = p_inst and role = 'institution_admin' and status = 'active')
+     and not exists (select 1 from uniattend.user_roles where institution_id = p_inst and role = 'institution_admin' and status = 'active' and user_id <> uid) then
+    raise exception 'You are this institution''s only administrator. Add another administrator before leaving.' using errcode = 'P0001';
+  end if;
+  update uniattend.user_roles set status = 'suspended', left_at = now()
+   where user_id = uid and institution_id = p_inst and left_at is null;
+  get diagnostics n = row_count;
+  if n > 0 then
+    perform uniattend.write_audit(p_inst, 'left_institution', 'user_roles', uid::text, '{}'::jsonb);
+  end if;
+  return n;
+end $$;
+
+revoke all on function uniattend.notify_joined(uuid, uuid, text) from public, anon, authenticated;
+revoke all on function uniattend.leave_institution(uuid) from public, anon;
+grant execute on function uniattend.leave_institution(uuid) to authenticated;
+
+
+-- ===================================================== 20261113000022_manual_billing.sql
+-- UniAttend 0022 — invoicing by hand, and warning before access runs out.
+--
+-- * record_manual_payment(): the platform administrator records an invoice paid
+--   by EFT (amount, reference, months). It is kept in payments (provider
+--   'manual'), the subscription becomes active and is extended from whichever is
+--   later, today or its current end. Audited. Same reference twice is refused.
+-- * subscription_notice(): what an institution's own admins see: plan, status,
+--   end date, days left and whether attendance is running, so a trial or paid
+--   period never ends without warning.
+
+create or replace function uniattend.record_manual_payment(p_inst uuid, p_amount_cents bigint, p_reference text,
+                                                          p_months int, p_plan_code text default null)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare sub uniattend.institution_subscriptions; v_plan uuid; v_from timestamptz; v_end timestamptz; v_pay uuid;
+begin
+  if not uniattend.is_super_admin() then raise exception 'super admin only' using errcode = '42501'; end if;
+  if p_amount_cents is null or p_amount_cents < 0 then raise exception 'Enter the amount paid.'; end if;
+  if p_months is null or p_months not between 1 and 36 then raise exception 'Choose between 1 and 36 months.'; end if;
+  if length(trim(coalesce(p_reference, ''))) < 3 then raise exception 'Enter the invoice or EFT reference.'; end if;
+  if exists (select 1 from uniattend.payments where provider = 'manual' and provider_ref = trim(p_reference)) then
+    raise exception 'A payment with that reference is already recorded.';
+  end if;
+  if p_plan_code is not null then
+    select id into v_plan from uniattend.subscription_plans where code = p_plan_code;
+    if v_plan is null then raise exception 'no such plan'; end if;
+  end if;
+
+  select * into sub from uniattend.institution_subscriptions
+   where institution_id = p_inst and status in ('trialing','active','past_due','suspended') limit 1;
+  v_from := greatest(now(), coalesce(case when sub.status = 'active' then sub.current_period_end end, now()));
+  v_end := v_from + make_interval(months => p_months);
+
+  if sub.id is null then
+    if v_plan is null then select id into v_plan from uniattend.subscription_plans where code = 'starter'; end if;
+    insert into uniattend.institution_subscriptions (institution_id, plan_id, status, current_period_end)
+    values (p_inst, v_plan, 'active', v_end) returning * into sub;
+  else
+    update uniattend.institution_subscriptions
+       set status = 'active', current_period_end = v_end, plan_id = coalesce(v_plan, plan_id)
+     where id = sub.id returning * into sub;
+  end if;
+
+  insert into uniattend.payments (institution_id, subscription_id, provider, provider_ref, amount_cents, currency, status, verified_at)
+  values (p_inst, sub.id, 'manual', trim(p_reference), p_amount_cents, 'ZAR', 'succeeded', now())
+  returning id into v_pay;
+  perform uniattend.write_audit(p_inst, 'manual_payment', 'payments', v_pay::text,
+    jsonb_build_object('amount_cents', p_amount_cents, 'reference', trim(p_reference), 'months', p_months, 'until', v_end));
+  insert into uniattend.notifications (institution_id, user_id, kind, title, body, link)
+  select p_inst, r.user_id, 'institution_status', 'Payment received',
+         'Thank you. UniAttend is active until ' || to_char(v_end at time zone 'Africa/Johannesburg', 'DD Mon YYYY') || '.', '/admin'
+  from uniattend.user_roles r where r.institution_id = p_inst and r.role = 'institution_admin' and r.status = 'active';
+  return jsonb_build_object('payment', v_pay, 'active_until', v_end);
+end $$;
+
+create or replace function uniattend.subscription_notice(p_inst uuid)
+returns jsonb language sql stable security definer set search_path = '' as $$
+  select case when not (uniattend.is_inst_admin(p_inst) or uniattend.is_super_admin()) then null else
+    (select jsonb_build_object(
+       'plan', (lp.plan).name, 'status', lp.sub_status, 'ends_at', lp.period_end,
+       'days_left', case when lp.period_end is null then null else floor(extract(epoch from lp.period_end - now()) / 86400)::int end,
+       'operating', uniattend.institution_can_operate(p_inst))
+     from uniattend.live_plan(p_inst) lp)
+  end;
+$$;
+
+revoke all on function uniattend.record_manual_payment(uuid, bigint, text, int, text) from public, anon;
+revoke all on function uniattend.subscription_notice(uuid) from public, anon;
+grant execute on function uniattend.record_manual_payment(uuid, bigint, text, int, text) to authenticated;
+grant execute on function uniattend.subscription_notice(uuid) to authenticated;
+
+
+-- ===================================================== 20261113000023_data_governance.sql
+-- UniAttend 0023 — keeping personal information no longer than needed, and
+-- letting people see and ask about what is held about them (POPIA ss 14, 23–25).
+--
+-- * Retention: each institution already sets retention_days (default 3 years).
+--   retention_preview() shows what is older than that; apply_retention() deletes
+--   it (institution admins, audited); with auto_retention on, run_retention()
+--   does it every night. Off by default: the institution, as the responsible
+--   party, decides when its records are deleted.
+--   Deleted: closed/cancelled sessions older than the period (with their
+--   attendance records, evidence, check-in events and disputes), stray check-in
+--   events, notifications, announcements, resolved early-warning alerts, audit
+--   entries, and student records removed from the register before the cut-off.
+--   Lecturers removed before the cut-off are anonymised (their sessions stay).
+-- * my_personal_data(): everything UniAttend holds about the signed-in person,
+--   as one JSON document they can download.
+-- * data_requests: a person asks for deletion, correction or objects; the
+--   platform administrator and the person's institution admins see it and record
+--   the outcome.
+
+alter table uniattend.institution_settings
+  add column if not exists auto_retention boolean not null default false,
+  add column if not exists retention_last_run timestamptz;
+
+-- What is past the institution's retention period, without deleting anything.
+create or replace function uniattend.retention_counts(p_inst uuid)
+returns jsonb language plpgsql stable security definer set search_path = '' as $$
+declare cutoff timestamptz;
+begin
+  select now() - make_interval(days => retention_days) into cutoff from uniattend.institution_settings where institution_id = p_inst;
+  if cutoff is null then return null; end if;
+  return jsonb_build_object(
+    'cutoff', cutoff,
+    'sessions', (select count(*) from uniattend.class_sessions where institution_id = p_inst and status in ('closed','cancelled') and coalesce(closed_at, closes_at) < cutoff),
+    'attendance_records', (select count(*) from uniattend.attendance_records r join uniattend.class_sessions s on s.id = r.session_id
+                           where s.institution_id = p_inst and s.status in ('closed','cancelled') and coalesce(s.closed_at, s.closes_at) < cutoff),
+    'notifications', (select count(*) from uniattend.notifications where institution_id = p_inst and created_at < cutoff),
+    'announcements', (select count(*) from uniattend.announcements where institution_id = p_inst and created_at < cutoff),
+    'alerts', (select count(*) from uniattend.student_alerts where institution_id = p_inst and resolved_at < cutoff),
+    'audit_entries', (select count(*) from uniattend.audit_logs where institution_id = p_inst and created_at < cutoff),
+    'removed_students', (select count(*) from uniattend.students where institution_id = p_inst and deleted_at < cutoff),
+    'removed_lecturers', (select count(*) from uniattend.lecturers where institution_id = p_inst and deleted_at < cutoff and full_name <> 'Former lecturer'));
+end $$;
+
+create or replace function uniattend.retention_preview(p_inst uuid)
+returns jsonb language plpgsql stable security definer set search_path = '' as $$
+begin
+  if not (uniattend.is_inst_admin(p_inst) or uniattend.is_super_admin()) then
+    raise exception 'institution admin only' using errcode = '42501';
+  end if;
+  return uniattend.retention_counts(p_inst) || jsonb_build_object(
+    'retention_days', (select retention_days from uniattend.institution_settings where institution_id = p_inst),
+    'auto', (select auto_retention from uniattend.institution_settings where institution_id = p_inst),
+    'last_run', (select retention_last_run from uniattend.institution_settings where institution_id = p_inst));
+end $$;
+
+-- The deletion itself. Internal: called by apply_retention (admins) and run_retention (nightly).
+create or replace function uniattend.retention_delete(p_inst uuid, p_by text)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare cutoff timestamptz; counts jsonb;
+begin
+  counts := uniattend.retention_counts(p_inst);
+  if counts is null then return null; end if;
+  cutoff := (counts->>'cutoff')::timestamptz;
+  delete from uniattend.class_sessions where institution_id = p_inst and status in ('closed','cancelled') and coalesce(closed_at, closes_at) < cutoff;
+  delete from uniattend.attendance_verification_events where institution_id = p_inst and created_at < cutoff;
+  delete from uniattend.notifications where institution_id = p_inst and created_at < cutoff;
+  delete from uniattend.announcements where institution_id = p_inst and created_at < cutoff;
+  delete from uniattend.student_alert_events where institution_id = p_inst and created_at < cutoff;
+  delete from uniattend.student_alerts where institution_id = p_inst and resolved_at < cutoff;
+  delete from uniattend.audit_logs where institution_id = p_inst and created_at < cutoff;
+  delete from uniattend.students where institution_id = p_inst and deleted_at < cutoff;
+  update uniattend.lecturers set full_name = 'Former lecturer', email = null, user_id = null
+   where institution_id = p_inst and deleted_at < cutoff and full_name <> 'Former lecturer';
+  update uniattend.institution_settings set retention_last_run = now() where institution_id = p_inst;
+  -- Recorded after the clean-up, so this entry itself is kept.
+  perform uniattend.write_audit(p_inst, 'retention_applied', 'institution_settings', p_inst::text, counts || jsonb_build_object('by', p_by));
+  return counts;
+end $$;
+
+create or replace function uniattend.apply_retention(p_inst uuid)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+begin
+  if not uniattend.is_inst_admin(p_inst) then raise exception 'institution admin only' using errcode = '42501'; end if;
+  return uniattend.retention_delete(p_inst, 'admin');
+end $$;
+
+create or replace function uniattend.set_auto_retention(p_inst uuid, p_on boolean)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if not uniattend.is_inst_admin(p_inst) then raise exception 'institution admin only' using errcode = '42501'; end if;
+  update uniattend.institution_settings set auto_retention = coalesce(p_on, false) where institution_id = p_inst;
+  perform uniattend.write_audit(p_inst, 'auto_retention', 'institution_settings', p_inst::text, jsonb_build_object('on', p_on));
+end $$;
+
+-- Nightly, for institutions that switched it on. Not callable by users.
+create or replace function uniattend.run_retention()
+returns int language plpgsql security definer set search_path = '' as $$
+declare r record; n int := 0;
+begin
+  for r in select s.institution_id from uniattend.institution_settings s
+           join uniattend.institutions i on i.id = s.institution_id
+           where s.auto_retention and i.deleted_at is null loop
+    perform uniattend.retention_delete(r.institution_id, 'schedule');
+    n := n + 1;
+  end loop;
+  return n;
+end $$;
+
+-- ------------------------------------------------------------ access to one's own data
+
+create or replace function uniattend.my_personal_data()
+returns jsonb language plpgsql stable security definer set search_path = '' as $$
+declare uid uuid := auth.uid();
+begin
+  if uid is null then raise exception 'not signed in' using errcode = '42501'; end if;
+  return jsonb_build_object(
+    'generated_at', now(),
+    'about', 'Everything UniAttend holds about your account. Your institution is responsible for these records; ask its administrators to correct anything.',
+    'account', (select jsonb_build_object('id', j->'id', 'email', j->'email', 'created_at', j->'created_at', 'last_sign_in_at', j->'last_sign_in_at')
+                from (select to_jsonb(u) j from auth.users u where u.id = uid) x),
+    'profile', (select to_jsonb(p) - 'avatar_path' from uniattend.profiles p where p.id = uid),
+    'memberships', coalesce((select jsonb_agg(jsonb_build_object('institution', i.name, 'role', r.role, 'status', r.status, 'since', r.created_at, 'left_at', r.left_at))
+                    from uniattend.user_roles r left join uniattend.institutions i on i.id = r.institution_id where r.user_id = uid), '[]'),
+    'student_records', coalesce((select jsonb_agg(jsonb_build_object('institution', i.name, 'student_number', s.student_number, 'full_name', s.full_name,
+                         'email', s.email, 'status', s.status,
+                         'modules', (select jsonb_agg(m.code || ' ' || m.title) from uniattend.module_enrolments e join uniattend.modules m on m.id = e.module_id where e.student_id = s.id),
+                         'attendance', (select jsonb_agg(jsonb_build_object('module', m.code, 'session', cs.title, 'date', cs.opens_at, 'status', ar.status,
+                                          'method', ar.method, 'checked_in_at', ar.checked_in_at, 'minutes_late', ar.minutes_late, 'explanation', ar.explanation)
+                                          order by cs.opens_at)
+                                        from uniattend.attendance_records ar join uniattend.class_sessions cs on cs.id = ar.session_id
+                                        join uniattend.modules m on m.id = ar.module_id where ar.student_id = s.id),
+                         'disputes', (select jsonb_agg(jsonb_build_object('reason', d.reason, 'status', d.status, 'created_at', d.created_at, 'outcome', d.resolution_note))
+                                      from uniattend.attendance_disputes d where d.student_id = s.id),
+                         'early_warning_alerts', (select jsonb_agg(jsonb_build_object('module', m.code, 'kind', a.kind, 'status', a.status, 'percent', a.percent, 'created_at', a.created_at))
+                                                  from uniattend.student_alerts a join uniattend.modules m on m.id = a.module_id where a.student_id = s.id)))
+                       from uniattend.students s join uniattend.institutions i on i.id = s.institution_id where s.user_id = uid), '[]'),
+    'lecturer_records', coalesce((select jsonb_agg(jsonb_build_object('institution', i.name, 'staff_number', l.staff_number, 'full_name', l.full_name, 'email', l.email, 'status', l.status))
+                        from uniattend.lecturers l join uniattend.institutions i on i.id = l.institution_id where l.user_id = uid), '[]'),
+    'notifications', coalesce((select jsonb_agg(jsonb_build_object('title', n.title, 'body', n.body, 'created_at', n.created_at) order by n.created_at desc)
+                     from (select * from uniattend.notifications where user_id = uid order by created_at desc limit 500) n), '[]'),
+    'notification_devices', coalesce((select jsonb_agg(jsonb_build_object('device', ps.user_agent, 'since', ps.created_at, 'settings', ps.prefs))
+                            from uniattend.push_subscriptions ps where ps.user_id = uid), '[]'),
+    'data_requests', coalesce((select jsonb_agg(jsonb_build_object('kind', d.kind, 'status', d.status, 'created_at', d.created_at, 'response', d.response))
+                     from uniattend.data_requests d where d.user_id = uid), '[]'));
+end $$;
+
+-- ------------------------------------------------------------ requests about one's data
+
+create table if not exists uniattend.data_requests (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  kind        text not null check (kind in ('deletion','correction','objection','other')),
+  details     text not null check (length(trim(details)) between 5 and 2000),
+  status      text not null default 'open' check (status in ('open','in_progress','done','declined')),
+  response    text check (length(response) <= 2000),
+  handled_by  uuid references auth.users(id) on delete set null,
+  handled_at  timestamptz,
+  created_at  timestamptz not null default now()
+);
+create index if not exists data_requests_user on uniattend.data_requests(user_id, created_at desc);
+create index if not exists data_requests_open on uniattend.data_requests(status) where status in ('open','in_progress');
+alter table uniattend.data_requests enable row level security;
+drop policy if exists data_requests_select on uniattend.data_requests;
+-- The person, the platform administrator, and admins of an institution the person belongs to.
+create policy data_requests_select on uniattend.data_requests for select to authenticated
+  using (user_id = (select auth.uid()) or uniattend.is_super_admin()
+         or exists (select 1 from uniattend.user_roles r where r.user_id = data_requests.user_id and r.institution_id is not null
+                    and uniattend.is_inst_admin(r.institution_id)));
+grant select on uniattend.data_requests to authenticated;
+
+create or replace function uniattend.request_data_action(p_kind text, p_details text)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare uid uuid := auth.uid(); v_id uuid;
+begin
+  if uid is null then raise exception 'not signed in' using errcode = '42501'; end if;
+  if p_kind not in ('deletion','correction','objection','other') then raise exception 'unknown request type'; end if;
+  if (select count(*) from uniattend.data_requests where user_id = uid and status in ('open','in_progress')) >= 3 then
+    raise exception 'You already have 3 open requests. We''ll answer those first.' using errcode = 'P0001';
+  end if;
+  insert into uniattend.data_requests (user_id, kind, details) values (uid, p_kind, trim(p_details)) returning id into v_id;
+  -- Tell the institution admins and the platform administrator.
+  insert into uniattend.notifications (institution_id, user_id, kind, title, body, link)
+  select distinct on (a.user_id) a.institution_id, a.user_id, 'data_request', 'Personal information request',
+         'Someone at your institution asked for ' || p_kind || ' of their information. Respond within 30 days.', '/admin/requests'
+  from uniattend.user_roles mine join uniattend.user_roles a on a.institution_id = mine.institution_id and a.role = 'institution_admin' and a.status = 'active'
+  where mine.user_id = uid and mine.institution_id is not null;
+  insert into uniattend.notifications (institution_id, user_id, kind, title, body, link)
+  select null, r.user_id, 'data_request', 'Personal information request', 'A new ' || p_kind || ' request is waiting.', '/super/requests'
+  from uniattend.user_roles r where r.role = 'super_admin' and r.status = 'active';
+  return v_id;
+end $$;
+
+create or replace function uniattend.answer_data_request(p_id uuid, p_status text, p_response text)
+returns void language plpgsql security definer set search_path = '' as $$
+declare d uniattend.data_requests;
+begin
+  select * into d from uniattend.data_requests where id = p_id;
+  if d.id is null then raise exception 'no such request'; end if;
+  if not (uniattend.is_super_admin() or exists (select 1 from uniattend.user_roles r where r.user_id = d.user_id and r.institution_id is not null
+                                                and uniattend.is_inst_admin(r.institution_id))) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if p_status not in ('in_progress','done','declined') then raise exception 'bad status'; end if;
+  if p_status in ('done','declined') and length(trim(coalesce(p_response, ''))) < 5 then
+    raise exception 'Tell the person what was done (or why not).';
+  end if;
+  update uniattend.data_requests set status = p_status, response = nullif(trim(p_response), ''), handled_by = auth.uid(), handled_at = now() where id = p_id;
+  insert into uniattend.notifications (institution_id, user_id, kind, title, body, link)
+  values (null, d.user_id, 'data_request', 'Your request: ' || replace(p_status, '_', ' '), coalesce(nullif(trim(p_response), ''), 'We are working on it.'), '/settings');
+end $$;
+
+revoke all on function uniattend.retention_counts(uuid) from public, anon, authenticated;
+revoke all on function uniattend.retention_delete(uuid, text) from public, anon, authenticated;
+revoke all on function uniattend.run_retention() from public, anon, authenticated;
+revoke all on function uniattend.retention_preview(uuid) from public, anon;
+revoke all on function uniattend.apply_retention(uuid) from public, anon;
+revoke all on function uniattend.set_auto_retention(uuid, boolean) from public, anon;
+revoke all on function uniattend.my_personal_data() from public, anon;
+revoke all on function uniattend.request_data_action(text, text) from public, anon;
+revoke all on function uniattend.answer_data_request(uuid, text, text) from public, anon;
+grant execute on function uniattend.retention_preview(uuid) to authenticated;
+grant execute on function uniattend.apply_retention(uuid) to authenticated;
+grant execute on function uniattend.set_auto_retention(uuid, boolean) to authenticated;
+grant execute on function uniattend.my_personal_data() to authenticated;
+grant execute on function uniattend.request_data_action(text, text) to authenticated;
+grant execute on function uniattend.answer_data_request(uuid, text, text) to authenticated;
+
+-- Nightly at 02:30 South African time, where pg_cron is installed (it is on Supabase).
+do $$
+begin
+  if to_regnamespace('cron') is null then return; end if;
+  if exists (select 1 from cron.job where jobname = 'uniattend-retention') then
+    perform cron.unschedule('uniattend-retention');
+  end if;
+  perform cron.schedule('uniattend-retention', '30 0 * * *', 'select uniattend.run_retention()');
+end $$;
+
+
+-- ===================================================== 20261113000024_integrations.sql
+-- UniAttend 0024 — collecting students, lecturers, modules and enrolments automatically.
+--
+-- An institution connects its own systems once, and UniAttend keeps its register
+-- in step with them:
+--   moodle — reads courses and the people enrolled in them from the institution's
+--            Moodle through its web-service API (a read-only token);
+--   feed   — reads a roster file (CSV or JSON) from an https link the student
+--            system publishes, on a schedule;
+--   api    — the institution's system pushes the roster to UniAttend with an API key.
+-- Plus import_roster(): the same roster uploaded by hand by an administrator.
+--
+-- Rules, enforced here rather than in the app:
+-- * A connection belongs to one institution; only its admins see or change it.
+-- * Tokens and keys are write-only: stored in integration_secrets, which nobody can
+--   read (no policy). The token is handed only to the server worker that holds the
+--   dispatch secret; API keys are stored as a SHA-256 hash and shown once.
+-- * A sync adds and updates; it never deletes a student, lecturer or attendance
+--   record. With "drop_missing" on, it marks as dropped only enrolments that the
+--   same connection created, only after a complete run, and never more than half
+--   of them at once (a broken or empty feed can't empty the register).
+-- * People still get access only by signing up with their own confirmed email
+--   (0021): a sync creates register entries, not accounts.
+-- * Trials may import in bulk, so an institution can evaluate with real class lists.
+
+alter table uniattend.module_enrolments add column if not exists source uuid;
+alter table uniattend.lecturer_assignments add column if not exists source uuid;
+
+create table if not exists uniattend.integrations (
+  id                uuid primary key default gen_random_uuid(),
+  institution_id    uuid not null references uniattend.institutions(id) on delete cascade,
+  kind              text not null check (kind in ('moodle','feed','api')),
+  name              text not null check (length(trim(name)) between 2 and 80),
+  base_url          text check (base_url is null or (base_url ~ '^https://[^\s"''<>]+$' and length(base_url) between 12 and 500)),
+  options           jsonb not null default '{}'::jsonb check (jsonb_typeof(options) = 'object' and pg_column_size(options) < 4096),
+  schedule          text not null default 'daily' check (schedule in ('manual','hourly','daily')),
+  status            text not null default 'active' check (status in ('active','paused')),
+  key_hint          text,
+  sync_requested_at timestamptz,
+  claimed_at        timestamptz,
+  run_id            uuid,
+  step_no           int not null default 0,
+  last_run_at       timestamptz,
+  last_status       text,
+  last_summary      jsonb,
+  next_run_at       timestamptz not null default now(),
+  created_by        uuid references auth.users(id) on delete set null,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now(),
+  check ((kind = 'api') = (base_url is null))
+);
+create index if not exists integrations_institution on uniattend.integrations(institution_id);
+create index if not exists integrations_due on uniattend.integrations(next_run_at) where status = 'active';
+
+create table if not exists uniattend.integration_secrets (
+  integration_id uuid primary key references uniattend.integrations(id) on delete cascade,
+  token          text,                                   -- moodle / feed: sent to the institution's own system
+  key_sha256     text check (key_sha256 ~ '^[0-9a-f]{64}$')  -- api: hash of the key the institution's system sends us
+);
+create unique index if not exists integration_secrets_key on uniattend.integration_secrets(key_sha256) where key_sha256 is not null;
+
+create table if not exists uniattend.integration_runs (
+  id              uuid primary key default gen_random_uuid(),
+  integration_id  uuid references uniattend.integrations(id) on delete cascade,
+  institution_id  uuid not null references uniattend.institutions(id) on delete cascade,
+  trigger         text not null default 'schedule' check (trigger in ('schedule','manual','api','upload')),
+  status          text not null default 'running' check (status in ('running','ok','failed')),
+  summary         jsonb not null default '{}'::jsonb,
+  unknown_modules jsonb not null default '[]'::jsonb,
+  errors          jsonb not null default '[]'::jsonb,
+  error           text,
+  started_at      timestamptz not null default now(),
+  finished_at     timestamptz
+);
+create index if not exists integration_runs_recent on uniattend.integration_runs(institution_id, started_at desc);
+
+create table if not exists uniattend.integration_seen (
+  run_id uuid not null references uniattend.integration_runs(id) on delete cascade,
+  module_id uuid not null, student_id uuid not null,
+  primary key (run_id, module_id, student_id)
+);
+create table if not exists uniattend.integration_seen_modules (
+  run_id uuid not null references uniattend.integration_runs(id) on delete cascade,
+  module_id uuid not null,
+  primary key (run_id, module_id)
+);
+
+alter table uniattend.integrations enable row level security;
+alter table uniattend.integration_secrets enable row level security;       -- no policy: nobody reads it
+alter table uniattend.integration_runs enable row level security;
+alter table uniattend.integration_seen enable row level security;          -- no policy
+alter table uniattend.integration_seen_modules enable row level security;  -- no policy
+drop policy if exists integrations_select on uniattend.integrations;
+create policy integrations_select on uniattend.integrations for select to authenticated
+  using (uniattend.is_super_admin() or uniattend.is_inst_admin(institution_id));
+drop policy if exists integration_runs_select on uniattend.integration_runs;
+create policy integration_runs_select on uniattend.integration_runs for select to authenticated
+  using (uniattend.is_super_admin() or uniattend.is_inst_admin(institution_id));
+revoke insert, update, delete on uniattend.integrations, uniattend.integration_runs from anon, authenticated;
+revoke all on uniattend.integration_secrets, uniattend.integration_seen, uniattend.integration_seen_modules from anon, authenticated;
+
+-- Bulk loading: plans with the feature, and any institution still on its trial.
+create or replace function uniattend.can_bulk_import(p_inst uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select uniattend.plan_feature(p_inst, 'bulk_import')
+      or exists (select 1 from uniattend.live_plan(p_inst) lp where lp.sub_status = 'trialing' and lp.period_end > now());
+$$;
+
+-- import_students as in 0006, with the bulk rule above (trials included).
+create or replace function uniattend.import_students(p_inst uuid, p_rows jsonb)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+  pattern text; n_rows int; ins int := 0; upd int := 0; enr int := 0; errors jsonb;
+begin
+  if not uniattend.is_inst_admin(p_inst) then raise exception 'institution admin only' using errcode = '42501'; end if;
+  if jsonb_typeof(p_rows) <> 'array' then raise exception 'rows must be an array'; end if;
+  n_rows := jsonb_array_length(p_rows);
+  if n_rows > 10000 then raise exception 'import at most 10,000 rows at a time'; end if;
+  if n_rows > 50 and not uniattend.can_bulk_import(p_inst) then
+    raise exception 'bulk import of more than 50 students needs the Professional plan' using errcode = 'P0001';
+  end if;
+  select student_number_pattern into pattern from uniattend.institutions where id = p_inst;
+
+  drop table if exists pg_temp._imp;
+  create temp table _imp on commit drop as
+  select n::int as row_no,
+         upper(trim(r->>'student_number')) as sn,
+         left(trim(r->>'full_name'), 200) as full_name,
+         nullif(lower(trim(r->>'email')), '') as email,
+         nullif(upper(trim(r->>'module_code')), '') as module_code,
+         null::text as error
+  from jsonb_array_elements(p_rows) with ordinality t(r, n);
+
+  update pg_temp._imp set error = case
+    when sn is null or sn = '' then 'student number is missing'
+    when pattern is not null and sn !~ pattern then 'student number does not match the institution format'
+    when full_name is null or full_name = '' then 'name is missing'
+    when email is not null and email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then 'email is not valid'
+    when module_code is not null and not exists (select 1 from uniattend.modules m
+         where m.institution_id = p_inst and upper(m.code) = pg_temp._imp.module_code and m.deleted_at is null)
+      then 'unknown module code ' || module_code
+  end
+  -- Every row starts with error null, so this matches all of them. The clause
+  -- is required: Supabase's pg_safeupdate rejects UPDATE without WHERE.
+  where error is null;
+  -- a student number repeated with different names in one file is an error, not a merge
+  update pg_temp._imp i set error = 'student number appears more than once with different details'
+  where error is null and exists (select 1 from pg_temp._imp j where j.sn = i.sn and j.row_no <> i.row_no
+                                  and (j.full_name is distinct from i.full_name or j.email is distinct from i.email));
+
+  with up as (
+    insert into uniattend.students as s (institution_id, student_number, full_name, email)
+    select distinct on (sn) p_inst, sn, full_name, email from pg_temp._imp where error is null order by sn, row_no
+    on conflict (institution_id, student_number) do update
+      set full_name = excluded.full_name, email = coalesce(excluded.email, s.email)
+      where s.deleted_at is null
+    returning (xmax = 0) as inserted)
+  select count(*) filter (where inserted), count(*) filter (where not inserted) into ins, upd from up;
+
+  insert into uniattend.module_enrolments (institution_id, module_id, student_id)
+  select distinct p_inst, m.id, s.id
+  from pg_temp._imp i
+  join uniattend.students s on s.institution_id = p_inst and s.student_number = i.sn
+  join uniattend.modules m on m.institution_id = p_inst and upper(m.code) = i.module_code and m.deleted_at is null
+  where i.error is null and i.module_code is not null
+  on conflict (module_id, student_id) do nothing;
+  get diagnostics enr = row_count;
+
+  select coalesce(jsonb_agg(jsonb_build_object('row', row_no, 'student_number', sn, 'error', error) order by row_no), '[]')
+    into errors from pg_temp._imp where error is not null;
+  perform uniattend.write_audit(p_inst, 'import', 'students', null,
+    jsonb_build_object('rows', n_rows, 'inserted', ins, 'updated', upd, 'enrolled', enr, 'errors', jsonb_array_length(errors)));
+  return jsonb_build_object('inserted', ins, 'updated', upd, 'enrolled', enr, 'errors', errors);
+end $$;
+
+-- ------------------------------------------------------------ applying a roster
+-- p_payload: { "modules": [{"code","title"}],
+--              "people":  [{"role":"student"|"lecturer","number","full_name","email","module_codes":[...]}] }
+create or replace function uniattend.roster_apply(p_inst uuid, p_integration uuid, p_run uuid, p_payload jsonb)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+  opts jsonb := '{}'::jsonb; pattern text; n_people int; v_people jsonb; v_modules jsonb;
+  c_mod int := 0; c_sins int := 0; c_supd int := 0; c_enr int := 0; c_lins int := 0; c_lupd int := 0; c_asg int := 0;
+  errs jsonb; unknown jsonb; n_err int; res jsonb;
+begin
+  if jsonb_typeof(p_payload) is distinct from 'object' then raise exception 'The roster must be a JSON object.' using errcode = 'P0001'; end if;
+  v_people := case when jsonb_typeof(p_payload->'people') = 'array' then p_payload->'people' else '[]'::jsonb end;
+  v_modules := case when jsonb_typeof(p_payload->'modules') = 'array' then p_payload->'modules' else '[]'::jsonb end;
+  n_people := jsonb_array_length(v_people);
+  if n_people > 20000 or jsonb_array_length(v_modules) > 20000 then
+    raise exception 'Send at most 20,000 people and 20,000 modules at a time.' using errcode = 'P0001';
+  end if;
+  if n_people > 50 and not uniattend.can_bulk_import(p_inst) then
+    raise exception 'Loading more than 50 people at once needs the Professional plan.' using errcode = 'P0001';
+  end if;
+  if p_integration is not null then
+    select options into opts from uniattend.integrations where id = p_integration and institution_id = p_inst;
+    if not found then raise exception 'unknown connection'; end if;
+  end if;
+  select student_number_pattern into pattern from uniattend.institutions where id = p_inst;
+
+  drop table if exists pg_temp._rm;
+  create temp table _rm on commit drop as
+  select distinct on (code) code, title from (
+    select upper(trim(m->>'code')) as code, left(trim(coalesce(nullif(trim(m->>'title'), ''), m->>'code')), 200) as title
+    from jsonb_array_elements(v_modules) m) x
+  where length(code) between 2 and 40 order by code;
+
+  if coalesce((opts->>'create_modules')::boolean, false) then
+    insert into uniattend.modules (institution_id, code, title)
+    select p_inst, r.code, r.title from pg_temp._rm r
+    where not exists (select 1 from uniattend.modules m where m.institution_id = p_inst and upper(m.code) = r.code)
+    on conflict do nothing;
+    get diagnostics c_mod = row_count;
+  end if;
+
+  drop table if exists pg_temp._rp;
+  create temp table _rp on commit drop as
+  select n::int as row_no,
+         case when lower(trim(coalesce(r->>'role', 'student'))) in ('lecturer','teacher','staff') then 'lecturer' else 'student' end as role,
+         upper(trim(coalesce(r->>'number', ''))) as num,
+         left(trim(coalesce(r->>'full_name', '')), 200) as full_name,
+         nullif(lower(trim(coalesce(r->>'email', ''))), '') as email,
+         case when jsonb_typeof(r->'module_codes') = 'array' then r->'module_codes' else '[]'::jsonb end as codes,
+         null::text as error
+  from jsonb_array_elements(v_people) with ordinality t(r, n);
+
+  update pg_temp._rp set error = case
+    when full_name = '' then 'name is missing'
+    when email is not null and email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then 'email is not valid'
+    when role = 'student' and length(num) not between 3 and 32 then 'student number is missing'
+    when role = 'student' and pattern is not null and num !~ pattern then 'student number does not match the institution format'
+    when role = 'lecturer' and num = '' and email is null then 'a lecturer needs a staff number or an email'
+    when role = 'lecturer' and length(num) > 32 then 'staff number is too long'
+  end
+  where error is null;
+
+  -- Staff with no staff number are known by the part of their email before the @.
+  update pg_temp._rp set num = upper(left(split_part(email, '@', 1), 32)) where role = 'lecturer' and num = '' and error is null;
+
+  with up as (
+    insert into uniattend.students as s (institution_id, student_number, full_name, email)
+    select distinct on (num) p_inst, num, full_name, email from pg_temp._rp where role = 'student' and error is null order by num, row_no
+    on conflict (institution_id, student_number) do update
+      set full_name = excluded.full_name, email = coalesce(excluded.email, s.email)
+      where s.deleted_at is null and (s.full_name is distinct from excluded.full_name or (excluded.email is not null and s.email is distinct from excluded.email))
+    returning (xmax = 0) as inserted)
+  select count(*) filter (where inserted), count(*) filter (where not inserted) into c_sins, c_supd from up;
+
+  -- Lecturers: the same person is recognised by email first, then by staff number.
+  update uniattend.lecturers l set full_name = x.full_name
+    from (select distinct on (email) email, full_name from pg_temp._rp
+          where role = 'lecturer' and error is null and email is not null order by email, row_no) x
+   where l.institution_id = p_inst and lower(l.email) = x.email and l.deleted_at is null and l.full_name is distinct from x.full_name;
+  get diagnostics c_lupd = row_count;
+  with up as (
+    insert into uniattend.lecturers as l (institution_id, staff_number, full_name, email)
+    select distinct on (num) p_inst, num, full_name, email from pg_temp._rp p
+    where role = 'lecturer' and error is null
+      and not exists (select 1 from uniattend.lecturers l2 where l2.institution_id = p_inst and l2.deleted_at is null
+                      and p.email is not null and lower(l2.email) = p.email)
+    order by num, row_no
+    on conflict (institution_id, staff_number) do update
+      set full_name = excluded.full_name, email = coalesce(excluded.email, l.email)
+      where l.deleted_at is null and (l.full_name is distinct from excluded.full_name or (excluded.email is not null and l.email is distinct from excluded.email))
+    returning (xmax = 0) as inserted)
+  select c_lins + count(*) filter (where inserted), c_lupd + count(*) filter (where not inserted) into c_lins, c_lupd from up;
+
+  drop table if exists pg_temp._re;
+  create temp table _re on commit drop as
+  select distinct p.role, p.num, p.email, upper(trim(c.code)) as code
+  from pg_temp._rp p, jsonb_array_elements_text(p.codes) c(code)
+  where p.error is null and trim(c.code) <> '';
+
+  drop table if exists pg_temp._pairs;
+  create temp table _pairs on commit drop as
+  select distinct m.id as module_id, s.id as student_id
+  from pg_temp._re e
+  join uniattend.students s on s.institution_id = p_inst and s.student_number = e.num and s.deleted_at is null
+  join uniattend.modules m on m.institution_id = p_inst and upper(m.code) = e.code and m.deleted_at is null
+  where e.role = 'student';
+
+  with ins as (
+    insert into uniattend.module_enrolments as me (institution_id, module_id, student_id, source)
+    select p_inst, module_id, student_id, p_integration from pg_temp._pairs
+    on conflict (module_id, student_id) do update set status = 'active'
+      where me.status = 'dropped' and me.source is not null and me.source = excluded.source
+    returning 1)
+  select count(*) into c_enr from ins;
+
+  insert into uniattend.lecturer_assignments (institution_id, module_id, lecturer_id, source)
+  select distinct p_inst, m.id, l.id, p_integration
+  from pg_temp._re e
+  join uniattend.lecturers l on l.institution_id = p_inst and l.deleted_at is null
+       and ((e.email is not null and lower(l.email) = e.email) or l.staff_number = e.num)
+  join uniattend.modules m on m.institution_id = p_inst and upper(m.code) = e.code and m.deleted_at is null
+  where e.role = 'lecturer'
+  on conflict (module_id, lecturer_id) do nothing;
+  get diagnostics c_asg = row_count;
+
+  select coalesce(jsonb_agg(code), '[]'::jsonb) into unknown from (
+    select distinct e.code from pg_temp._re e
+    where not exists (select 1 from uniattend.modules m where m.institution_id = p_inst and upper(m.code) = e.code and m.deleted_at is null)
+    order by e.code limit 40) u;
+  select count(*) into n_err from pg_temp._rp where error is not null;
+  select coalesce(jsonb_agg(jsonb_build_object('row', row_no, 'who', coalesce(nullif(num, ''), email, full_name), 'error', error) order by row_no), '[]'::jsonb)
+    into errs from (select * from pg_temp._rp where error is not null order by row_no limit 50) e;
+
+  res := jsonb_build_object('people', n_people, 'modules_created', c_mod, 'students_added', c_sins, 'students_updated', c_supd,
+    'lecturers_added', c_lins, 'lecturers_updated', c_lupd, 'enrolments_added', c_enr, 'assignments_added', c_asg, 'skipped', n_err);
+
+  if p_run is not null then
+    insert into uniattend.integration_seen (run_id, module_id, student_id)
+    select p_run, module_id, student_id from pg_temp._pairs on conflict do nothing;
+    insert into uniattend.integration_seen_modules (run_id, module_id)
+    select p_run, m.id from pg_temp._rm r join uniattend.modules m on m.institution_id = p_inst and upper(m.code) = r.code and m.deleted_at is null
+    union select p_run, module_id from pg_temp._pairs
+    on conflict do nothing;
+    update uniattend.integration_runs r
+       set summary = (select jsonb_object_agg(k, coalesce((r.summary->>k)::bigint, 0) + (res->>k)::bigint) from jsonb_object_keys(res) k),
+           unknown_modules = (select coalesce(jsonb_agg(v), '[]'::jsonb) from (select distinct v from jsonb_array_elements_text(r.unknown_modules || unknown) v order by v limit 40) u),
+           errors = (select coalesce(jsonb_agg(v), '[]'::jsonb) from (select v from jsonb_array_elements(r.errors || errs) v limit 50) e)
+     where r.id = p_run;
+  end if;
+  return res || jsonb_build_object('unknown_modules', unknown, 'errors', errs);
+end $$;
+
+-- Closes a run: optional clean-up of enrolments that are gone at the source, bookkeeping, audit.
+create or replace function uniattend.integration_finish(p_run uuid, p_status text, p_error text, p_complete boolean)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare r uniattend.integration_runs; it uniattend.integrations; n_mine int := 0; n_gone int := 0; n_seen int; held boolean := false; v_summary jsonb;
+begin
+  select * into r from uniattend.integration_runs where id = p_run for update;
+  if r.id is null or r.status <> 'running' then return null; end if;
+  if r.integration_id is not null then select * into it from uniattend.integrations where id = r.integration_id; end if;
+
+  if p_status = 'ok' and coalesce(p_complete, false) and it.id is not null and coalesce((it.options->>'drop_missing')::boolean, false) then
+    select count(*) into n_seen from uniattend.integration_seen where run_id = p_run;
+    select count(*) into n_mine from uniattend.module_enrolments where source = it.id and status = 'active';
+    select count(*) into n_gone from uniattend.module_enrolments me
+     where me.source = it.id and me.status = 'active'
+       and exists (select 1 from uniattend.integration_seen_modules sm where sm.run_id = p_run and sm.module_id = me.module_id)
+       and not exists (select 1 from uniattend.integration_seen s where s.run_id = p_run and s.module_id = me.module_id and s.student_id = me.student_id);
+    -- A source that suddenly lists nobody, or loses most of its students, is far more often broken than right.
+    if n_gone > 0 and (n_seen = 0 or (n_gone > 20 and n_gone * 2 > n_mine)) then
+      held := true;
+    elsif n_gone > 0 then
+      update uniattend.module_enrolments me set status = 'dropped'
+       where me.source = it.id and me.status = 'active'
+         and exists (select 1 from uniattend.integration_seen_modules sm where sm.run_id = p_run and sm.module_id = me.module_id)
+         and not exists (select 1 from uniattend.integration_seen s where s.run_id = p_run and s.module_id = me.module_id and s.student_id = me.student_id);
+    end if;
+  end if;
+
+  v_summary := r.summary || jsonb_build_object('enrolments_dropped', case when held then 0 else n_gone end)
+    || case when held then jsonb_build_object('held_back', n_gone) else '{}'::jsonb end;
+  update uniattend.integration_runs set status = p_status, error = left(p_error, 500), summary = v_summary, finished_at = now() where id = p_run;
+  delete from uniattend.integration_seen where run_id = p_run;
+  delete from uniattend.integration_seen_modules where run_id = p_run;
+
+  if it.id is not null then
+    update uniattend.integrations
+       set last_run_at = now(), last_status = p_status, updated_at = now(),
+           last_summary = v_summary || case when p_error is null then '{}'::jsonb else jsonb_build_object('error', left(p_error, 300)) end,
+           run_id = null, step_no = 0, claimed_at = null, sync_requested_at = null,
+           next_run_at = case when p_status = 'failed' then now() + interval '1 hour'
+                              when schedule = 'hourly' then now() + interval '1 hour' else now() + interval '24 hours' end
+     where id = it.id;
+    if p_status = 'failed' or held then
+      insert into uniattend.notifications (institution_id, user_id, kind, title, body, link, dedupe_key)
+      select r.institution_id, x.user_id, 'integration',
+             case when held then it.name || ': sync needs a look' else it.name || ': sync failed' end,
+             case when held then n_gone || ' enrolments are missing at the source. They were left in place; check the source, then sync again.'
+                  else coalesce(left(p_error, 300), 'The sync could not finish.') || ' UniAttend will try again in an hour.' end,
+             '/admin/connections', 'integ:' || it.id || ':' || to_char(now(), 'YYYYMMDD') || ':' || x.user_id
+      from uniattend.user_roles x where x.institution_id = r.institution_id and x.role = 'institution_admin' and x.status = 'active'
+      on conflict (dedupe_key) where dedupe_key is not null do nothing;
+    end if;
+  end if;
+  perform uniattend.write_audit(r.institution_id, 'roster_sync', 'integrations', coalesce(r.integration_id::text, 'upload'),
+    v_summary || jsonb_build_object('status', p_status, 'trigger', r.trigger));
+  return v_summary;
+end $$;
+
+-- ------------------------------------------------------------ administrators
+
+create or replace function uniattend.save_integration(p_inst uuid, p_id uuid, p_kind text, p_name text, p_base_url text,
+                                                     p_token text, p_options jsonb, p_schedule text)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare v_id uuid; v_key text; v_token text := nullif(trim(coalesce(p_token, '')), '');
+begin
+  if not uniattend.is_inst_admin(p_inst) then raise exception 'institution admin only' using errcode = '42501'; end if;
+  if p_kind not in ('moodle','feed','api') then raise exception 'unknown connection type'; end if;
+  if p_kind <> 'api' and coalesce(p_base_url, '') !~ '^https://' then raise exception 'The address must start with https://' using errcode = 'P0001'; end if;
+  if length(coalesce(v_token, '')) > 2000 then raise exception 'That token is too long.' using errcode = 'P0001'; end if;
+  if p_id is null then
+    if (select count(*) from uniattend.integrations where institution_id = p_inst) >= 10 then
+      raise exception 'An institution can have up to 10 connections.' using errcode = 'P0001';
+    end if;
+    if p_kind = 'moodle' and v_token is null then raise exception 'Paste the Moodle web-service token.' using errcode = 'P0001'; end if;
+    insert into uniattend.integrations (institution_id, kind, name, base_url, options, schedule, key_hint, created_by)
+    values (p_inst, p_kind, trim(p_name), case when p_kind = 'api' then null else trim(p_base_url) end, coalesce(p_options, '{}'::jsonb),
+            case when p_kind = 'api' then 'manual' else coalesce(p_schedule, 'daily') end,
+            case when v_token is not null then right(v_token, 4) end, auth.uid())
+    returning id into v_id;
+    if p_kind = 'api' then
+      v_key := 'ua_' || encode(extensions.gen_random_bytes(24), 'hex');
+      insert into uniattend.integration_secrets (integration_id, key_sha256) values (v_id, encode(extensions.digest(v_key, 'sha256'), 'hex'));
+      update uniattend.integrations set key_hint = right(v_key, 4) where id = v_id;
+    else
+      insert into uniattend.integration_secrets (integration_id, token) values (v_id, v_token);
+    end if;
+  else
+    update uniattend.integrations
+       set name = trim(p_name), options = coalesce(p_options, options), updated_at = now(),
+           base_url = case when kind = 'api' then null else trim(p_base_url) end,
+           schedule = case when kind = 'api' then 'manual' else coalesce(p_schedule, schedule) end,
+           key_hint = case when kind <> 'api' and v_token is not null then right(v_token, 4) else key_hint end
+     where id = p_id and institution_id = p_inst and kind = p_kind
+    returning id into v_id;
+    if v_id is null then raise exception 'unknown connection'; end if;
+    if p_kind <> 'api' and v_token is not null then
+      update uniattend.integration_secrets set token = v_token where integration_id = v_id;
+    end if;
+  end if;
+  perform uniattend.write_audit(p_inst, case when p_id is null then 'integration_added' else 'integration_changed' end, 'integrations', v_id::text,
+    jsonb_build_object('kind', p_kind, 'name', trim(p_name)));
+  return jsonb_build_object('id', v_id, 'api_key', v_key);
+end $$;
+
+-- p_action: 'sync' | 'pause' | 'resume' | 'delete' | 'new_key'
+create or replace function uniattend.integration_action(p_id uuid, p_action text)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare it uniattend.integrations; v_key text;
+begin
+  select * into it from uniattend.integrations where id = p_id;
+  if it.id is null or not uniattend.is_inst_admin(it.institution_id) then raise exception 'institution admin only' using errcode = '42501'; end if;
+  if p_action = 'sync' then
+    if it.kind = 'api' then raise exception 'This connection is updated by your own system, when it sends a roster.' using errcode = 'P0001'; end if;
+    if not exists (select 1 from uniattend.institutions where id = it.institution_id and status = 'active') then
+      raise exception 'Your institution must be approved before it can sync.' using errcode = 'P0001';
+    end if;
+    update uniattend.integrations set sync_requested_at = now(), status = 'active' where id = p_id;
+  elsif p_action = 'pause' then update uniattend.integrations set status = 'paused' where id = p_id;
+  elsif p_action = 'resume' then update uniattend.integrations set status = 'active' where id = p_id;
+  elsif p_action = 'delete' then delete from uniattend.integrations where id = p_id;
+  elsif p_action = 'new_key' and it.kind = 'api' then
+    v_key := 'ua_' || encode(extensions.gen_random_bytes(24), 'hex');
+    update uniattend.integration_secrets set key_sha256 = encode(extensions.digest(v_key, 'sha256'), 'hex') where integration_id = p_id;
+    update uniattend.integrations set key_hint = right(v_key, 4) where id = p_id;
+  else raise exception 'unknown action';
+  end if;
+  perform uniattend.write_audit(it.institution_id, 'integration_' || p_action, 'integrations', p_id::text, jsonb_build_object('name', it.name));
+  return jsonb_build_object('api_key', v_key);
+end $$;
+
+-- A roster file uploaded by an administrator (same shape as a sync).
+create or replace function uniattend.import_roster(p_inst uuid, p_payload jsonb)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare v_run uuid; res jsonb;
+begin
+  if not uniattend.is_inst_admin(p_inst) then raise exception 'institution admin only' using errcode = '42501'; end if;
+  insert into uniattend.integration_runs (institution_id, trigger) values (p_inst, 'upload') returning id into v_run;
+  res := uniattend.roster_apply(p_inst, null, v_run, p_payload);
+  perform uniattend.integration_finish(v_run, 'ok', null, false);
+  return res;
+end $$;
+
+-- ------------------------------------------------------------ the institution's system pushes (API key)
+
+create or replace function uniattend.roster_push(p_key text, p_payload jsonb)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare it uniattend.integrations; v_run uuid; res jsonb; fin jsonb;
+begin
+  select i.* into it from uniattend.integrations i join uniattend.integration_secrets s on s.integration_id = i.id
+   where i.kind = 'api' and s.key_sha256 = encode(extensions.digest(coalesce(p_key, ''), 'sha256'), 'hex');
+  if it.id is null then raise exception 'That API key is not valid.' using errcode = '42501'; end if;
+  if it.status <> 'active' then raise exception 'This connection is paused.' using errcode = 'P0001'; end if;
+  if not exists (select 1 from uniattend.institutions where id = it.institution_id and status = 'active' and deleted_at is null) then
+    raise exception 'The institution is not active.' using errcode = 'P0001';
+  end if;
+  if (select count(*) from uniattend.integration_runs where integration_id = it.id and started_at > now() - interval '1 hour') >= 120 then
+    raise exception 'Too many requests. Send at most 120 rosters an hour.' using errcode = 'P0001';
+  end if;
+  insert into uniattend.integration_runs (integration_id, institution_id, trigger) values (it.id, it.institution_id, 'api') returning id into v_run;
+  res := uniattend.roster_apply(it.institution_id, it.id, v_run, p_payload);
+  fin := uniattend.integration_finish(v_run, 'ok', null, coalesce((p_payload->>'complete')::boolean, false));
+  return res || jsonb_build_object('enrolments_dropped', coalesce((fin->>'enrolments_dropped')::int, 0), 'held_back', coalesce((fin->>'held_back')::int, 0));
+end $$;
+
+-- ------------------------------------------------------------ the server worker (dispatch secret)
+
+-- Hands one due connection, with its token, to the worker. Only one worker at a time per connection.
+create or replace function uniattend.integration_claim(p_secret text)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare it uniattend.integrations; v_run uuid; v_token text;
+begin
+  if not uniattend.push_secret_ok(p_secret) then raise exception 'not allowed' using errcode = '42501'; end if;
+  select i.* into it from uniattend.integrations i
+   join uniattend.institutions n on n.id = i.institution_id and n.status = 'active' and n.deleted_at is null
+   where i.kind in ('moodle','feed') and i.status = 'active'
+     and (i.sync_requested_at is not null or i.run_id is not null or (i.schedule <> 'manual' and i.next_run_at <= now()))
+     and (i.claimed_at is null or i.claimed_at < now() - interval '5 minutes')
+   order by i.sync_requested_at nulls last, i.next_run_at
+   limit 1 for update of i skip locked;
+  if it.id is null then return null; end if;
+  v_run := it.run_id;
+  if v_run is null or not exists (select 1 from uniattend.integration_runs where id = v_run and status = 'running') then
+    insert into uniattend.integration_runs (integration_id, institution_id, trigger)
+    values (it.id, it.institution_id, case when it.sync_requested_at is not null then 'manual' else 'schedule' end) returning id into v_run;
+    update uniattend.integrations set run_id = v_run, step_no = 0, claimed_at = now() where id = it.id;
+    it.step_no := 0;
+  else
+    update uniattend.integrations set claimed_at = now() where id = it.id;
+  end if;
+  select token into v_token from uniattend.integration_secrets where integration_id = it.id;
+  return jsonb_build_object('id', it.id, 'institution_id', it.institution_id, 'kind', it.kind, 'base_url', it.base_url,
+                            'options', it.options, 'token', v_token, 'run_id', v_run, 'cursor', it.step_no,
+                            'module_codes', (select coalesce(jsonb_agg(distinct upper(m.code)), '[]'::jsonb) from uniattend.modules m
+                                             where m.institution_id = it.institution_id and m.deleted_at is null));
+end $$;
+
+create or replace function uniattend.integration_apply(p_secret text, p_run uuid, p_payload jsonb, p_cursor int)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare it uniattend.integrations;
+begin
+  if not uniattend.push_secret_ok(p_secret) then raise exception 'not allowed' using errcode = '42501'; end if;
+  select * into it from uniattend.integrations where run_id = p_run;
+  if it.id is null then raise exception 'that sync is no longer running'; end if;
+  update uniattend.integrations set step_no = coalesce(p_cursor, step_no), claimed_at = now() where id = it.id;
+  return uniattend.roster_apply(it.institution_id, it.id, p_run, p_payload);
+end $$;
+
+-- p_status: 'ok' | 'failed' | 'later' (out of time: keep the place and let the next worker continue)
+create or replace function uniattend.integration_done(p_secret text, p_run uuid, p_status text, p_error text, p_complete boolean)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+begin
+  if not uniattend.push_secret_ok(p_secret) then raise exception 'not allowed' using errcode = '42501'; end if;
+  if p_status = 'later' then
+    update uniattend.integrations set claimed_at = null where run_id = p_run;
+    return null;
+  end if;
+  if p_status not in ('ok','failed') then raise exception 'bad status'; end if;
+  return uniattend.integration_finish(p_run, p_status, p_error, p_complete);
+end $$;
+
+revoke all on function uniattend.can_bulk_import(uuid) from public, anon;
+revoke all on function uniattend.roster_apply(uuid, uuid, uuid, jsonb) from public, anon, authenticated;
+revoke all on function uniattend.integration_finish(uuid, text, text, boolean) from public, anon, authenticated;
+revoke all on function uniattend.save_integration(uuid, uuid, text, text, text, text, jsonb, text) from public, anon;
+revoke all on function uniattend.integration_action(uuid, text) from public, anon;
+revoke all on function uniattend.import_roster(uuid, jsonb) from public, anon;
+grant execute on function uniattend.can_bulk_import(uuid) to authenticated;
+grant execute on function uniattend.save_integration(uuid, uuid, text, text, text, text, jsonb, text) to authenticated;
+grant execute on function uniattend.integration_action(uuid, text) to authenticated;
+grant execute on function uniattend.import_roster(uuid, jsonb) to authenticated;
+-- Checked by key or by the dispatch secret, so callable without a session:
+revoke all on function uniattend.roster_push(text, jsonb) from public;
+revoke all on function uniattend.integration_claim(text) from public;
+revoke all on function uniattend.integration_apply(text, uuid, jsonb, int) from public;
+revoke all on function uniattend.integration_done(text, uuid, text, text, boolean) from public;
+grant execute on function uniattend.roster_push(text, jsonb) to anon, authenticated;
+grant execute on function uniattend.integration_claim(text) to anon, authenticated;
+grant execute on function uniattend.integration_apply(text, uuid, jsonb, int) to anon, authenticated;
+grant execute on function uniattend.integration_done(text, uuid, text, text, boolean) to anon, authenticated;
+
+
+-- ===================================================== 20261114000025_sync_engine.sql
+-- UniAttend 0025 — the academic data synchronisation engine.
+--
+-- Every source (a file upload, a roster link, Moodle, a university's own API,
+-- later ITS/CELCAT/Banner/PeopleSoft through configurable connectors) is turned
+-- into rows of a common shape per dataset and goes through the same steps:
+--
+--   stage → validate → match → preview → commit → report
+--
+-- * integration_staging: rows waiting to be applied, per run. Admins of the
+--   institution can read them (to preview); nobody writes them directly. Deleted
+--   when the run ends, so source payloads are not kept.
+-- * integration_external_ids: the source system's own id for each record, scoped
+--   to institution + source + entity. Matching uses it first, then the natural key
+--   (student number, staff number, module code…), so renumbering at the source
+--   updates the same record instead of creating a new one.
+-- * Preview runs the real commit inside a subtransaction and rolls it back, so the
+--   preview and the import can never disagree.
+-- * Commit applies one run atomically: either the whole run lands or none of it.
+-- * Never deletes. Students and lecturers change status only from an explicit
+--   status in the source. Enrolments are dropped only from an explicit status, or
+--   by a complete reconciliation of the same source, guarded against mass removal.
+-- * integration_errors: rejected rows with the reason (no payload). Kept with the run.
+-- * integration_checkpoints: where an incremental sync got to, per dataset.
+-- * Connection status: changed only by a real test made by the server (dispatch
+--   secret), so an administrator can't mark a connection "connected" by hand.
+--
+-- Datasets: faculties, departments, programmes, academic_periods, venues, modules,
+-- lecturers, students, enrolments, assignments. (Class sections and dated timetable
+-- events follow in a later migration.)
+
+-- ------------------------------------------------------------ connections: status
+
+alter table uniattend.integrations
+  add column if not exists connection_status text not null default 'not_configured',
+  add column if not exists last_tested_at timestamptz,
+  add column if not exists last_test_message text,
+  add column if not exists last_success_at timestamptz;
+alter table uniattend.integrations drop constraint if exists integrations_connection_status_check;
+alter table uniattend.integrations add constraint integrations_connection_status_check
+  check (connection_status in ('not_configured','incomplete','testing','connected','auth_failed','connection_failed',
+                               'permission_denied','unavailable','suspended'));
+
+-- ------------------------------------------------------------ runs: richer lifecycle
+
+alter table uniattend.integration_runs
+  add column if not exists source text,
+  add column if not exists label text,
+  add column if not exists mode text not null default 'full',
+  add column if not exists complete boolean not null default false,
+  add column if not exists checkpoints jsonb not null default '{}'::jsonb,
+  add column if not exists created_by uuid references auth.users(id) on delete set null;
+alter table uniattend.integration_runs drop constraint if exists integration_runs_status_check;
+alter table uniattend.integration_runs add constraint integration_runs_status_check
+  check (status in ('queued','staging','running','ok','warnings','failed','cancelled'));
+alter table uniattend.integration_runs drop constraint if exists integration_runs_mode_check;
+alter table uniattend.integration_runs add constraint integration_runs_mode_check check (mode in ('full','incremental'));
+alter table uniattend.integration_runs drop constraint if exists integration_runs_trigger_check;
+alter table uniattend.integration_runs add constraint integration_runs_trigger_check
+  check (trigger in ('schedule','manual','api','upload','retry'));
+
+-- ------------------------------------------------------------ tables
+
+create table if not exists uniattend.integration_staging (
+  id             bigint generated always as identity primary key,
+  run_id         uuid not null references uniattend.integration_runs(id) on delete cascade,
+  institution_id uuid not null references uniattend.institutions(id) on delete cascade,
+  dataset        text not null check (dataset in ('faculties','departments','programmes','academic_periods','venues','modules',
+                                                  'lecturers','students','enrolments','assignments')),
+  row_no         int not null,
+  payload        jsonb not null check (jsonb_typeof(payload) = 'object' and pg_column_size(payload) < 8192),
+  outcome        text check (outcome in ('insert','update','unchanged','duplicate','reject')),
+  error          text,
+  internal_id    uuid
+);
+create index if not exists integration_staging_run on uniattend.integration_staging(run_id, dataset, row_no);
+
+create table if not exists uniattend.integration_external_ids (
+  institution_id uuid not null references uniattend.institutions(id) on delete cascade,
+  source         text not null check (length(source) between 1 and 80),
+  entity         text not null,
+  external_id    text not null check (length(external_id) between 1 and 200),
+  internal_id    uuid not null,
+  updated_at     timestamptz not null default now(),
+  primary key (institution_id, source, entity, external_id)
+);
+create index if not exists integration_external_ids_internal on uniattend.integration_external_ids(institution_id, entity, internal_id);
+
+create table if not exists uniattend.integration_errors (
+  id             bigint generated always as identity primary key,
+  run_id         uuid not null references uniattend.integration_runs(id) on delete cascade,
+  institution_id uuid not null references uniattend.institutions(id) on delete cascade,
+  dataset        text not null,
+  row_no         int,
+  ref            text,        -- external id / number / code: enough to find the row at the source, never the whole row
+  message        text not null,
+  created_at     timestamptz not null default now()
+);
+create index if not exists integration_errors_run on uniattend.integration_errors(run_id, dataset, row_no);
+
+create table if not exists uniattend.integration_checkpoints (
+  integration_id uuid not null references uniattend.integrations(id) on delete cascade,
+  institution_id uuid not null references uniattend.institutions(id) on delete cascade,
+  dataset        text not null,
+  checkpoint     text not null check (length(checkpoint) <= 500),
+  updated_at     timestamptz not null default now(),
+  primary key (integration_id, dataset)
+);
+
+alter table uniattend.integration_staging enable row level security;
+alter table uniattend.integration_external_ids enable row level security;
+alter table uniattend.integration_errors enable row level security;
+alter table uniattend.integration_checkpoints enable row level security;
+drop policy if exists integration_staging_select on uniattend.integration_staging;
+create policy integration_staging_select on uniattend.integration_staging for select to authenticated
+  using (uniattend.is_inst_admin(institution_id));
+drop policy if exists integration_external_ids_select on uniattend.integration_external_ids;
+create policy integration_external_ids_select on uniattend.integration_external_ids for select to authenticated
+  using (uniattend.is_inst_admin(institution_id));
+drop policy if exists integration_errors_select on uniattend.integration_errors;
+create policy integration_errors_select on uniattend.integration_errors for select to authenticated
+  using (uniattend.is_inst_admin(institution_id) or uniattend.is_super_admin());
+drop policy if exists integration_checkpoints_select on uniattend.integration_checkpoints;
+create policy integration_checkpoints_select on uniattend.integration_checkpoints for select to authenticated
+  using (uniattend.is_inst_admin(institution_id));
+revoke insert, update, delete on uniattend.integration_staging, uniattend.integration_external_ids,
+  uniattend.integration_errors, uniattend.integration_checkpoints from anon, authenticated;
+revoke select on uniattend.integration_staging, uniattend.integration_external_ids, uniattend.integration_errors,
+  uniattend.integration_checkpoints from anon;
+grant select on uniattend.integration_staging, uniattend.integration_external_ids, uniattend.integration_errors,
+  uniattend.integration_checkpoints to authenticated;
+
+-- ------------------------------------------------------------ helpers
+
+-- Free text from a source → one of our statuses, or null when it isn't recognisable.
+create or replace function uniattend.sync_status(p_kind text, p_raw text)
+returns text language sql immutable set search_path = '' as $$
+  select case
+    when p_raw is null or trim(p_raw) = '' then case p_kind when 'enrolment' then 'active' when 'assignment' then 'active' else 'active' end
+    when p_kind = 'student' then case
+      when lower(trim(p_raw)) in ('active','registered','current','enrolled','reg','a','1','true') then 'active'
+      when lower(trim(p_raw)) in ('withdrawn','cancelled','canceled','deregistered','discontinued','inactive','w','0','false','left') then 'withdrawn'
+      when lower(trim(p_raw)) in ('graduated','completed','alumni','g') then 'graduated'
+      when lower(trim(p_raw)) in ('suspended','blocked','excluded','s') then 'suspended' end
+    when p_kind = 'lecturer' then case
+      when lower(trim(p_raw)) in ('active','current','employed','a','1','true') then 'active'
+      when lower(trim(p_raw)) in ('left','terminated','resigned','retired','inactive','0','false') then 'left'
+      when lower(trim(p_raw)) in ('suspended','blocked') then 'suspended' end
+    when p_kind in ('enrolment','assignment') then case
+      when lower(trim(p_raw)) in ('active','registered','enrolled','current','a','1','true') then 'active'
+      when lower(trim(p_raw)) in ('dropped','withdrawn','cancelled','canceled','deregistered','removed','inactive','d','w','0','false') then 'dropped' end
+  end;
+$$;
+
+-- Steps every dataset shares, on the dataset's rows in pg_temp._s:
+-- external id → internal id; repeated rows in the same batch.
+create or replace function uniattend._sync_match_ext(p_inst uuid, p_src text, p_entity text)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  update pg_temp._s s set iid = m.internal_id
+    from uniattend.integration_external_ids m
+   where s.error is null and s.ext is not null and m.institution_id = p_inst and m.source = p_src
+     and m.entity = p_entity and m.external_id = s.ext;
+end $$;
+
+-- After the natural-key match: a key seen twice is a duplicate when identical, a conflict when not.
+create or replace function uniattend._sync_dupes()
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  update pg_temp._s s set outcome = case when s.p = f.p then 'duplicate' else 'reject' end,
+                          error = case when s.p = f.p then null else 'appears more than once with different details (first at row ' || f.row_no || ')' end
+    from (select distinct on (k) k, row_no, p from pg_temp._s where error is null and k is not null order by k, row_no) f
+   where s.error is null and s.k = f.k and s.row_no <> f.row_no;
+end $$;
+
+-- Writes the outcome back to staging, remembers external ids, and returns the counts.
+create or replace function uniattend._sync_finish(p_inst uuid, p_src text, p_entity text, p_commit boolean)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare c jsonb;
+begin
+  update pg_temp._s set outcome = 'reject' where error is not null;
+  update uniattend.integration_staging st set outcome = s.outcome, error = s.error, internal_id = s.iid
+    from pg_temp._s s where st.id = s.sid;
+  if p_commit then
+    insert into uniattend.integration_external_ids as m (institution_id, source, entity, external_id, internal_id)
+    select distinct on (ext) p_inst, p_src, p_entity, ext, iid from pg_temp._s
+     where ext is not null and iid is not null and outcome in ('insert','update','unchanged') order by ext, row_no
+    on conflict (institution_id, source, entity, external_id) do update set internal_id = excluded.internal_id, updated_at = now()
+      where m.internal_id is distinct from excluded.internal_id;
+  end if;
+  select jsonb_build_object('received', count(*),
+           'inserted', count(*) filter (where outcome = 'insert'), 'updated', count(*) filter (where outcome = 'update'),
+           'unchanged', count(*) filter (where outcome = 'unchanged'), 'duplicates', count(*) filter (where outcome = 'duplicate'),
+           'rejected', count(*) filter (where outcome = 'reject'))
+    into c from pg_temp._s;
+  return c;
+end $$;
+
+-- ------------------------------------------------------------ applying one run
+
+create or replace function uniattend._sync_apply(p_run uuid)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare r uniattend.integration_runs; v_inst uuid; v_src text; res jsonb := '{}'::jsonb; c jsonb; pattern text;
+        n_mine int; n_gone int; n_seen int; v_dropped int := 0; v_held int := 0;
+begin
+  select * into r from uniattend.integration_runs where id = p_run;
+  v_inst := r.institution_id;
+  v_src := coalesce(r.source, case when r.integration_id is not null then 'conn:' || r.integration_id else 'upload' end);
+  select student_number_pattern into pattern from uniattend.institutions where id = v_inst;
+
+  -- ---------------------------------------------------- faculties
+  drop table if exists pg_temp._s;
+  create temp table _s on commit drop as
+  select id sid, row_no, payload p, nullif(trim(payload->>'external_id'), '') ext,
+         upper(trim(coalesce(payload->>'code', ''))) code, left(trim(coalesce(payload->>'name', '')), 200) name,
+         null::uuid iid, null::text k, null::text outcome, null::text error
+  from uniattend.integration_staging where run_id = p_run and dataset = 'faculties';
+  update pg_temp._s set error = case when code = '' then 'code is missing' when name = '' then 'name is missing' end where error is null;
+  perform uniattend._sync_match_ext(v_inst, v_src, 'faculty');
+  update pg_temp._s s set iid = f.id from uniattend.faculties f
+   where s.iid is null and s.error is null and f.institution_id = v_inst and upper(f.code) = s.code and f.deleted_at is null;
+  update pg_temp._s set k = coalesce(ext, code) where error is null;
+  perform uniattend._sync_dupes();
+  update pg_temp._s s set outcome = case when s.iid is null then 'insert'
+      when exists (select 1 from uniattend.faculties f where f.id = s.iid and (upper(f.code) <> s.code or f.name <> s.name)) then 'update' else 'unchanged' end
+   where s.error is null and s.outcome is null;
+  update uniattend.faculties f set code = s.code, name = s.name, updated_at = now() from pg_temp._s s where s.outcome = 'update' and f.id = s.iid;
+  with ins as (insert into uniattend.faculties (institution_id, code, name)
+               select v_inst, code, name from pg_temp._s where outcome = 'insert' returning id, code)
+  update pg_temp._s s set iid = ins.id from ins where s.outcome = 'insert' and s.code = ins.code;
+  res := res || jsonb_build_object('faculties', uniattend._sync_finish(v_inst, v_src, 'faculty', true));
+
+  -- ---------------------------------------------------- departments
+  drop table if exists pg_temp._s;
+  create temp table _s on commit drop as
+  select id sid, row_no, payload p, nullif(trim(payload->>'external_id'), '') ext,
+         upper(trim(coalesce(payload->>'code', ''))) code, left(trim(coalesce(payload->>'name', '')), 200) name,
+         upper(nullif(trim(payload->>'faculty_code'), '')) fcode, null::uuid fac,
+         null::uuid iid, null::text k, null::text outcome, null::text error
+  from uniattend.integration_staging where run_id = p_run and dataset = 'departments';
+  update pg_temp._s s set fac = f.id from uniattend.faculties f
+   where f.institution_id = v_inst and upper(f.code) = s.fcode and f.deleted_at is null;
+  update pg_temp._s set error = case when code = '' then 'code is missing' when name = '' then 'name is missing'
+      when fcode is null then 'faculty_code is missing' when fac is null then 'unknown faculty ' || fcode end where error is null;
+  perform uniattend._sync_match_ext(v_inst, v_src, 'department');
+  update pg_temp._s s set iid = d.id from uniattend.departments d
+   where s.iid is null and s.error is null and d.institution_id = v_inst and upper(d.code) = s.code and d.deleted_at is null;
+  update pg_temp._s set k = coalesce(ext, code) where error is null;
+  perform uniattend._sync_dupes();
+  update pg_temp._s s set outcome = case when s.iid is null then 'insert'
+      when exists (select 1 from uniattend.departments d where d.id = s.iid and (upper(d.code) <> s.code or d.name <> s.name or d.faculty_id <> s.fac)) then 'update' else 'unchanged' end
+   where s.error is null and s.outcome is null;
+  update uniattend.departments d set code = s.code, name = s.name, faculty_id = s.fac, updated_at = now() from pg_temp._s s where s.outcome = 'update' and d.id = s.iid;
+  with ins as (insert into uniattend.departments (institution_id, faculty_id, code, name)
+               select v_inst, fac, code, name from pg_temp._s where outcome = 'insert' returning id, code)
+  update pg_temp._s s set iid = ins.id from ins where s.outcome = 'insert' and s.code = ins.code;
+  res := res || jsonb_build_object('departments', uniattend._sync_finish(v_inst, v_src, 'department', true));
+
+  -- ---------------------------------------------------- programmes (qualifications)
+  drop table if exists pg_temp._s;
+  create temp table _s on commit drop as
+  select id sid, row_no, payload p, nullif(trim(payload->>'external_id'), '') ext,
+         upper(trim(coalesce(payload->>'code', ''))) code, left(trim(coalesce(payload->>'name', '')), 200) name,
+         upper(nullif(trim(payload->>'department_code'), '')) dcode, null::uuid dep,
+         null::uuid iid, null::text k, null::text outcome, null::text error
+  from uniattend.integration_staging where run_id = p_run and dataset = 'programmes';
+  update pg_temp._s s set dep = d.id from uniattend.departments d
+   where d.institution_id = v_inst and upper(d.code) = s.dcode and d.deleted_at is null;
+  update pg_temp._s set error = case when code = '' then 'code is missing' when name = '' then 'name is missing'
+      when dcode is null then 'department_code is missing' when dep is null then 'unknown department ' || dcode end where error is null;
+  perform uniattend._sync_match_ext(v_inst, v_src, 'programme');
+  update pg_temp._s s set iid = x.id from uniattend.academic_programmes x
+   where s.iid is null and s.error is null and x.institution_id = v_inst and upper(x.code) = s.code and x.deleted_at is null;
+  update pg_temp._s set k = coalesce(ext, code) where error is null;
+  perform uniattend._sync_dupes();
+  update pg_temp._s s set outcome = case when s.iid is null then 'insert'
+      when exists (select 1 from uniattend.academic_programmes x where x.id = s.iid and (upper(x.code) <> s.code or x.name <> s.name or x.department_id <> s.dep)) then 'update' else 'unchanged' end
+   where s.error is null and s.outcome is null;
+  update uniattend.academic_programmes x set code = s.code, name = s.name, department_id = s.dep, updated_at = now() from pg_temp._s s where s.outcome = 'update' and x.id = s.iid;
+  with ins as (insert into uniattend.academic_programmes (institution_id, department_id, code, name)
+               select v_inst, dep, code, name from pg_temp._s where outcome = 'insert' returning id, code)
+  update pg_temp._s s set iid = ins.id from ins where s.outcome = 'insert' and s.code = ins.code;
+  res := res || jsonb_build_object('programmes', uniattend._sync_finish(v_inst, v_src, 'programme', true));
+
+  -- ---------------------------------------------------- academic periods
+  drop table if exists pg_temp._s;
+  create temp table _s on commit drop as
+  select id sid, row_no, payload p, nullif(trim(payload->>'external_id'), '') ext,
+         left(trim(coalesce(payload->>'name', '')), 120) name,
+         lower(coalesce(nullif(trim(payload->>'kind'), ''), 'semester')) kind,
+         case when payload->>'starts_on' ~ '^\d{4}-\d{2}-\d{2}' then left(payload->>'starts_on', 10) end s_on,
+         case when payload->>'ends_on' ~ '^\d{4}-\d{2}-\d{2}' then left(payload->>'ends_on', 10) end e_on,
+         coalesce(lower(payload->>'is_current') in ('true','1','yes'), false) cur,
+         null::uuid iid, null::text k, null::text outcome, null::text error
+  from uniattend.integration_staging where run_id = p_run and dataset = 'academic_periods';
+  update pg_temp._s set error = case when name = '' then 'name is missing'
+      when kind not in ('year','semester','term','block') then 'kind must be year, semester, term or block'
+      when s_on is null or e_on is null then 'starts_on and ends_on must be dates (YYYY-MM-DD)'
+      when e_on <= s_on then 'ends_on must be after starts_on' end where error is null;
+  perform uniattend._sync_match_ext(v_inst, v_src, 'academic_period');
+  update pg_temp._s s set iid = x.id from uniattend.academic_periods x
+   where s.iid is null and s.error is null and x.institution_id = v_inst and lower(x.name) = lower(s.name);
+  update pg_temp._s set k = coalesce(ext, lower(name)) where error is null;
+  perform uniattend._sync_dupes();
+  update pg_temp._s s set outcome = case when s.iid is null then 'insert'
+      when exists (select 1 from uniattend.academic_periods x where x.id = s.iid and (x.name <> s.name or x.kind <> s.kind or x.starts_on <> s.s_on::date
+                   or x.ends_on <> s.e_on::date or x.is_current <> s.cur)) then 'update' else 'unchanged' end
+   where s.error is null and s.outcome is null;
+  update uniattend.academic_periods x set name = s.name, kind = s.kind, starts_on = s.s_on::date, ends_on = s.e_on::date, is_current = s.cur, updated_at = now()
+    from pg_temp._s s where s.outcome = 'update' and x.id = s.iid;
+  with ins as (insert into uniattend.academic_periods (institution_id, name, kind, starts_on, ends_on, is_current)
+               select v_inst, name, kind, s_on::date, e_on::date, cur from pg_temp._s where outcome = 'insert' returning id, name)
+  update pg_temp._s s set iid = ins.id from ins where s.outcome = 'insert' and s.name = ins.name;
+  res := res || jsonb_build_object('academic_periods', uniattend._sync_finish(v_inst, v_src, 'academic_period', true));
+
+  -- ---------------------------------------------------- venues
+  drop table if exists pg_temp._s;
+  create temp table _s on commit drop as
+  select id sid, row_no, payload p, nullif(trim(payload->>'external_id'), '') ext,
+         nullif(upper(trim(coalesce(payload->>'code', ''))), '') code, left(trim(coalesce(payload->>'name', '')), 200) name,
+         case when payload->>'capacity' ~ '^\d{1,6}$' and (payload->>'capacity')::int > 0 then (payload->>'capacity')::int end cap,
+         nullif(left(trim(coalesce(payload->>'building', '')), 120), '') building,
+         null::uuid iid, null::text k, null::text outcome, null::text error
+  from uniattend.integration_staging where run_id = p_run and dataset = 'venues';
+  update pg_temp._s set error = case when name = '' then 'name is missing' end where error is null;
+  perform uniattend._sync_match_ext(v_inst, v_src, 'venue');
+  update pg_temp._s s set iid = (select v.id from uniattend.venues v where v.institution_id = v_inst and v.deleted_at is null
+                                   and ((s.code is not null and upper(v.code) = s.code) or (s.code is null and lower(v.name) = lower(s.name)))
+                                 order by v.created_at limit 1)
+   where s.iid is null and s.error is null;
+  update pg_temp._s set k = coalesce(ext, code, lower(name)) where error is null;
+  perform uniattend._sync_dupes();
+  update pg_temp._s s set outcome = case when s.iid is null then 'insert'
+      when exists (select 1 from uniattend.venues v where v.id = s.iid and (v.name <> s.name or v.code is distinct from coalesce(s.code, v.code)
+                   or v.capacity is distinct from coalesce(s.cap, v.capacity) or v.building is distinct from coalesce(s.building, v.building))) then 'update' else 'unchanged' end
+   where s.error is null and s.outcome is null;
+  -- Map positions and outlines are set in UniAttend and never overwritten by a sync.
+  update uniattend.venues v set name = s.name, code = coalesce(s.code, v.code), capacity = coalesce(s.cap, v.capacity),
+         building = coalesce(s.building, v.building), updated_at = now()
+    from pg_temp._s s where s.outcome = 'update' and v.id = s.iid;
+  with ins as (insert into uniattend.venues (institution_id, name, code, capacity, building)
+               select v_inst, name, code, cap, building from pg_temp._s where outcome = 'insert' returning id, name, code)
+  update pg_temp._s s set iid = ins.id from ins where s.outcome = 'insert' and s.name = ins.name and s.code is not distinct from ins.code;
+  res := res || jsonb_build_object('venues', uniattend._sync_finish(v_inst, v_src, 'venue', true));
+
+  -- ---------------------------------------------------- modules
+  drop table if exists pg_temp._s;
+  create temp table _s on commit drop as
+  select id sid, row_no, payload p, nullif(trim(payload->>'external_id'), '') ext,
+         upper(trim(coalesce(payload->>'code', ''))) code, left(trim(coalesce(payload->>'title', payload->>'name', '')), 200) title,
+         upper(nullif(trim(payload->>'department_code'), '')) dcode, nullif(trim(payload->>'period_name'), '') pname,
+         case when payload->>'credits' ~ '^\d{1,3}$' then (payload->>'credits')::int end credits,
+         null::uuid dep, null::uuid per, null::uuid iid, null::text k, null::text outcome, null::text error
+  from uniattend.integration_staging where run_id = p_run and dataset = 'modules';
+  update pg_temp._s s set dep = d.id from uniattend.departments d where d.institution_id = v_inst and upper(d.code) = s.dcode and d.deleted_at is null;
+  update pg_temp._s s set per = x.id from uniattend.academic_periods x where x.institution_id = v_inst and lower(x.name) = lower(s.pname);
+  update pg_temp._s set error = case when code = '' then 'code is missing' when length(code) > 40 then 'code is too long'
+      when title = '' then 'title is missing'
+      when dcode is not null and dep is null then 'unknown department ' || dcode
+      when pname is not null and per is null then 'unknown academic period ' || pname end where error is null;
+  perform uniattend._sync_match_ext(v_inst, v_src, 'module');
+  update pg_temp._s s set iid = m.id from uniattend.modules m
+   where s.iid is null and s.error is null and m.institution_id = v_inst and upper(m.code) = s.code
+     and m.academic_period_id is not distinct from s.per and m.deleted_at is null;
+  update pg_temp._s set k = coalesce(ext, code || '|' || coalesce(per::text, '')) where error is null;
+  perform uniattend._sync_dupes();
+  update pg_temp._s s set outcome = case when s.iid is null then 'insert'
+      when exists (select 1 from uniattend.modules m where m.id = s.iid and (upper(m.code) <> s.code or m.title <> s.title
+                   or m.department_id is distinct from coalesce(s.dep, m.department_id) or m.credits is distinct from coalesce(s.credits, m.credits))) then 'update' else 'unchanged' end
+   where s.error is null and s.outcome is null;
+  update uniattend.modules m set code = s.code, title = s.title, department_id = coalesce(s.dep, m.department_id),
+         credits = coalesce(s.credits, m.credits), updated_at = now()
+    from pg_temp._s s where s.outcome = 'update' and m.id = s.iid;
+  with ins as (insert into uniattend.modules (institution_id, code, title, department_id, academic_period_id, credits)
+               select v_inst, code, title, dep, per, credits from pg_temp._s where outcome = 'insert' returning id, code, academic_period_id)
+  update pg_temp._s s set iid = ins.id from ins where s.outcome = 'insert' and s.code = ins.code and s.per is not distinct from ins.academic_period_id;
+  res := res || jsonb_build_object('modules', uniattend._sync_finish(v_inst, v_src, 'module', true));
+
+  -- ---------------------------------------------------- lecturers
+  drop table if exists pg_temp._s;
+  create temp table _s on commit drop as
+  select id sid, row_no, payload p, nullif(trim(payload->>'external_id'), '') ext,
+         upper(trim(coalesce(payload->>'staff_number', ''))) num,
+         left(trim(coalesce(nullif(trim(payload->>'full_name'), ''), concat_ws(' ', nullif(trim(payload->>'first_name'), ''), nullif(trim(payload->>'last_name'), '')), '')), 200) name,
+         nullif(lower(trim(coalesce(payload->>'email', ''))), '') email,
+         upper(nullif(trim(payload->>'department_code'), '')) dcode, payload->>'status' raw_status,
+         uniattend.sync_status('lecturer', payload->>'status') status,
+         null::uuid dep, null::uuid iid, null::text k, null::text outcome, null::text error
+  from uniattend.integration_staging where run_id = p_run and dataset = 'lecturers';
+  update pg_temp._s s set dep = d.id from uniattend.departments d where d.institution_id = v_inst and upper(d.code) = s.dcode and d.deleted_at is null;
+  update pg_temp._s set error = case when num = '' then 'staff_number is missing' when length(num) > 32 then 'staff_number is too long'
+      when name = '' then 'name is missing'
+      when email is not null and email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then 'email is not valid'
+      when status is null then 'unknown status "' || left(raw_status, 30) || '"'
+      when dcode is not null and dep is null then 'unknown department ' || dcode end where error is null;
+  perform uniattend._sync_match_ext(v_inst, v_src, 'lecturer');
+  update pg_temp._s s set iid = l.id from uniattend.lecturers l
+   where s.iid is null and s.error is null and l.institution_id = v_inst and upper(l.staff_number) = s.num and l.deleted_at is null;
+  -- A staff number that now belongs to someone else (renumbering at the source) is a conflict, not a merge.
+  update pg_temp._s s set error = 'staff number ' || s.num || ' already belongs to another lecturer'
+   where s.error is null and s.iid is not null and exists (select 1 from uniattend.lecturers l where l.institution_id = v_inst and upper(l.staff_number) = s.num
+                                                             and l.id <> s.iid and l.deleted_at is null);
+  update pg_temp._s set k = coalesce(ext, num) where error is null;
+  perform uniattend._sync_dupes();
+  update pg_temp._s s set outcome = case when s.iid is null then 'insert'
+      when exists (select 1 from uniattend.lecturers l where l.id = s.iid and (upper(l.staff_number) <> s.num or l.full_name <> s.name
+                   or l.email is distinct from coalesce(s.email, l.email) or l.status <> s.status
+                   or l.department_id is distinct from coalesce(s.dep, l.department_id))) then 'update' else 'unchanged' end
+   where s.error is null and s.outcome is null;
+  update uniattend.lecturers l set staff_number = s.num, full_name = s.name, email = coalesce(s.email, l.email), status = s.status,
+         department_id = coalesce(s.dep, l.department_id), updated_at = now()
+    from pg_temp._s s where s.outcome = 'update' and l.id = s.iid;
+  with ins as (insert into uniattend.lecturers (institution_id, staff_number, full_name, email, status, department_id)
+               select v_inst, num, name, email, status, dep from pg_temp._s where outcome = 'insert' returning id, staff_number)
+  update pg_temp._s s set iid = ins.id from ins where s.outcome = 'insert' and s.num = ins.staff_number;
+  res := res || jsonb_build_object('lecturers', uniattend._sync_finish(v_inst, v_src, 'lecturer', true));
+
+  -- ---------------------------------------------------- students
+  drop table if exists pg_temp._s;
+  create temp table _s on commit drop as
+  select id sid, row_no, payload p, nullif(trim(payload->>'external_id'), '') ext,
+         upper(trim(coalesce(payload->>'student_number', ''))) num,
+         left(trim(coalesce(nullif(trim(payload->>'full_name'), ''), concat_ws(' ', nullif(trim(payload->>'first_name'), ''), nullif(trim(payload->>'last_name'), '')), '')), 200) name,
+         nullif(lower(trim(coalesce(payload->>'email', ''))), '') email, payload->>'status' raw_status,
+         uniattend.sync_status('student', payload->>'status') status,
+         case when payload->>'year_of_study' ~ '^\d{1,2}$' and (payload->>'year_of_study')::int between 1 and 10 then (payload->>'year_of_study')::int end yos,
+         upper(nullif(trim(payload->>'programme_code'), '')) pcode, null::uuid prog,
+         null::uuid iid, null::text k, null::text outcome, null::text error
+  from uniattend.integration_staging where run_id = p_run and dataset = 'students';
+  update pg_temp._s s set prog = x.id from uniattend.academic_programmes x where x.institution_id = v_inst and upper(x.code) = s.pcode and x.deleted_at is null;
+  update pg_temp._s set error = case when num = '' then 'student_number is missing'
+      when length(num) not between 3 and 32 then 'student_number must be 3 to 32 characters'
+      when pattern is not null and num !~ pattern then 'student number does not match the institution format'
+      when name = '' then 'name is missing'
+      when email is not null and email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then 'email is not valid'
+      when status is null then 'unknown status "' || left(raw_status, 30) || '"'
+      when pcode is not null and prog is null then 'unknown programme ' || pcode end where error is null;
+  perform uniattend._sync_match_ext(v_inst, v_src, 'student');
+  update pg_temp._s s set iid = x.id from uniattend.students x
+   where s.iid is null and s.error is null and x.institution_id = v_inst and x.student_number = s.num and x.deleted_at is null;
+  update pg_temp._s s set error = 'student number ' || s.num || ' already belongs to another student'
+   where s.error is null and s.iid is not null and exists (select 1 from uniattend.students x where x.institution_id = v_inst and x.student_number = s.num
+                                                             and x.id <> s.iid and x.deleted_at is null);
+  update pg_temp._s set k = coalesce(ext, num) where error is null;
+  perform uniattend._sync_dupes();
+  update pg_temp._s s set outcome = case when s.iid is null then 'insert'
+      when exists (select 1 from uniattend.students x where x.id = s.iid and (x.student_number <> s.num or x.full_name <> s.name
+                   or x.email is distinct from coalesce(s.email, x.email) or x.status <> s.status
+                   or x.year_of_study is distinct from coalesce(s.yos, x.year_of_study) or x.programme_id is distinct from coalesce(s.prog, x.programme_id))) then 'update' else 'unchanged' end
+   where s.error is null and s.outcome is null;
+  update uniattend.students x set student_number = s.num, full_name = s.name, email = coalesce(s.email, x.email), status = s.status,
+         year_of_study = coalesce(s.yos, x.year_of_study), programme_id = coalesce(s.prog, x.programme_id), updated_at = now()
+    from pg_temp._s s where s.outcome = 'update' and x.id = s.iid;
+  with ins as (insert into uniattend.students (institution_id, student_number, full_name, email, status, year_of_study, programme_id)
+               select v_inst, num, name, email, status, yos, prog from pg_temp._s where outcome = 'insert' returning id, student_number)
+  update pg_temp._s s set iid = ins.id from ins where s.outcome = 'insert' and s.num = ins.student_number;
+  res := res || jsonb_build_object('students', uniattend._sync_finish(v_inst, v_src, 'student', true));
+
+  -- ---------------------------------------------------- enrolments
+  drop table if exists pg_temp._s;
+  create temp table _s on commit drop as
+  select id sid, row_no, payload p, nullif(trim(payload->>'external_id'), '') ext,
+         nullif(upper(trim(coalesce(payload->>'student_number', ''))), '') snum, nullif(trim(payload->>'student_external_id'), '') sext,
+         nullif(upper(trim(coalesce(payload->>'module_code', ''))), '') mcode, nullif(trim(payload->>'module_external_id'), '') mext,
+         nullif(trim(payload->>'period_name'), '') pname, payload->>'status' raw_status,
+         uniattend.sync_status('enrolment', payload->>'status') status,
+         null::uuid stu, null::text stu_status, null::uuid mod, null::uuid iid, null::text k, null::text outcome, null::text error
+  from uniattend.integration_staging where run_id = p_run and dataset = 'enrolments';
+  update pg_temp._s s set stu = m.internal_id from uniattend.integration_external_ids m
+   where s.sext is not null and m.institution_id = v_inst and m.source = v_src and m.entity = 'student' and m.external_id = s.sext;
+  update pg_temp._s s set stu = x.id from uniattend.students x
+   where s.stu is null and s.snum is not null and x.institution_id = v_inst and x.student_number = s.snum and x.deleted_at is null;
+  update pg_temp._s s set stu_status = x.status from uniattend.students x where x.id = s.stu;
+  update pg_temp._s s set mod = m.internal_id from uniattend.integration_external_ids m
+   where s.mext is not null and m.institution_id = v_inst and m.source = v_src and m.entity = 'module' and m.external_id = s.mext;
+  update pg_temp._s s set mod = (select m.id from uniattend.modules m
+                                  left join uniattend.academic_periods ap on ap.id = m.academic_period_id
+                                 where m.institution_id = v_inst and upper(m.code) = s.mcode and m.deleted_at is null
+                                   and (s.pname is null or lower(ap.name) = lower(s.pname))
+                                 order by (m.academic_period_id is null) desc, m.created_at desc limit 1)
+   where s.mod is null and s.mcode is not null;
+  update pg_temp._s set error = case when snum is null and sext is null then 'student_number is missing'
+      when mcode is null and mext is null then 'module_code is missing'
+      when stu is null then 'unknown student ' || coalesce(snum, sext)
+      when mod is null then 'unknown module ' || coalesce(mcode, mext)
+      when status is null then 'unknown status "' || left(raw_status, 30) || '"' end where error is null;
+  -- New enrolments only for students who are active at the institution.
+  update pg_temp._s s set error = 'student ' || coalesce(s.snum, s.sext) || ' is ' || s.stu_status || ', so they can''t be enrolled'
+   where s.error is null and s.status = 'active' and s.stu_status <> 'active'
+     and not exists (select 1 from uniattend.module_enrolments e where e.module_id = s.mod and e.student_id = s.stu and e.status = 'active');
+  update pg_temp._s s set iid = e.id from uniattend.module_enrolments e where s.error is null and e.module_id = s.mod and e.student_id = s.stu;
+  update pg_temp._s set k = mod || '|' || stu where error is null;
+  perform uniattend._sync_dupes();
+  update pg_temp._s s set outcome = case
+      when s.iid is null and s.status = 'dropped' then 'unchanged'
+      when s.iid is null then 'insert'
+      when exists (select 1 from uniattend.module_enrolments e where e.id = s.iid and e.status <> s.status) then 'update' else 'unchanged' end
+   where s.error is null and s.outcome is null;
+  -- The status changes; who created the enrolment does not (a hand-made one never becomes removable by a sync).
+  update uniattend.module_enrolments e set status = s.status
+    from pg_temp._s s where s.outcome = 'update' and e.id = s.iid;
+  with ins as (insert into uniattend.module_enrolments (institution_id, module_id, student_id, source)
+               select v_inst, mod, stu, r.integration_id from pg_temp._s where outcome = 'insert' returning id, module_id, student_id)
+  update pg_temp._s s set iid = ins.id from ins where s.outcome = 'insert' and s.mod = ins.module_id and s.stu = ins.student_id;
+  c := uniattend._sync_finish(v_inst, v_src, 'enrolment', true);
+
+  -- A complete roster from a connection: drop that connection's own enrolments, in the modules it
+  -- covered, that are no longer listed. Held back when it would remove most of them at once.
+  if r.complete and r.integration_id is not null then
+    select count(*) into n_seen from pg_temp._s where outcome in ('insert','update','unchanged','duplicate');
+    select count(*) into n_mine from uniattend.module_enrolments where source = r.integration_id and status = 'active';
+    select count(*) into n_gone from uniattend.module_enrolments e
+     where e.source = r.integration_id and e.status = 'active'
+       and exists (select 1 from pg_temp._s s where s.mod = e.module_id and s.error is null)
+       and not exists (select 1 from pg_temp._s s where s.mod = e.module_id and s.stu = e.student_id and s.error is null);
+    if n_gone > 0 and (n_seen = 0 or (n_gone > 20 and n_gone * 2 > n_mine)) then
+      v_held := n_gone;
+    elsif n_gone > 0 then
+      update uniattend.module_enrolments e set status = 'dropped'
+       where e.source = r.integration_id and e.status = 'active'
+         and exists (select 1 from pg_temp._s s where s.mod = e.module_id and s.error is null)
+         and not exists (select 1 from pg_temp._s s where s.mod = e.module_id and s.stu = e.student_id and s.error is null);
+      v_dropped := n_gone;
+    end if;
+  end if;
+  res := res || jsonb_build_object('enrolments', c || jsonb_build_object('dropped_missing', v_dropped, 'held_back', v_held));
+
+  -- ---------------------------------------------------- teaching assignments
+  drop table if exists pg_temp._s;
+  create temp table _s on commit drop as
+  select id sid, row_no, payload p, null::text ext,
+         nullif(upper(trim(coalesce(payload->>'staff_number', ''))), '') lnum, nullif(trim(payload->>'lecturer_external_id'), '') lext,
+         nullif(lower(trim(coalesce(payload->>'email', ''))), '') email,
+         nullif(upper(trim(coalesce(payload->>'module_code', ''))), '') mcode, nullif(trim(payload->>'module_external_id'), '') mext,
+         case when lower(coalesce(payload->>'role', '')) in ('assistant','tutor','ta') then 'assistant' else 'primary' end role,
+         payload->>'status' raw_status, uniattend.sync_status('assignment', payload->>'status') status,
+         null::uuid lec, null::uuid mod, null::uuid iid, null::text k, null::text outcome, null::text error
+  from uniattend.integration_staging where run_id = p_run and dataset = 'assignments';
+  update pg_temp._s s set lec = m.internal_id from uniattend.integration_external_ids m
+   where s.lext is not null and m.institution_id = v_inst and m.source = v_src and m.entity = 'lecturer' and m.external_id = s.lext;
+  update pg_temp._s s set lec = (select l.id from uniattend.lecturers l where l.institution_id = v_inst and l.deleted_at is null
+                                  and ((s.lnum is not null and upper(l.staff_number) = s.lnum) or (s.lnum is null and s.email is not null and lower(l.email) = s.email))
+                                 limit 1)
+   where s.lec is null;
+  update pg_temp._s s set mod = m.internal_id from uniattend.integration_external_ids m
+   where s.mext is not null and m.institution_id = v_inst and m.source = v_src and m.entity = 'module' and m.external_id = s.mext;
+  update pg_temp._s s set mod = (select m.id from uniattend.modules m where m.institution_id = v_inst and upper(m.code) = s.mcode and m.deleted_at is null
+                                 order by (m.academic_period_id is null) desc, m.created_at desc limit 1)
+   where s.mod is null and s.mcode is not null;
+  update pg_temp._s set error = case when lnum is null and lext is null and email is null then 'staff_number or email is missing'
+      when mcode is null and mext is null then 'module_code is missing'
+      when lec is null then 'unknown lecturer ' || coalesce(lnum, lext, email)
+      when mod is null then 'unknown module ' || coalesce(mcode, mext)
+      when status is null then 'unknown status "' || left(raw_status, 30) || '"' end where error is null;
+  update pg_temp._s s set iid = a.id from uniattend.lecturer_assignments a where s.error is null and a.module_id = s.mod and a.lecturer_id = s.lec;
+  update pg_temp._s set k = mod || '|' || lec where error is null;
+  perform uniattend._sync_dupes();
+  update pg_temp._s s set outcome = case
+      when s.status = 'dropped' and s.iid is null then 'unchanged'
+      when s.status = 'dropped' then 'update'
+      when s.iid is null then 'insert'
+      when exists (select 1 from uniattend.lecturer_assignments a where a.id = s.iid and a.role <> s.role) then 'update' else 'unchanged' end
+   where s.error is null and s.outcome is null;
+  -- An assignment ending at the source removes the lecturer from the module; their past sessions stay.
+  delete from uniattend.lecturer_assignments a using pg_temp._s s where s.outcome = 'update' and s.status = 'dropped' and a.id = s.iid;
+  update uniattend.lecturer_assignments a set role = s.role from pg_temp._s s where s.outcome = 'update' and s.status = 'active' and a.id = s.iid;
+  insert into uniattend.lecturer_assignments (institution_id, module_id, lecturer_id, role, source)
+  select v_inst, mod, lec, role, r.integration_id from pg_temp._s where outcome = 'insert';
+  res := res || jsonb_build_object('assignments', uniattend._sync_finish(v_inst, v_src, 'assignment', false));
+
+  return res;
+end $$;
+
+-- Totals across datasets, for the run summary.
+create or replace function uniattend._sync_totals(p_res jsonb)
+returns jsonb language sql immutable set search_path = '' as $$
+  select jsonb_build_object(
+    'received', coalesce(sum((v->>'received')::int), 0), 'inserted', coalesce(sum((v->>'inserted')::int), 0),
+    'updated', coalesce(sum((v->>'updated')::int), 0), 'unchanged', coalesce(sum((v->>'unchanged')::int), 0),
+    'duplicates', coalesce(sum((v->>'duplicates')::int), 0), 'rejected', coalesce(sum((v->>'rejected')::int), 0))
+  from jsonb_each(coalesce(p_res, '{}'::jsonb)) e(k, v);
+$$;
+
+-- Preview (p_commit false: everything is applied, counted, then rolled back) or commit.
+create or replace function uniattend._sync_process(p_run uuid, p_commit boolean)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare r uniattend.integration_runs; res jsonb; outcomes jsonb; tot jsonb; v_status text;
+begin
+  select * into r from uniattend.integration_runs where id = p_run for update;
+  if r.id is null then raise exception 'unknown import'; end if;
+  if r.status not in ('staging','running') then raise exception 'This import has already finished (%).', r.status using errcode = 'P0001'; end if;
+  if not exists (select 1 from uniattend.institutions where id = r.institution_id and status = 'active' and deleted_at is null) then
+    raise exception 'Your institution must be approved before data can be imported.' using errcode = 'P0001';
+  end if;
+
+  if not p_commit then
+    begin
+      res := uniattend._sync_apply(p_run);
+      select coalesce(jsonb_agg(jsonb_build_array(id, outcome, error, internal_id)), '[]'::jsonb) into outcomes
+        from uniattend.integration_staging where run_id = p_run;
+      raise exception using errcode = 'UA001', message = 'preview';
+    exception when sqlstate 'UA001' then
+      null;  -- everything above is undone; keep only what we learned
+    end;
+    update uniattend.integration_staging st set outcome = o->>1, error = o->>2, internal_id = (o->>3)::uuid
+      from jsonb_array_elements(outcomes) o where st.id = (o->>0)::bigint and st.run_id = p_run;
+    tot := uniattend._sync_totals(res);
+    update uniattend.integration_runs set summary = jsonb_build_object('preview', true, 'datasets', res) || tot where id = p_run;
+    return jsonb_build_object('preview', true, 'datasets', res) || tot;
+  end if;
+
+  res := uniattend._sync_apply(p_run);
+  tot := uniattend._sync_totals(res);
+  insert into uniattend.integration_errors (run_id, institution_id, dataset, row_no, ref, message)
+  select p_run, r.institution_id, dataset, row_no,
+         left(coalesce(payload->>'external_id', payload->>'student_number', payload->>'staff_number', payload->>'code', payload->>'module_code', payload->>'name'), 120),
+         left(error, 300)
+    from uniattend.integration_staging where run_id = p_run and outcome = 'reject';
+  delete from uniattend.integration_staging where run_id = p_run;   -- source payloads are not kept
+  v_status := case when (tot->>'rejected')::int > 0 or exists (select 1 from jsonb_each(res) e(k, v) where (v->>'held_back')::int > 0) then 'warnings' else 'ok' end;
+  update uniattend.integration_runs set status = v_status, summary = jsonb_build_object('datasets', res) || tot, finished_at = now() where id = p_run;
+  if r.integration_id is not null then
+    update uniattend.integrations set last_run_at = now(), last_status = v_status, last_success_at = now(),
+           last_summary = tot, updated_at = now(), sync_requested_at = null,
+           next_run_at = case schedule when 'hourly' then now() + interval '1 hour' when 'daily' then now() + interval '24 hours' else next_run_at end
+     where id = r.integration_id;
+    insert into uniattend.integration_checkpoints (integration_id, institution_id, dataset, checkpoint)
+    select r.integration_id, r.institution_id, k, left(v #>> '{}', 500) from jsonb_each(r.checkpoints) e(k, v)
+    on conflict (integration_id, dataset) do update set checkpoint = excluded.checkpoint, updated_at = now();
+  end if;
+  perform uniattend.write_audit(r.institution_id, 'data_sync', 'integration_runs', p_run::text,
+    tot || jsonb_build_object('status', v_status, 'trigger', r.trigger, 'source', r.source));
+  return jsonb_build_object('preview', false, 'status', v_status, 'datasets', res) || tot;
+end $$;
+
+create or replace function uniattend._sync_stage(p_run uuid, p_dataset text, p_rows jsonb, p_first_row int)
+returns int language plpgsql security definer set search_path = '' as $$
+declare r uniattend.integration_runs; n int; base int;
+begin
+  select * into r from uniattend.integration_runs where id = p_run;
+  if r.status not in ('staging','running') then raise exception 'This import has already finished (%).', r.status using errcode = 'P0001'; end if;
+  if p_dataset not in ('faculties','departments','programmes','academic_periods','venues','modules','lecturers','students','enrolments','assignments') then
+    raise exception 'unknown dataset %', p_dataset using errcode = 'P0001';
+  end if;
+  if jsonb_typeof(p_rows) is distinct from 'array' then raise exception 'rows must be a list' using errcode = 'P0001'; end if;
+  n := jsonb_array_length(p_rows);
+  if n > 20000 then raise exception 'Send at most 20,000 rows at a time.' using errcode = 'P0001'; end if;
+  if n + (select count(*) from uniattend.integration_staging where run_id = p_run) > 200000 then
+    raise exception 'An import can hold at most 200,000 rows.' using errcode = 'P0001';
+  end if;
+  if n > 50 and p_dataset in ('students','enrolments') and not uniattend.can_bulk_import(r.institution_id) then
+    raise exception 'Loading more than 50 students at once needs the Professional plan.' using errcode = 'P0001';
+  end if;
+  base := coalesce(p_first_row, (select coalesce(max(row_no), 0) from uniattend.integration_staging where run_id = p_run and dataset = p_dataset) + 1);
+  insert into uniattend.integration_staging (run_id, institution_id, dataset, row_no, payload)
+  select p_run, r.institution_id, p_dataset, base + (o - 1)::int, case when jsonb_typeof(x) = 'object' then x else '{}'::jsonb end
+    from jsonb_array_elements(p_rows) with ordinality t(x, o);
+  return n;
+end $$;
+
+-- ------------------------------------------------------------ administrators: imports
+
+create or replace function uniattend.import_start(p_inst uuid, p_source text, p_label text, p_complete boolean default false)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare v_id uuid;
+begin
+  if not uniattend.is_inst_admin(p_inst) then raise exception 'institution admin only' using errcode = '42501'; end if;
+  -- Imports nobody finished are cleared after two days.
+  update uniattend.integration_runs set status = 'cancelled', finished_at = now(), error = 'Not confirmed within two days.'
+   where institution_id = p_inst and status = 'staging' and started_at < now() - interval '2 days';
+  delete from uniattend.integration_staging st using uniattend.integration_runs r
+   where st.run_id = r.id and r.institution_id = p_inst and r.status = 'cancelled';
+  if (select count(*) from uniattend.integration_runs where institution_id = p_inst and status = 'staging') >= 5 then
+    raise exception 'You have 5 imports waiting to be confirmed. Confirm or cancel one first.' using errcode = 'P0001';
+  end if;
+  insert into uniattend.integration_runs (institution_id, trigger, status, source, label, complete, created_by)
+  values (p_inst, 'upload', 'staging', left(coalesce(nullif(trim(p_source), ''), 'upload'), 80), left(trim(coalesce(p_label, '')), 200), coalesce(p_complete, false), auth.uid())
+  returning id into v_id;
+  return v_id;
+end $$;
+
+create or replace function uniattend.import_add(p_run uuid, p_dataset text, p_rows jsonb)
+returns int language plpgsql security definer set search_path = '' as $$
+declare v_inst uuid;
+begin
+  select institution_id into v_inst from uniattend.integration_runs where id = p_run and trigger = 'upload';
+  if v_inst is null or not uniattend.is_inst_admin(v_inst) then raise exception 'institution admin only' using errcode = '42501'; end if;
+  return uniattend._sync_stage(p_run, p_dataset, p_rows, null);
+end $$;
+
+create or replace function uniattend.import_preview(p_run uuid)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare v_inst uuid;
+begin
+  select institution_id into v_inst from uniattend.integration_runs where id = p_run;
+  if v_inst is null or not uniattend.is_inst_admin(v_inst) then raise exception 'institution admin only' using errcode = '42501'; end if;
+  return uniattend._sync_process(p_run, false);
+end $$;
+
+create or replace function uniattend.import_commit(p_run uuid)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare v_inst uuid;
+begin
+  select institution_id into v_inst from uniattend.integration_runs where id = p_run;
+  if v_inst is null or not uniattend.is_inst_admin(v_inst) then raise exception 'institution admin only' using errcode = '42501'; end if;
+  return uniattend._sync_process(p_run, true);
+end $$;
+
+create or replace function uniattend.import_cancel(p_run uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+declare v_inst uuid;
+begin
+  select institution_id into v_inst from uniattend.integration_runs where id = p_run and status = 'staging';
+  if v_inst is null or not uniattend.is_inst_admin(v_inst) then raise exception 'institution admin only' using errcode = '42501'; end if;
+  delete from uniattend.integration_staging where run_id = p_run;
+  update uniattend.integration_runs set status = 'cancelled', finished_at = now() where id = p_run;
+end $$;
+
+-- ------------------------------------------------------------ the server worker (dispatch secret)
+
+-- Starts a run for a connection outside the roster path (configurable connectors), with its last checkpoints.
+create or replace function uniattend.sync_begin(p_secret text, p_integration uuid, p_mode text, p_trigger text)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare it uniattend.integrations; v_run uuid;
+begin
+  if not uniattend.push_secret_ok(p_secret) then raise exception 'not allowed' using errcode = '42501'; end if;
+  select * into it from uniattend.integrations where id = p_integration and status = 'active';
+  if it.id is null then raise exception 'unknown or paused connection'; end if;
+  insert into uniattend.integration_runs (integration_id, institution_id, trigger, status, source, mode)
+  values (it.id, it.institution_id, coalesce(p_trigger, 'schedule'), 'running', 'conn:' || it.id, coalesce(p_mode, 'full'))
+  returning id into v_run;
+  return jsonb_build_object('run_id', v_run, 'checkpoints',
+    (select coalesce(jsonb_object_agg(dataset, checkpoint), '{}'::jsonb) from uniattend.integration_checkpoints where integration_id = it.id));
+end $$;
+
+create or replace function uniattend.sync_stage(p_secret text, p_run uuid, p_dataset text, p_rows jsonb)
+returns int language plpgsql security definer set search_path = '' as $$
+begin
+  if not uniattend.push_secret_ok(p_secret) then raise exception 'not allowed' using errcode = '42501'; end if;
+  if not exists (select 1 from uniattend.integration_runs where id = p_run and integration_id is not null) then raise exception 'unknown run'; end if;
+  return uniattend._sync_stage(p_run, p_dataset, p_rows, null);
+end $$;
+
+-- Commit what was staged. p_checkpoints: {dataset: checkpoint} saved only if the commit succeeds.
+create or replace function uniattend.sync_commit(p_secret text, p_run uuid, p_complete boolean, p_checkpoints jsonb)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+begin
+  if not uniattend.push_secret_ok(p_secret) then raise exception 'not allowed' using errcode = '42501'; end if;
+  update uniattend.integration_runs set complete = coalesce(p_complete, false),
+         checkpoints = case when jsonb_typeof(p_checkpoints) = 'object' then p_checkpoints else '{}'::jsonb end
+   where id = p_run and integration_id is not null and status = 'running';
+  if not found then raise exception 'unknown run'; end if;
+  return uniattend._sync_process(p_run, true);
+end $$;
+
+create or replace function uniattend.sync_fail(p_secret text, p_run uuid, p_error text)
+returns void language plpgsql security definer set search_path = '' as $$
+declare r uniattend.integration_runs;
+begin
+  if not uniattend.push_secret_ok(p_secret) then raise exception 'not allowed' using errcode = '42501'; end if;
+  select * into r from uniattend.integration_runs where id = p_run and status in ('running','staging');
+  if r.id is null then return; end if;
+  delete from uniattend.integration_staging where run_id = p_run;
+  update uniattend.integration_runs set status = 'failed', error = left(p_error, 500), finished_at = now() where id = p_run;
+  update uniattend.integrations set last_run_at = now(), last_status = 'failed', updated_at = now(),
+         last_summary = jsonb_build_object('error', left(p_error, 300)), next_run_at = now() + interval '1 hour'
+   where id = r.integration_id;
+end $$;
+
+-- A real test, made by the server, sets the connection status. Nobody can set "connected" by hand.
+create or replace function uniattend.integration_test_result(p_secret text, p_id uuid, p_status text, p_message text)
+returns void language plpgsql security definer set search_path = '' as $$
+declare it uniattend.integrations;
+begin
+  if not uniattend.push_secret_ok(p_secret) then raise exception 'not allowed' using errcode = '42501'; end if;
+  if p_status not in ('connected','auth_failed','connection_failed','permission_denied','unavailable','incomplete') then raise exception 'bad status'; end if;
+  update uniattend.integrations set connection_status = case when status = 'paused' then 'suspended' else p_status end,
+         last_tested_at = now(), last_test_message = left(p_message, 300), updated_at = now()
+   where id = p_id returning * into it;
+  if it.id is not null then
+    perform uniattend.write_audit(it.institution_id, 'integration_tested', 'integrations', p_id::text, jsonb_build_object('status', p_status));
+  end if;
+end $$;
+
+-- Retry a failed or cancelled connection run (queues the connection to run again now).
+create or replace function uniattend.retry_run(p_run uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+declare r uniattend.integration_runs;
+begin
+  select * into r from uniattend.integration_runs where id = p_run;
+  if r.id is null or not uniattend.is_inst_admin(r.institution_id) then raise exception 'institution admin only' using errcode = '42501'; end if;
+  if r.integration_id is null then raise exception 'Upload the file again to retry an upload.' using errcode = 'P0001'; end if;
+  if r.status not in ('failed','cancelled','warnings') then raise exception 'Only a failed run can be retried.' using errcode = 'P0001'; end if;
+  update uniattend.integrations set sync_requested_at = now(), status = 'active' where id = r.integration_id and kind <> 'api';
+  if not found then raise exception 'This connection is updated by your own system; send the roster again.' using errcode = 'P0001'; end if;
+  perform uniattend.write_audit(r.institution_id, 'integration_retry', 'integration_runs', p_run::text, '{}'::jsonb);
+end $$;
+
+-- The roster path (0024) now also writes connection status and success time.
+create or replace function uniattend._integration_mark_success()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  if new.last_status in ('ok','warnings') and new.last_run_at is distinct from old.last_run_at then
+    new.last_success_at := coalesce(new.last_run_at, now());
+  end if;
+  if new.status = 'paused' then new.connection_status := 'suspended';
+  elsif old.status = 'paused' and new.status = 'active' and new.connection_status = 'suspended' then new.connection_status := 'not_configured';
+  end if;
+  return new;
+end $$;
+drop trigger if exists integrations_success on uniattend.integrations;
+create trigger integrations_success before update on uniattend.integrations
+  for each row execute function uniattend._integration_mark_success();
+
+revoke all on function uniattend.sync_status(text, text) from public, anon;
+revoke all on function uniattend._sync_match_ext(uuid, text, text) from public, anon, authenticated;
+revoke all on function uniattend._sync_dupes() from public, anon, authenticated;
+revoke all on function uniattend._sync_finish(uuid, text, text, boolean) from public, anon, authenticated;
+revoke all on function uniattend._sync_apply(uuid) from public, anon, authenticated;
+revoke all on function uniattend._sync_totals(jsonb) from public, anon, authenticated;
+revoke all on function uniattend._sync_process(uuid, boolean) from public, anon, authenticated;
+revoke all on function uniattend._sync_stage(uuid, text, jsonb, int) from public, anon, authenticated;
+revoke all on function uniattend._integration_mark_success() from public, anon, authenticated;
+revoke all on function uniattend.import_start(uuid, text, text, boolean) from public, anon;
+revoke all on function uniattend.import_add(uuid, text, jsonb) from public, anon;
+revoke all on function uniattend.import_preview(uuid) from public, anon;
+revoke all on function uniattend.import_commit(uuid) from public, anon;
+revoke all on function uniattend.import_cancel(uuid) from public, anon;
+revoke all on function uniattend.retry_run(uuid) from public, anon;
+grant execute on function uniattend.import_start(uuid, text, text, boolean) to authenticated;
+grant execute on function uniattend.import_add(uuid, text, jsonb) to authenticated;
+grant execute on function uniattend.import_preview(uuid) to authenticated;
+grant execute on function uniattend.import_commit(uuid) to authenticated;
+grant execute on function uniattend.import_cancel(uuid) to authenticated;
+grant execute on function uniattend.retry_run(uuid) to authenticated;
+-- Checked by the dispatch secret, so callable from the server without a session:
+revoke all on function uniattend.sync_begin(text, uuid, text, text) from public;
+revoke all on function uniattend.sync_stage(text, uuid, text, jsonb) from public;
+revoke all on function uniattend.sync_commit(text, uuid, boolean, jsonb) from public;
+revoke all on function uniattend.sync_fail(text, uuid, text) from public;
+revoke all on function uniattend.integration_test_result(text, uuid, text, text) from public;
+grant execute on function uniattend.sync_begin(text, uuid, text, text) to anon, authenticated;
+grant execute on function uniattend.sync_stage(text, uuid, text, jsonb) to anon, authenticated;
+grant execute on function uniattend.sync_commit(text, uuid, boolean, jsonb) to anon, authenticated;
+grant execute on function uniattend.sync_fail(text, uuid, text) to anon, authenticated;
+grant execute on function uniattend.integration_test_result(text, uuid, text, text) to anon, authenticated;
+
+-- The stored (encrypted) credential, for a test the server makes on an administrator's behalf.
+-- The server first confirms, as that administrator, that the connection is theirs.
+create or replace function uniattend.integration_secret(p_secret text, p_id uuid)
+returns text language plpgsql security definer set search_path = '' as $$
+begin
+  if not uniattend.push_secret_ok(p_secret) then raise exception 'not allowed' using errcode = '42501'; end if;
+  return (select token from uniattend.integration_secrets where integration_id = p_id);
+end $$;
+revoke all on function uniattend.integration_secret(text, uuid) from public;
+grant execute on function uniattend.integration_secret(text, uuid) to anon, authenticated;
+
+
+-- ===================================================== 20261114000026_import_mappings.sql
+-- UniAttend 0026 — saved column mappings for imports.
+--
+-- An institution's files rarely use UniAttend's field names (STUDENT_NO, not
+-- student_number). An administrator maps the columns once on the Import page and
+-- the mapping is remembered per institution and dataset, so the next file with
+-- the same layout needs no work. A mapping holds column names and tidy-up rules
+-- only: no data from any file.
+
+create table if not exists uniattend.integration_mappings (
+  id             uuid primary key default gen_random_uuid(),
+  institution_id uuid not null references uniattend.institutions(id) on delete cascade,
+  dataset        text not null check (dataset in ('faculties','departments','programmes','academic_periods','venues','modules',
+                                                  'lecturers','students','enrolments','assignments')),
+  name           text not null check (length(trim(name)) between 1 and 80),
+  mapping        jsonb not null check (jsonb_typeof(mapping) = 'object' and pg_column_size(mapping) < 8192),
+  updated_by     uuid references auth.users(id) on delete set null,
+  updated_at     timestamptz not null default now(),
+  unique (institution_id, dataset, name)
+);
+
+alter table uniattend.integration_mappings enable row level security;
+drop policy if exists integration_mappings_select on uniattend.integration_mappings;
+create policy integration_mappings_select on uniattend.integration_mappings for select to authenticated
+  using (uniattend.is_inst_admin(institution_id));
+drop policy if exists integration_mappings_insert on uniattend.integration_mappings;
+create policy integration_mappings_insert on uniattend.integration_mappings for insert to authenticated
+  with check (uniattend.is_inst_admin(institution_id));
+drop policy if exists integration_mappings_update on uniattend.integration_mappings;
+create policy integration_mappings_update on uniattend.integration_mappings for update to authenticated
+  using (uniattend.is_inst_admin(institution_id)) with check (uniattend.is_inst_admin(institution_id));
+drop policy if exists integration_mappings_delete on uniattend.integration_mappings;
+create policy integration_mappings_delete on uniattend.integration_mappings for delete to authenticated
+  using (uniattend.is_inst_admin(institution_id));
+revoke all on uniattend.integration_mappings from anon;
+grant select, insert, update, delete on uniattend.integration_mappings to authenticated;
+
 commit;

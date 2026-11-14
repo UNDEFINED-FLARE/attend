@@ -32,6 +32,25 @@ export async function changePlan(_: S, f: FormData): Promise<S> {
   return error ? { error: error.message } : { ok: "Subscription updated." };
 }
 
+/** An invoice paid by EFT: recorded, and the institution is active for that many more months. */
+export async function recordPayment(_: S, f: FormData): Promise<S> {
+  const p = z.object({
+    id: z.string().uuid(),
+    amount: z.coerce.number().min(0).max(100_000_000),
+    reference: z.string().trim().min(3, "Enter the invoice or EFT reference.").max(80),
+    months: z.coerce.number().int().min(1).max(36),
+  }).safeParse(Object.fromEntries(f));
+  if (!p.success) return { error: p.error.issues[0].message };
+  const { supabase } = await requireRole("super_admin");
+  const { data, error } = await supabase.rpc("record_manual_payment", {
+    p_inst: p.data.id, p_amount_cents: Math.round(p.data.amount * 100), p_reference: p.data.reference, p_months: p.data.months,
+  });
+  if (error) return { error: error.code === "PGRST202" ? "Recording payments needs the latest database update (migration 0022)." : error.message };
+  revalidatePath("/super");
+  const until = new Date((data as { active_until: string }).active_until).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" });
+  return { ok: `Payment recorded. Active until ${until}.` };
+}
+
 export async function savePlan(_: S, f: FormData): Promise<S> {
   const num = z.union([z.literal(""), z.coerce.number().int().positive()]).transform((v) => (v === "" ? null : v));
   const p = z.object({

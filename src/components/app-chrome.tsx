@@ -28,7 +28,7 @@ export function AppTitle({ title, eyebrow, sub, action }: { title: string; eyebr
       </div>
       <div className="flex shrink-0 items-center gap-2 pt-1">
         {action}
-        {me && <div className="flex items-center gap-2 lg:hidden"><Bell unread={me.unread} /><AvatarMenu me={me} /></div>}
+        {me && <div className="flex items-center gap-2 lg:hidden print:hidden"><Bell unread={me.unread} /><AvatarMenu me={me} /></div>}
       </div>
     </div>
   );
@@ -68,6 +68,7 @@ function AvatarMenu({ me }: { me: Me }) {
           <nav className="p-2 text-sm">
             <Link href="/notifications" className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-bg"><Icon name="bell" size={18} />Notifications</Link>
             <Link href="/student/history" className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-bg"><Icon name="flag" size={18} />Disputes</Link>
+            <Link href="/settings" className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-bg"><Icon name="lock" size={18} />Security &amp; app lock</Link>
             <Link href="/privacy" className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-bg"><Icon name="shield" size={18} />Privacy</Link>
             <form action={signOut}>
               <button className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-bad hover:bg-bad/5"><Icon name="logout" size={18} />Sign out</button>
@@ -84,7 +85,7 @@ export function AppTabBar({ items, center }: { items: NavItem[]; center: string 
   const path = usePathname();
   const active = items.filter((i) => path === i.href || path.startsWith(i.href + "/")).sort((a, b) => b.href.length - a.href.length)[0]?.href;
   return (
-    <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 px-4 pb-[max(12px,env(safe-area-inset-bottom))] lg:hidden">
+    <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 px-4 print:hidden pb-[max(12px,env(safe-area-inset-bottom))] lg:hidden">
       <ul className="mx-auto flex max-w-md items-center justify-around rounded-[28px] bg-surface px-2 py-2 shadow-[0_10px_40px_rgb(15_27_45/0.14)]">
         {items.map((i) => {
           const on = i.href === active;

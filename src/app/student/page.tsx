@@ -25,7 +25,7 @@ export default async function StudentHome() {
   const nowIso = new Date().toISOString();
   const since = new Date(Date.now() - 8 * 7 * 864e5).toISOString();
   const recSelect = (late: boolean) => supabase.from("attendance_records")
-    .select(`id, status, session_id, checked_in_at, created_at, module_id${late ? ", minutes_late" : ""}, modules(code, title), class_sessions(title, opens_at)`)
+    .select(`id, status, session_id, checked_in_at, created_at, module_id${late ? ", minutes_late, checked_out_at" : ""}, modules(code, title), class_sessions(title, opens_at)`)
     .eq("institution_id", institutionId).gte("created_at", since).order("created_at", { ascending: false }).limit(600);
   const [{ data }, { data: open }, { data: me }, recRes, theme, slots] = await Promise.all([
     supabase.rpc("my_attendance"),
@@ -44,6 +44,12 @@ export default async function StudentHome() {
   const todaySlots = slots.filter((t) => t.weekday === day);
   const done = new Set(recs.map((r) => r.session_id));
   const live = (open ?? []).filter((s) => !done.has(s.id));
+  // Checked in to a class that is still open, and not checked out yet: offer "I'm leaving".
+  const inClass = (open ?? []).flatMap((s) => {
+    const r = recs.find((x) => x.session_id === s.id && ["present", "late", "late_pending"].includes(x.status) && !x.checked_out_at);
+    const m = s.modules as unknown as { code: string; title: string };
+    return r ? [{ session: s.id, code: m.code, title: s.title, since: r.checked_in_at }] : [];
+  });
   const att = rows.reduce((a, r) => a + r.attended, 0), tot = rows.reduce((a, r) => a + r.attended + r.absent, 0);
   const overall = tot ? Math.round((1000 * att) / tot) / 10 : null;
   const pending = rows.reduce((a, r) => a + r.unresolved, 0);
@@ -71,6 +77,6 @@ export default async function StudentHome() {
     const kinds = new Set(slots.filter((s) => s.weekday === k + 1).map((s) => (/test|exam/i.test(s.kind) ? "test" : /prac|tut|lab/i.test(s.kind) ? "prac" : "lecture")));
     return { wd: k + 1, date: d.getUTCDate(), letter: "MTWTFSS"[k], kinds };
   });
-  return <DashboardView d={{ theme, hello, first, studentNumber: me?.student_number ?? null, rows, recs, live, series, todaySlots, nextSlot, now, day,
+  return <DashboardView d={{ theme, hello, first, studentNumber: me?.student_number ?? null, rows, recs, live, inClass, series, todaySlots, nextSlot, now, day,
     overall, att, tot, pending, atRisk, week }} />;
 }

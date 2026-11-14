@@ -1,26 +1,45 @@
 "use server";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { env } from "@/lib/env";
 import { safeNextPath } from "@/lib/safe-redirect";
+import { SESSION_ONLY_COOKIE } from "@/lib/supabase/cookies";
 import { supabaseServer } from "@/lib/supabase/server";
 
 export type FormState = { error?: string; ok?: string } | undefined;
+export type SignInState = { error?: string; next?: string } | undefined;
 
 const email = z.string().trim().toLowerCase().email("Enter a valid email address.");
 const password = z.string().min(10, "Use at least 10 characters.").max(128);
 
 const safeNext = (v: FormDataEntryValue | null) => safeNextPath(v);
+/** The bot-protection token from the form (see src/components/captcha.tsx); Supabase Auth checks it when CAPTCHA is on. */
+const captcha = (form: FormData) => {
+  const t = form.get("cf-turnstile-response");
+  return typeof t === "string" && t ? { captchaToken: t.slice(0, 4096) } : {};
+};
+const CAPTCHA_MSG = "Please complete the check that you're not a robot, then try again.";
+const isCaptcha = (m: string) => /captcha/i.test(m);
 
-export async function signIn(_: FormState, form: FormData): Promise<FormState> {
-  const parsed = z.object({ email, password: z.string().min(1) }).safeParse(Object.fromEntries(form));
+/**
+ * Signs in and returns where to go next. The page then lets the browser save the
+ * password (it only offers to once it knows the sign-in worked) and navigates.
+ */
+export async function signIn(_: SignInState, form: FormData): Promise<SignInState> {
+  const parsed = z.object({ email, password: z.string().min(1) }).safeParse({ email: form.get("email"), password: form.get("password") });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
-  const supabase = await supabaseServer();
-  const { error } = await supabase.auth.signInWithPassword(parsed.data);
+  const remember = form.get("remember") === "on";
+  const supabase = await supabaseServer({ sessionOnly: !remember });
+  const { error } = await supabase.auth.signInWithPassword({ ...parsed.data, options: captcha(form) });
+  if (error && isCaptcha(error.message)) return { error: CAPTCHA_MSG };
   // One message for both cases, so the form does not reveal which emails exist.
   if (error) return { error: "Email or password is incorrect, or the email is not yet confirmed." };
+  const store = await cookies();
+  if (remember) store.delete(SESSION_ONLY_COOKIE);
+  else store.set(SESSION_ONLY_COOKIE, "1", { httpOnly: true, sameSite: "lax", secure: true, path: "/" });
   await supabase.rpc("link_my_accounts");
-  redirect(safeNext(form.get("next")));
+  return { next: safeNext(form.get("next")) };
 }
 
 export async function signUp(_: FormState, form: FormData): Promise<FormState> {
@@ -36,9 +55,9 @@ export async function signUp(_: FormState, form: FormData): Promise<FormState> {
     email: parsed.data.email,
     password: parsed.data.password,
     // full_name only. Roles are never taken from signup data.
-    options: { data: { full_name: parsed.data.full_name, app: "uniattend" }, emailRedirectTo: `${env.siteUrl}/auth/callback` },
+    options: { data: { full_name: parsed.data.full_name, app: "uniattend" }, emailRedirectTo: `${env.siteUrl}/auth/callback`, ...captcha(form) },
   });
-  if (error) return { error: error.message };
+  if (error) return { error: isCaptcha(error.message) ? CAPTCHA_MSG : error.message };
   return { ok: "Check your inbox to confirm your email, then sign in." };
 }
 
@@ -46,9 +65,10 @@ export async function requestReset(_: FormState, form: FormData): Promise<FormSt
   const parsed = email.safeParse(form.get("email"));
   if (!parsed.success) return { error: parsed.error.issues[0].message };
   const supabase = await supabaseServer();
-  await supabase.auth.resetPasswordForEmail(parsed.data, {
-    redirectTo: `${env.siteUrl}/auth/callback?next=/reset-password`,
+  const { error } = await supabase.auth.resetPasswordForEmail(parsed.data, {
+    redirectTo: `${env.siteUrl}/auth/callback?next=/reset-password`, ...captcha(form),
   });
+  if (error && isCaptcha(error.message)) return { error: CAPTCHA_MSG };
   return { ok: "If an account uses that email, a reset link is on its way." };
 }
 

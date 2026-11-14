@@ -129,17 +129,20 @@ export async function updateModule(_: S, f: FormData): Promise<S> {
   const num = z.union([z.literal(""), z.coerce.number().int().min(0).max(100000)]).transform((v) => (v === "" ? null : v));
   const p = z.object({
     id: uuid, code: z.string().trim().toUpperCase().min(2).max(20), title: z.string().trim().min(2).max(200),
-    department_id: z.union([uuid, z.literal("")]).transform((v) => v || null),
+    // Optional: a form that leaves a field out (the Data page) leaves it unchanged.
+    department_id: z.union([uuid, z.literal("")]).transform((v) => v || null).optional(),
     min_attendance_pct: z.union([z.literal(""), z.coerce.number().int().min(0).max(100)]).transform((v) => (v === "" ? null : v)),
-    expected_students: num,
+    expected_students: num.optional(),
   }).safeParse(Object.fromEntries(f));
   if (!p.success) return { error: `${p.error.issues[0].path.join(".")}: ${p.error.issues[0].message}` };
-  const { id, expected_students, ...rest } = p.data;
+  const { id, expected_students, ...withUndefined } = p.data;
+  const rest = Object.fromEntries(Object.entries(withUndefined).filter(([, v]) => v !== undefined));
   const { supabase, institutionId } = await requireRole("institution_admin");
-  let { error } = await supabase.from("modules").update({ ...rest, expected_students }).eq("id", id).eq("institution_id", institutionId);
+  let { error } = await supabase.from("modules").update(expected_students === undefined ? rest : { ...rest, expected_students }).eq("id", id).eq("institution_id", institutionId);
   if (error?.code === "PGRST204") ({ error } = await supabase.from("modules").update(rest).eq("id", id).eq("institution_id", institutionId));
   if (error) return { error: error.code === "23505" ? "Another module already uses that code." : error.message };
   revalidatePath("/admin/modules");
+  revalidatePath("/admin/data");
   return { ok: "Saved." };
 }
 
@@ -158,5 +161,83 @@ export async function updatePerson(_: S, f: FormData): Promise<S> {
   const { error } = await supabase.from(p.data.kind === "student" ? "students" : "lecturers").update(row).eq("id", p.data.id).eq("institution_id", institutionId);
   if (error) return { error: error.code === "23505" ? "Someone else already has that number." : error.message };
   revalidatePath("/admin/people");
+  revalidatePath("/admin/data");
+  return { ok: "Saved." };
+}
+
+// ---------------------------------------------------------------- Data page (bulk)
+
+const BULK_KINDS = { students: "student", lecturers: "lecturer", modules: "module", venues: "venue", timetable: "slot" } as const;
+
+/**
+ * Bulk actions from the Data page: delete (archives anything with attendance history,
+ * exactly like the single delete), restore archived records, or set students' status.
+ */
+export async function bulkData(_: S, f: FormData): Promise<S> {
+  const p = z.object({
+    kind: z.enum(["students", "lecturers", "modules", "venues", "timetable"]),
+    op: z.enum(["delete", "restore", "status"]),
+    status: z.enum(["active", "suspended", "graduated", "withdrawn", "left"]).optional(),
+    ids: z.array(uuid).min(1, "Tick at least one row.").max(500),
+  }).safeParse({ kind: f.get("kind"), op: f.get("op"), status: f.get("status") || undefined, ids: f.getAll("id") });
+  if (!p.success) return { error: p.error.issues[0].message };
+  const { kind, op, ids, status } = p.data;
+  const { supabase, institutionId } = await requireRole("institution_admin");
+  let done = 0;
+  const failed: string[] = [];
+
+  if (op === "delete") {
+    for (const id of ids) {
+      const fd = new FormData(); fd.set("kind", BULK_KINDS[kind]); fd.set("id", id);
+      const r = await deleteRecord(undefined, fd);
+      if (r?.error) failed.push(r.error); else done++;
+    }
+  } else if (op === "restore") {
+    if (kind === "timetable") return { error: "Timetable classes can't be restored; add them again." };
+    const table = kind, col = kind === "students" ? "student_number" : kind === "lecturers" ? "staff_number" : kind === "modules" ? "code" : null;
+    for (const id of ids) {
+      const { data: row } = await supabase.from(table).select(col ? `id, ${col}` : "id").eq("id", id).eq("institution_id", institutionId).maybeSingle();
+      if (!row) { failed.push("A row no longer exists."); continue; }
+      const patch: Record<string, unknown> = { deleted_at: null };
+      if (kind === "students") patch.status = "active";
+      if (kind === "lecturers") patch.status = "active";
+      if (col) {
+        // Archiving added "~<id>" to free the number or code; take it off again if nobody has reused it.
+        const original = String((row as unknown as Record<string, unknown>)[col]).replace(/~[0-9a-f]{8}$/, "");
+        const { count } = await supabase.from(table).select("id", { count: "exact", head: true }).eq("institution_id", institutionId).eq(col, original).neq("id", id);
+        if (!count) patch[col] = original;
+      }
+      const { error } = await supabase.from(table).update(patch).eq("id", id).eq("institution_id", institutionId);
+      if (error) failed.push(error.message); else done++;
+    }
+  } else {
+    if (kind !== "students" && kind !== "lecturers") return { error: "Status applies to students and lecturers." };
+    const allowed = kind === "students" ? ["active", "suspended", "graduated", "withdrawn"] : ["active", "suspended", "left"];
+    if (!status || !allowed.includes(status)) return { error: "Choose a status." };
+    const { error, count } = await supabase.from(kind).update({ status }, { count: "exact" }).in("id", ids).eq("institution_id", institutionId);
+    if (error) return { error: error.message };
+    done = count ?? 0;
+  }
+  ["/admin/data", "/admin/people", "/admin/modules", "/admin/structure", "/admin/timetable"].forEach((path) => revalidatePath(path));
+  const verb = op === "delete" ? "deleted or archived" : op === "restore" ? "restored" : `set to ${status}`;
+  return failed.length
+    ? { error: `${done} ${verb}; ${failed.length} not: ${[...new Set(failed)].slice(0, 2).join(" ")}` }
+    : { ok: `${done} ${verb}.` };
+}
+
+/** Edit a venue's name, code, building and capacity. */
+export async function updateVenue(_: S, f: FormData): Promise<S> {
+  const p = z.object({
+    id: uuid, name: z.string().trim().min(1).max(120), code: z.string().trim().max(40),
+    building: z.string().trim().max(120), capacity: z.union([z.literal(""), z.coerce.number().int().min(1).max(100000)]),
+  }).safeParse(Object.fromEntries(f));
+  if (!p.success) return { error: `${p.error.issues[0].path.join(".")}: ${p.error.issues[0].message}` };
+  const { supabase, institutionId } = await requireRole("institution_admin");
+  const { id, capacity, code, building, name } = p.data;
+  let { error } = await supabase.from("venues").update({ name, code: code || null, building: building || null, capacity: capacity === "" ? null : capacity })
+    .eq("id", id).eq("institution_id", institutionId);
+  if (error?.code === "PGRST204") ({ error } = await supabase.from("venues").update({ name, code: code || null, capacity: capacity === "" ? null : capacity }).eq("id", id).eq("institution_id", institutionId));
+  if (error) return { error: error.message };
+  ["/admin/data", "/admin/structure"].forEach((path) => revalidatePath(path));
   return { ok: "Saved." };
 }

@@ -1,30 +1,43 @@
+import { loadTheme } from "@/lib/shell-data";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ActionForm, Submit } from "@/components/form";
-import { Badge, Card, CardTitle, Field, Input, PageHeader, Select, Stat, Table, Td, when } from "@/components/ui";
+import { Submit } from "@/components/form";
+import { Badge, Card, PageHeader, Stat, when } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
-import { closeSession, override } from "../../actions";
+import { closeSession } from "../../actions";
 import { VenueMap } from "@/components/map/venue-map";
 import type { LatLng } from "@/lib/campuses";
-import { LateChip } from "@/components/late";
 import { LateArrivals, type LateRow } from "./late-arrivals";
 import { LiveQr, RealtimeRefresh } from "./live";
+import { Register, type CustomStatus, type RegisterRow } from "./register";
+import { SessionControls } from "./controls";
 
-type Rec = { id: string; student_id: string; status: string; minutes_late: number | null; overridden_by: string | null; score: number | null; checked_in_at: string | null;
+type Rec = { id: string; student_id: string; status: string; custom_status_id?: string | null; checked_out_at?: string | null; minutes_late: number | null; overridden_by: string | null; score: number | null; checked_in_at: string | null;
              explanation: string[]; method: string; override_note: string | null };
 
 export default async function SessionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { supabase } = await requireRole("lecturer");
-  const { data: s } = await supabase.from("class_sessions")
-    .select("id, title, status, join_code, opens_at, closes_at, late_after, require_gps, module_id, modules(code, title), venues(name, lat, lng, radius_m, polygon)")
+  const { supabase, institutionId, user } = await requireRole("lecturer");
+  const features = (await loadTheme(supabase, institutionId)).features;
+  // allow_printed_qr needs database update 0016; older databases still load.
+  const sessionSelect = (printed: boolean) => supabase.from("class_sessions")
+    .select(`id, title, status, join_code, opens_at, closes_at, late_after, require_gps, module_id, modules(code, title), venues(name, lat, lng, radius_m, polygon)${printed ? ", allow_printed_qr" : ""}`)
     .eq("id", id).maybeSingle();
+  let sRes = await sessionSelect(true);
+  if (sRes.error) sRes = await sessionSelect(false);
+  const s = sRes.data as unknown as ({ id: string; title: string; status: string; join_code: string; opens_at: string; closes_at: string; late_after: string;
+    require_gps: boolean; module_id: string; modules: unknown; venues: unknown; allow_printed_qr?: boolean }) | null;
   if (!s) notFound();
-  const [{ data: enrolled }, { data: recs }] = await Promise.all([
+  const recSelect = (custom: boolean) => supabase.from("attendance_records")
+    .select(`id, student_id, status, minutes_late, overridden_by, score, checked_in_at, explanation, method, override_note${custom ? ", custom_status_id, checked_out_at" : ""}`).eq("session_id", id);
+  const [{ data: enrolled }, recRes, { data: statusRows }] = await Promise.all([
     supabase.from("module_enrolments").select("students(id, student_number, full_name)").eq("module_id", s.module_id).eq("status", "active"),
-    supabase.from("attendance_records").select("id, student_id, status, minutes_late, overridden_by, score, checked_in_at, explanation, method, override_note").eq("session_id", id),
+    recSelect(true),
+    supabase.from("attendance_statuses").select("id, name, color, category").eq("active", true).order("sort_order").order("name"),
   ]);
-  const byStudent = new Map(((recs ?? []) as Rec[]).map((r) => [r.student_id, r]));
+  // custom_status_id needs database update 0014; older databases still load.
+  const recs = (recRes.error ? (await recSelect(false)).data : recRes.data) as unknown as Rec[] | null;
+  const byStudent = new Map((recs ?? []).map((r) => [r.student_id, r]));
   const roster = (enrolled ?? []).map((e) => e.students as unknown as { id: string; student_number: string; full_name: string })
     .sort((a, b) => a.student_number.localeCompare(b.student_number));
   const count = (st: string) => (recs ?? []).filter((r) => r.status === st).length;
@@ -60,7 +73,13 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,360px)_1fr]">
         <div className="space-y-4">
-          {open ? <LiveQr session={id} /> : <Card><Badge status={s.status} /> <span className="ml-2 text-sm text-muted">This session is {s.status}.</span></Card>}
+          {open ? <LiveQr session={id} /> : s.status === "scheduled"
+            ? <Card><p className="text-sm font-semibold text-warn">Check-in is paused.</p><p className="text-xs text-muted">Students can&apos;t check in until you resume it below.</p></Card>
+            : <Card><Badge status={s.status} /> <span className="ml-2 text-sm text-muted">This session is {s.status}.</span></Card>}
+          {(open || s.status === "scheduled") && (
+            <SessionControls session={id} status={s.status} requireGps={s.require_gps} printed={!!s.allow_printed_qr} closesAt={s.closes_at} lateAfter={s.late_after}
+              printedFeature={features.printedQr} scanFeature={features.cardScanning} />
+          )}
           {venue && (venue.polygon || venue.lat != null) && <VenueMap venue={venue} height={220} />}
           <div className="grid grid-cols-2 gap-3">
             <Stat label="Present" value={count("present")} />
@@ -68,45 +87,17 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
             <Stat label="To review" value={count("pending_verification")} />
             <Stat label={open ? "Not yet in" : "Absent"} value={open ? roster.length - (recs ?? []).length : count("absent")} />
           </div>
-          <Card>
-            <CardTitle>Correct a record</CardTitle>
-            <ActionForm action={override} submit="Save correction" pending="Saving…">
-              <input type="hidden" name="session" value={id} />
-              <Field label="Student">
-                <Select name="student" required>
-                  {roster.map((st) => <option key={st.id} value={st.id}>{st.student_number} · {st.full_name}</option>)}
-                </Select>
-              </Field>
-              <Field label="Status">
-                <Select name="status" defaultValue="present">
-                  <option value="present">Present</option><option value="late">Late</option>
-                  <option value="excused">Excused</option><option value="absent">Absent</option>
-                </Select>
-              </Field>
-              <Field label="Reason" hint="Required. Kept in the audit log."><Input name="note" required minLength={3} /></Field>
-            </ActionForm>
-          </Card>
         </div>
 
-        <div>
+        <div className="min-w-0 space-y-6">
         <LateArrivals session={id} rows={lateRows} />
-        <Card>
-          <CardTitle>Register ({roster.length})</CardTitle>
-          <Table head={["Student", "Status", "Time", "Confidence", "Why"]}>
-            {roster.map((st) => {
-              const r = byStudent.get(st.id);
-              return (
-                <tr key={st.id}>
-                  <Td><b className="font-mono">{st.student_number}</b> {st.full_name}</Td>
-                  <Td>{r ? <span className="flex flex-wrap items-center gap-1"><Badge status={r.status} /><LateChip minutes={r.minutes_late} /></span> : <span className="text-muted">—</span>}</Td>
-                  <Td className="text-xs">{r?.checked_in_at ? new Date(r.checked_in_at).toLocaleTimeString("en-ZA") : ""}</Td>
-                  <Td>{r?.score != null ? `${r.score}` : ""}</Td>
-                  <Td className="max-w-xs text-xs text-muted">{r?.override_note ? `Corrected: ${r.override_note}` : (r?.explanation ?? []).join(" ")}</Td>
-                </tr>
-              );
-            })}
-          </Table>
-        </Card>
+        <Register session={id} open={open} userId={user.id} label={`${mod.code} · ${s.title}`} statuses={(statusRows ?? []) as CustomStatus[]}
+          rows={roster.map((st): RegisterRow => {
+            const r = byStudent.get(st.id);
+            return { student_id: st.id, student_number: st.student_number, full_name: st.full_name, record_id: r?.id ?? null,
+              status: r?.status ?? null, custom_status_id: r?.custom_status_id ?? null, checked_in_at: r?.checked_in_at ?? null,
+              method: r?.method ?? null, minutes_late: r?.minutes_late ?? null, checked_out_at: r?.checked_out_at ?? null };
+          })} />
         </div>
       </div>
     </>

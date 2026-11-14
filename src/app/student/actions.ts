@@ -4,13 +4,16 @@ import { z } from "zod";
 import { supabaseServer } from "@/lib/supabase/server";
 
 export type Verdict = {
-  outcome: "accepted" | "review" | "rejected" | "duplicate";
+  /** "queued": saved on the phone without signal, to be sent later (client only). */
+  outcome: "accepted" | "review" | "rejected" | "duplicate" | "queued";
   status: string | null;
   score: number | null;
   reasons: string[];
   module_code?: string;
   session_title?: string;
   venue?: VenueShape | null;
+  /** The session checked in to, for the live class screen. */
+  session_id?: string | null;
   minutes_late?: number | null;
   checked_in_at?: string | null;
   opens_at?: string;
@@ -38,17 +41,40 @@ export async function checkIn(raw: z.input<typeof Input>): Promise<Verdict | { e
   });
   if (error) return { error: error.message };
   revalidatePath("/student");
-  return { ...(data as Verdict), venue: await venueFor(supabase, p.data.session, p.data.code) };
+  const where = await venueFor(supabase, p.data.session, p.data.code);
+  return { ...(data as Verdict), venue: where.venue, session_id: where.id };
 }
 
-export type VenueShape = { name: string; lat: number | null; lng: number | null; radius_m: number | null; polygon: [number, number][] | null };
+/**
+ * A check-in saved on the phone without signal, sent now. Never accepted by itself:
+ * the database records it for the lecturer to review, with the original time.
+ * `retry` is false when the answer is final (sent, already recorded, or refused).
+ */
+export async function checkInOffline(raw: unknown): Promise<{ ok?: Verdict; error?: string; retry: boolean }> {
+  const p = Input.extend({ captured_at: z.string().datetime({ offset: true }) }).safeParse(raw);
+  if (!p.success) return { error: "This saved check-in could not be read.", retry: false };
+  const supabase = await supabaseServer();
+  const { data, error } = await supabase.rpc("check_in_offline", {
+    p_session: p.data.session, p_code: p.data.code, p_token: p.data.token,
+    p_gps: p.data.gps, p_device_hash: p.data.device, p_captured_at: p.data.captured_at,
+  });
+  if (error) {
+    // Missing function (update not run yet) or rate limit: keep it and try later.
+    const later = error.code === "PGRST202" || /Too many attempts|unavailable/i.test(error.message);
+    return { error: later && error.code === "PGRST202" ? "Waiting for a server update before it can be sent." : error.message, retry: later };
+  }
+  revalidatePath("/student");
+  return { ok: data as Verdict, retry: false };
+}
+
+export type VenueShape ={ name: string; lat: number | null; lng: number | null; radius_m: number | null; polygon: [number, number][] | null };
 
 // For the result map only. RLS lets an enrolled student read their session and venue.
 async function venueFor(supabase: Awaited<ReturnType<typeof supabaseServer>>, session: string | null, code: string | null) {
-  let q = supabase.from("class_sessions").select("venues(name, lat, lng, radius_m, polygon)").order("opens_at", { ascending: false }).limit(1);
+  let q = supabase.from("class_sessions").select("id, venues(name, lat, lng, radius_m, polygon)").order("opens_at", { ascending: false }).limit(1);
   q = session ? q.eq("id", session) : q.eq("join_code", code ?? "").eq("status", "open");
   const { data } = await q.maybeSingle();
-  return (data?.venues as unknown as VenueShape | null) ?? null;
+  return { id: (data?.id as string | undefined) ?? null, venue: (data?.venues as unknown as VenueShape | null) ?? null };
 }
 
 export async function dispute(_: unknown, form: FormData) {
@@ -60,4 +86,16 @@ export async function dispute(_: unknown, form: FormData) {
   if (error) return { error: error.message };
   revalidatePath("/student/history");
   return { ok: "Dispute submitted. Your lecturer has been notified." };
+}
+
+/** "I'm leaving": the student's own check-out. */
+export async function checkOut(session: string): Promise<{ error?: string; ok?: string }> {
+  if (!z.string().uuid().safeParse(session).success) return { error: "Unknown session." };
+  const supabase = await supabaseServer();
+  const { data, error } = await supabase.rpc("check_out", { p_session: session });
+  if (error) return { error: error.message };
+  revalidatePath("/student");
+  const r = data as { outcome: string; left_early?: boolean; minutes_present?: number | null };
+  if (r.outcome === "duplicate") return { ok: "You already checked out." };
+  return { ok: `Checked out${r.minutes_present != null ? ` after ${r.minutes_present} min` : ""}.${r.left_early ? " Recorded as left early." : ""}` };
 }

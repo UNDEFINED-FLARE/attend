@@ -15,6 +15,9 @@ const VAPID_PUBLIC = () => clean(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY);
 const VAPID_PRIVATE = () => clean(process.env.VAPID_PRIVATE_KEY);
 const DISPATCH_SECRET = () => clean(process.env.PUSH_DISPATCH_SECRET);
 
+/** The shared secret the database checks for server-to-database work (push, roster sync). Server only. */
+export const dispatchSecret = () => DISPATCH_SECRET();
+
 export const pushConfigured = () => !!(VAPID_PUBLIC() && VAPID_PRIVATE() && DISPATCH_SECRET());
 /** Which settings the server is missing, by name only (never values). */
 export const missingPushSettings = () => [
@@ -34,7 +37,7 @@ type Claimed = { notification_id: string; kind: string; title: string; body: str
 export type PushPayload = { id: string; kind: string; title: string; body: string; url: string; icon: string;
   badge: string; institution: string | null };
 
-const URGENT = new Set(["class_reminder", "session_open"]);
+const URGENT = new Set(["class_reminder", "session_open", "class_update"]);
 
 export async function dispatchPush(): Promise<{ sent: number; gone: number; failed: number }> {
   if (!pushConfigured()) return { sent: 0, gone: 0, failed: 0 };

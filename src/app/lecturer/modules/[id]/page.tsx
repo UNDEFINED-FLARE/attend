@@ -4,6 +4,8 @@ import { ActionForm } from "@/components/form";
 import { Badge, Card, CardTitle, Field, Input, LinkButton, PageHeader, pct, Select, Table, Td, when } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { openSession } from "../../actions";
+import { sendClassMessage } from "@/app/push-actions";
+import { Textarea } from "@/components/ui";
 
 type ReportRow = { student_id: string; student_number: string; full_name: string; sessions: number; attended: number;
   late: number; absent: number; excused: number; unresolved: number; percent: number | null;
@@ -44,6 +46,23 @@ export default async function ModulePage({ params }: { params: Promise<{ id: str
               <Field label="Late after (min)"><Input name="late" type="number" min={0} max={240} defaultValue={10} /></Field>
             </div>
           </ActionForm>
+          <div className="mt-6 border-t border-line pt-5">
+            <CardTitle>Message this class</CardTitle>
+            <ActionForm action={sendClassMessage} submit="Send to students" pending="Sending…">
+              <input type="hidden" name="module" value={id} />
+              <Field label="Type">
+                <Select name="category" defaultValue="announcement">
+                  <option value="announcement">General</option><option value="class_cancelled">Class cancelled</option>
+                  <option value="venue_change">Venue change</option><option value="timetable_change">Timetable change</option>
+                  <option value="class_reminder">Reminder</option>
+                </Select>
+              </Field>
+              <Field label="Title"><Input name="title" placeholder="Today's lecture moves to Hall 2" required maxLength={150} /></Field>
+              <Field label="Message" hint={`Goes to every student in ${mod.code}: their inbox, and their phone if notifications are on.`}>
+                <Textarea name="body" required maxLength={2000} placeholder="Same time, 10:00. See you there." />
+              </Field>
+            </ActionForm>
+          </div>
         </Card>
         <Card className="lg:col-span-2">
           <CardTitle>Sessions</CardTitle>
