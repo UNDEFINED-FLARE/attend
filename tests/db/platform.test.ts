@@ -1165,3 +1165,25 @@ describe("sync engine: stage, preview, commit, external ids, two institutions", 
     expect(after).toEqual({ connection_status: "auth_failed", last_test_message: "The token was refused." });
   });
 });
+
+describe("saved column matchings for imports", () => {
+  const map = JSON.stringify({ student_number: { column: "STUDENT_NO" }, full_name: { column: "NAME" } });
+
+  it("an institution's admins keep their own matchings; nobody else sees or changes them", async () => {
+    await db.as(u.adminA, "insert into uniattend.integration_mappings (institution_id, dataset, name, mapping) values ($1, 'students', 'ITS export', $2)", [id.instA, map]);
+    expect(await db.as(u.adminA, "select 1 from uniattend.integration_mappings")).toHaveLength(1);
+    for (const who of [u.adminB, u.lectA, u.sA1]) {
+      expect(await db.as(who, "select 1 from uniattend.integration_mappings")).toHaveLength(0);
+      await expect(db.as(who, "insert into uniattend.integration_mappings (institution_id, dataset, name, mapping) values ($1, 'students', 'mine', $2)", [id.instA, map]))
+        .rejects.toThrow(/row-level security/);
+    }
+    await db.as(u.adminB, "delete from uniattend.integration_mappings where institution_id = $1", [id.instA]);
+    await db.as(u.adminB, "update uniattend.integration_mappings set name = 'taken' where institution_id = $1", [id.instA]);
+    const [m] = await db.as<{ name: string }>(u.adminA, "select name from uniattend.integration_mappings");
+    expect(m.name).toBe("ITS export");
+    // An admin can't move a matching into another institution.
+    await expect(db.as(u.adminA, "update uniattend.integration_mappings set institution_id = $1 where institution_id = $2", [id.instB, id.instA]))
+      .rejects.toThrow(/row-level security/);
+    await expect(db.as(null, "select 1 from uniattend.integration_mappings")).rejects.toThrow(/permission denied/);
+  });
+});

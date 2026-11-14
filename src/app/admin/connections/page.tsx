@@ -98,7 +98,7 @@ export default async function Connections() {
 
         <div className="space-y-6">
           <Card>
-            <CardTitle>Upload a roster file</CardTitle>
+            <CardTitle action={<Link href="/admin/integrations/import" className="text-sm font-medium text-accent">Import Centre →</Link>}>Upload a roster file</CardTitle>
             <p className="mb-3 text-sm text-muted">Students <b>and</b> lecturers with their modules, in one file. One row per person per module. Uploading again only adds what&apos;s new.</p>
             <pre className="mb-3 overflow-x-auto rounded-xl bg-bg p-3 text-xs leading-relaxed">{`role,number,full_name,email,module_code
 student,22012345,Thabo Nkosi,22012345@example.ac.za,CSC1541
