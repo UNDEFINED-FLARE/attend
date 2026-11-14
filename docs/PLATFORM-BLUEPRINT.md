@@ -1432,9 +1432,9 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/admin/actions.ts` (325 lines) — "" must be tested first: z.coerce.number() would turn it into 0.
 - `src/app/admin/announce-form.tsx` (56 lines) — Send an announcement to everyone, a faculty, a department, a module, one student or one lecturer.
 - `src/app/admin/audit/page.tsx` (27 lines)
-- `src/app/admin/connections/actions.ts` (161 lines) — Server-to-database client for the steps that need the dispatch secret (never the user's session).
-- `src/app/admin/connections/connection-forms.tsx` (141 lines)
-- `src/app/admin/connections/page.tsx` (175 lines)
+- `src/app/admin/connections/actions.ts` (162 lines) — Server-to-database client for the steps that need the dispatch secret (never the user's session).
+- `src/app/admin/connections/connection-forms.tsx` (144 lines)
+- `src/app/admin/connections/page.tsx` (176 lines)
 - `src/app/admin/data-actions.ts` (243 lines) — Frees a unique number/code on an archived row so the same one can be added again later.
 - `src/app/admin/data/data-table.tsx` (131 lines) — The Data page table: tick rows for bulk actions, or edit one row inline.
 - `src/app/admin/data/export/route.ts` (20 lines) — CSV of any Data tab, with the same search and archived filter as the page.
@@ -1444,11 +1444,16 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/admin/design/menus-features.tsx` (82 lines) — Features: switch optional parts of UniAttend on or off for the whole institution.
 - `src/app/admin/design/page.tsx` (33 lines)
 - `src/app/admin/early-warning/page.tsx` (82 lines)
+- `src/app/admin/integrations/activity/[run]/page.tsx` (97 lines) — One connection's sync: counts per kind of data, rejected rows with reasons, checkpoints, and a retry. No source data or credentials are shown.
+- `src/app/admin/integrations/activity/actions.ts` (18 lines) — Queue the connection behind a failed run to run again now. The database checks it is this admin's.
+- `src/app/admin/integrations/activity/page.tsx` (85 lines)
+- `src/app/admin/integrations/connect/page.tsx` (112 lines) — The setup wizard. Steps 1 and 2 are choices in the address (?provider=&method=),
 - `src/app/admin/integrations/import/[run]/errors/route.ts` (29 lines) — The rejected rows of one import, as a CSV to fix and upload again.
 - `src/app/admin/integrations/import/[run]/page.tsx` (116 lines)
 - `src/app/admin/integrations/import/actions.ts` (135 lines) — A CSV, Excel or JSON file as a header row and cells. Throws a message fit to show.
 - `src/app/admin/integrations/import/import-wizard.tsx` (145 lines) — Upload → match the file's columns to UniAttend's fields → preview. The file stays in the browser until step 2 is submitted.
 - `src/app/admin/integrations/import/page.tsx` (80 lines)
+- `src/app/admin/integrations/page.tsx` (149 lines)
 - `src/app/admin/layout.tsx` (39 lines)
 - `src/app/admin/modules/assign-actions.ts` (111 lines) — The institution always comes from the admin's own role, never from the form.
 - `src/app/admin/modules/assign-import.tsx` (105 lines) — Upload a PDF, Word, Excel or CSV list; review the matches; assign lecturers to modules.
@@ -1584,12 +1589,13 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/lib/geo.ts` (60 lines) — Small geometry helpers for the live map and walking navigation.
 - `src/lib/ics.ts` (73 lines) — A weekly timetable as an iCalendar (.ics) file: each class becomes a weekly
 - `src/lib/integrations/datasets.ts` (208 lines) — What each kind of academic data looks like to UniAttend, whatever the source calls
-- `src/lib/integrations/roster.ts` (125 lines) — The one shape every source is turned into before it reaches the database
+- `src/lib/integrations/providers.ts` (104 lines) — The systems a university might connect, and how. Honest by design: a method is
+- `src/lib/integrations/roster.ts` (128 lines) — The one shape every source is turned into before it reaches the database
 - `src/lib/integrations/runner.ts` (79 lines) — The sync worker. The database decides what is due and hands over one connection
 - `src/lib/integrations/secrets.ts` (60 lines) — Credentials for an institution's systems (Moodle tokens, roster-link tokens, OAuth
 - `src/lib/integrations/sources.ts` (99 lines) — Talking to an institution's own systems. Every request: https only, public
 - `src/lib/legal.ts` (40 lines) — The company details every legal page uses: the privacy notice, terms, PAIA manual
-- `src/lib/nav-config.ts` (66 lines) — Every menu in the app, with the defaults an institution starts from. The Design
+- `src/lib/nav-config.ts` (65 lines) — Every menu in the app, with the defaults an institution starts from. The Design
 - `src/lib/offline-queue.ts` (59 lines) — Work done without signal, kept on the phone until it can be sent.
 - `src/lib/palette.ts` (5 lines) — Module colours in the minimal graphite look: dark-to-mid greys that stay readable
 - `src/lib/push.ts` (88 lines) — Delivers queued notifications to phones and browsers with Web Push.
@@ -1651,6 +1657,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `tests/unit/ics.test.ts` (33 lines) — 2026-11-11 is a Wednesday (ISO 3)
 - `tests/unit/integration-secrets.test.ts` (58 lines) — A new random IV each time: the same secret never looks the same twice.
 - `tests/unit/nav-config.test.ts` (35 lines)
+- `tests/unit/providers.test.ts` (48 lines) — Vendors without a built connector get files, a link or the push API, plus a plain "not yet".
 - `tests/unit/roster.test.ts` (84 lines)
 - `tests/unit/safe-redirect.test.ts` (30 lines) — 2. Open redirect: "next" must always stay on this site.
 - `tests/unit/theme.test.ts` (31 lines)

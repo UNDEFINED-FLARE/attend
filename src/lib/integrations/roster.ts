@@ -3,6 +3,7 @@
 // Pure functions only, so they are easy to test.
 import { z } from "zod";
 import { csvObjects } from "@/lib/csv";
+import { PROVIDER_KEYS } from "./providers";
 
 export type RosterPerson = { role: "student" | "lecturer"; number: string; full_name: string; email?: string; module_codes: string[] };
 export type Roster = { modules: { code: string; title: string }[]; people: RosterPerson[] };
@@ -18,6 +19,8 @@ export const ConnectionOptions = z.object({
   course_code_from: z.enum(["shortname", "idnumber"]).default("shortname"),
   /** Moodle: "CSC1541_2026_S1" is read as CSC1541. */
   trim_course_code: z.boolean().default(true),
+  /** Which system this is (ITS, Banner…), chosen in the setup wizard. Only labels the connection. */
+  provider: z.enum(PROVIDER_KEYS).optional(),
 });
 export type ConnectionOptions = z.infer<typeof ConnectionOptions>;
 export const parseOptions = (raw: unknown): ConnectionOptions => ConnectionOptions.catch(ConnectionOptions.parse({})).parse(raw ?? {});

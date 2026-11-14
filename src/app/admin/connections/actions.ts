@@ -40,6 +40,7 @@ export async function saveConnection(_: S, f: FormData): Promise<S> {
   const options = ConnectionOptions.parse({
     create_modules: on(f, "create_modules"), drop_missing: on(f, "drop_missing"), trim_course_code: on(f, "trim_course_code"),
     student_number_from: f.get("student_number_from") || undefined, course_code_from: f.get("course_code_from") || undefined,
+    provider: f.get("provider") || undefined,
   });
   const url = (d.base_url ?? "").replace(/\/+$/, "");
   let note = "";

@@ -35,17 +35,20 @@ function Check({ name, label, hint, on }: { name: string; label: string; hint: s
 }
 
 /** Add a connection, or edit one (the token is never shown again; leave it empty to keep it). */
-export function ConnectionForm({ existing }: { existing?: ConnectionRow }) {
-  const [kind, setKind] = useState<Kind>(existing?.kind ?? "moodle");
+/** `preset` comes from the setup wizard: the method is already chosen, and the provider labels the connection. */
+export function ConnectionForm({ existing, preset }: { existing?: ConnectionRow; preset?: { kind: Kind; provider?: string; name?: string } }) {
+  const [kind, setKind] = useState<Kind>(existing?.kind ?? preset?.kind ?? "moodle");
+  const provider = (existing?.options?.provider as string | undefined) ?? preset?.provider;
   const [state, run] = useActionState(saveConnection, undefined as S);
   const o = existing?.options ?? {};
   const opt = (k: string, fallback: boolean) => (typeof o[k] === "boolean" ? (o[k] as boolean) : fallback);
   return (
     <form action={run} className="space-y-4">
       {existing && <input type="hidden" name="id" value={existing.id} />}
+      {provider && <input type="hidden" name="provider" value={provider} />}
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Where does the data come from?">
-          {existing ? <><input type="hidden" name="kind" value={kind} /><Input value={{ moodle: "Moodle", feed: "Roster link", api: "Our system sends it (API)" }[kind]} readOnly /></> : (
+          {existing || preset ? <><input type="hidden" name="kind" value={kind} /><Input value={{ moodle: "Moodle", feed: "Roster link", api: "Our system sends it (API)" }[kind]} readOnly /></> : (
             <Select name="kind" value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
               <option value="moodle">Moodle</option>
               <option value="feed">A roster link (CSV or JSON)</option>
@@ -53,7 +56,7 @@ export function ConnectionForm({ existing }: { existing?: ConnectionRow }) {
             </Select>
           )}
         </Field>
-        <Field label="Name"><Input name="name" required maxLength={80} defaultValue={existing?.name} placeholder={{ moodle: "Campus Moodle", feed: "ITS nightly export", api: "Student system" }[kind]} /></Field>
+        <Field label="Name"><Input name="name" required maxLength={80} defaultValue={existing?.name ?? preset?.name} placeholder={{ moodle: "Campus Moodle", feed: "ITS nightly export", api: "Student system" }[kind]} /></Field>
       </div>
 
       {kind === "moodle" && (
