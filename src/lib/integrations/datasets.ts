@@ -4,7 +4,7 @@
 // Pure functions only.
 
 export type DatasetKey = "students" | "lecturers" | "modules" | "enrolments" | "assignments"
-  | "faculties" | "departments" | "programmes" | "academic_periods" | "venues";
+  | "faculties" | "departments" | "programmes" | "academic_periods" | "venues" | "timetable_events";
 
 export type FieldDef = { key: string; label: string; required?: boolean; hint?: string; aliases: string[] };
 export type DatasetDef = { key: DatasetKey; label: string; one: string; about: string; fields: FieldDef[]; needs?: string };
@@ -82,6 +82,23 @@ export const DATASETS: DatasetDef[] = [
     { key: "ends_on", label: "Ends on", required: true, hint: "A date.", aliases: ["ends_on", "end_date", "end", "to", "finish_date"] },
     { key: "is_current", label: "Is the current period", hint: "yes / true / 1.", aliases: ["is_current", "current", "active"] },
     EXT,
+  ] },
+  { key: "timetable_events", label: "Timetable events", one: "class", about: "Dated classes from a timetable system such as CELCAT. Each needs that system's own event id, so sending it again updates instead of duplicating; a cancelled status cancels the class.",
+    needs: "Modules, venues and lecturers must already exist.", fields: [
+    { key: "external_id", label: "Event ID in your system", required: true, aliases: ["external_id", "event_id", "id", "activity_id", "booking_id", "uid"] },
+    MODULE_CODE,
+    { key: "starts_at", label: "Starts (date and time)", hint: "e.g. 2026-11-20 08:00. Or map the date and start time separately below.", aliases: ["starts_at", "start", "start_datetime", "start_time_full", "begin"] },
+    { key: "ends_at", label: "Ends (date and time)", aliases: ["ends_at", "end", "end_datetime", "finish"] },
+    { key: "date", label: "Date", aliases: ["date", "event_date", "day_date"] },
+    { key: "start_time", label: "Start time", aliases: ["start_time", "from", "time_from"] },
+    { key: "end_time", label: "End time", aliases: ["end_time", "to", "time_to"] },
+    { key: "venue_code", label: "Venue code", aliases: ["venue_code", "room_code", "room", "location_code"] },
+    { key: "venue_name", label: "Venue name", aliases: ["venue_name", "venue", "location", "room_name"] },
+    { key: "staff_number", label: "Lecturer staff number", aliases: ["staff_number", "staff_no", "staff_id", "lecturer_id"] },
+    { key: "lecturer_email", label: "Lecturer email", aliases: ["lecturer_email", "staff_email", "email"] },
+    { key: "kind", label: "Kind", hint: "lecture, tutorial, practical, test or other.", aliases: ["kind", "type", "activity_type", "event_type"] },
+    { key: "group", label: "Group", aliases: ["group", "group_name", "class_group", "section"] },
+    STATUS("Cancelled cancels the class; anything else keeps it on."),
   ] },
   { key: "venues", label: "Venues", one: "venue", about: "Lecture halls, labs and rooms. Map positions are set on the Venues & map page and never changed by an import.", fields: [
     { key: "name", label: "Venue name", required: true, aliases: ["name", "venue_name", "venue", "room", "room_name", "description"] },
@@ -169,6 +186,9 @@ export function mappingProblems(dataset: DatasetDef, mapping: Mapping, headers: 
     out.push("Choose the column for the full name, or both first name and surname.");
   }
   if (dataset.key === "assignments" && !has("staff_number") && !has("email")) out.push("Choose the column for the staff number or the lecturer's email.");
+  if (dataset.key === "timetable_events" && !((has("starts_at") || (has("date") && has("start_time"))) && (has("ends_at") || (has("date") && has("end_time"))))) {
+    out.push("Choose the start and end: full date-times, or a date with a start and end time.");
+  }
   return out;
 }
 

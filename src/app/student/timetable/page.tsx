@@ -7,13 +7,16 @@ import { Card, CardTitle } from "@/components/ui";
 import { hhmm, moduleColor, todayWeekday, WeekGrid } from "@/components/week-grid";
 import { requireRole } from "@/lib/auth";
 import { myTimetable, nowHHMM } from "@/lib/student-data";
+import { ClassList } from "@/components/class-list";
+import { upcomingClasses } from "@/lib/class-events";
 
 export const metadata = { title: "Timetable" };
 
 export default async function StudentTimetable() {
   const { supabase, institutionId } = await requireRole("student");
   const features = (await loadTheme(supabase, institutionId)).features;
-  const slots = await myTimetable(supabase, institutionId);
+  const [slots, classes] = await Promise.all([myTimetable(supabase, institutionId), upcomingClasses(supabase)]);
+  const changed = classes.filter((c) => c.status === "cancelled" || c.edited);
   const day = todayWeekday(), now = nowHHMM();
   const today = slots.filter((s) => s.weekday === day);
   const current = today.find((s) => hhmm(s.starts_at) <= now && now < hhmm(s.ends_at));
@@ -23,6 +26,13 @@ export default async function StudentTimetable() {
     <div className="mx-auto max-w-6xl space-y-6">
       <AppTitle title="Timetable" eyebrow={new Date().toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long", timeZone: "Africa/Johannesburg" })}
         action={<Link href="/student/map" aria-label="Campus map" className="hidden h-11 items-center gap-2 rounded-2xl bg-surface px-4 text-sm font-semibold shadow-card sm:inline-flex"><Icon name="map" size={18} />Campus map</Link>} />
+
+      {classes.length > 0 && (
+        <Card>
+          <CardTitle>Next seven days{changed.length ? ` · ${changed.length} change${changed.length === 1 ? "" : "s"}` : ""}</CardTitle>
+          <ClassList events={classes} role="student" now={Date.now()} />
+        </Card>
+      )}
 
       <TimetableActions ics={features.calendarDownload ? "/student/timetable/calendar.ics" : null}
         hint="The calendar file adds every class as a weekly event with a 15-minute reminder in Google Calendar, Outlook or your phone's calendar. Download it again if your timetable changes." />

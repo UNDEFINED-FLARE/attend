@@ -1187,3 +1187,130 @@ describe("saved column matchings for imports", () => {
     await expect(db.as(null, "select 1 from uniattend.integration_mappings")).rejects.toThrow(/permission denied/);
   });
 });
+
+describe("classes from the timetable and sessions prepared from them", () => {
+  type Ev = { id: string; starts_at: string; status: string; venue_id: string | null; requires_attendance: boolean; edited: boolean; group_name: string | null };
+  let slot: string, venue2: string, subUser: string, subLect: string;
+  const events = (who: string) => db.as<Ev>(who, "select id, starts_at, status, venue_id, requires_attendance, edited, group_name from uniattend.timetable_events where timetable_id = $1 order by starts_at", [slot]);
+  const gen = async () => (await db.asOne<{ generate_timetable_events: { created: number; updated: number; cancelled: number } }>(u.adminA,
+    "select uniattend.generate_timetable_events($1, 14)", [id.instA])).generate_timetable_events;
+  // An event happening now, made the way a timetable system would send it.
+  const nowEvent = async (group: string | null = null) => (await db.admin<{ id: string }>(
+    "insert into uniattend.timetable_events (institution_id, module_id, venue_id, kind, group_name, starts_at, ends_at, source) values ($1, $2, $3, 'lecture', $4, now() - interval '5 minutes', now() + interval '55 minutes', 'manual') returning id",
+    [id.instA, id.modA, id.venueA, group]))[0].id;
+
+  beforeAll(async () => {
+    // Tomorrow (in South Africa) at 10:00, every week.
+    const [{ dow }] = await db.admin<{ dow: number }>("select extract(isodow from (now() at time zone 'Africa/Johannesburg')::date + 1)::int dow");
+    slot = (await db.asOne<{ id: string }>(u.adminA,
+      "insert into uniattend.timetables (institution_id, module_id, venue_id, weekday, starts_at, ends_at, kind) values ($1, $2, $3, $4, '10:00', '11:00', 'lecture') returning id",
+      [id.instA, id.modA, id.venueA, dow])).id;
+    venue2 = (await db.asOne<{ id: string }>(u.adminA, "insert into uniattend.venues (institution_id, name) values ($1, 'Hall 2') returning id", [id.instA])).id;
+    subUser = await db.newUser("sub@unia.ac.za");
+    subLect = (await db.asOne<{ id: string }>(u.adminA, "insert into uniattend.lecturers (institution_id, staff_number, full_name, email) values ($1, 'SUB1', 'Dr Substitute', 'sub@unia.ac.za') returning id", [id.instA])).id;
+    await db.as(subUser, "select uniattend.link_my_accounts()");
+  });
+
+  it("the weekly timetable becomes dated classes, once, visible only to the right people", async () => {
+    await gen();
+    // Repeating changes nothing at all: no new classes, and none rewritten.
+    expect(await gen()).toMatchObject({ created: 0, updated: 0, cancelled: 0 });
+    const list = await events(u.adminA);
+    expect(list).toHaveLength(2);
+    expect(list.every((e) => e.requires_attendance && e.status === "scheduled")).toBe(true);
+    expect(new Date(list[0].starts_at).toLocaleTimeString("en-ZA", { timeZone: "Africa/Johannesburg", hour: "2-digit", minute: "2-digit" })).toBe("10:00");
+    expect(await events(u.sA1)).toHaveLength(2);       // enrolled student
+    expect(await events(u.lectA)).toHaveLength(2);     // module lecturer
+    expect(await events(u.sB1)).toHaveLength(0);
+    expect(await events(u.lectB)).toHaveLength(0);
+    expect(await events(u.adminB)).toHaveLength(0);
+    await expect(db.as(u.adminB, "select uniattend.generate_timetable_events($1, 14)", [id.instA])).rejects.toThrow(/institution admin only/);
+  });
+
+  it("untouched classes follow the weekly slot; one changed by hand keeps its change", async () => {
+    const [first, second] = await events(u.adminA);
+    await db.as(u.lectA, "select uniattend.change_event($1, 'cancel', null, null, null, null, 'Public holiday')", [first.id]);
+    await db.as(u.adminA, "update uniattend.timetables set venue_id = $1, starts_at = '11:00', ends_at = '12:00' where id = $2", [venue2, slot]);
+    const r = await gen();
+    expect(r.created).toBe(0);
+    const [a, b] = await db.as<Ev>(u.adminA, "select id, starts_at, status, venue_id, edited from uniattend.timetable_events where id in ($1, $2) order by starts_at", [first.id, second.id]);
+    expect(a).toMatchObject({ status: "cancelled", venue_id: id.venueA, edited: true });
+    expect(b).toMatchObject({ status: "scheduled", venue_id: venue2, edited: false });
+    expect(new Date(b.starts_at).toLocaleTimeString("en-ZA", { timeZone: "Africa/Johannesburg", hour: "2-digit", minute: "2-digit" })).toBe("11:00");
+    expect(await events(u.adminA)).toHaveLength(2);    // moved, not duplicated
+  });
+
+  it("which kinds take attendance is the institution's choice", async () => {
+    await db.as(u.adminA, "select uniattend.set_attendance_kinds($1, $2)", [id.instA, ["tutorial", "practical"]]);
+    const list = await events(u.adminA);
+    expect(list.find((e) => !e.edited)!.requires_attendance).toBe(false);
+    await db.as(u.adminA, "select uniattend.set_attendance_kinds($1, $2)", [id.instA, ["lecture", "tutorial", "practical"]]);
+    await expect(db.as(u.adminA, "select uniattend.set_attendance_kinds($1, $2)", [id.instA, ["party"]])).rejects.toThrow(/unknown kind/);
+    await expect(db.as(u.lectA, "select uniattend.set_attendance_kinds($1, $2)", [id.instA, ["lecture"]])).rejects.toThrow(/institution admin only/);
+  });
+
+  it("'Open attendance' opens one session for the class, only in its time, for its lecturers", async () => {
+    const future = (await events(u.adminA)).find((e) => e.status === "scheduled")!;
+    await expect(db.as(u.lectA, "select uniattend.open_event_session($1)", [future.id])).rejects.toThrow(/opens 30 minutes before/);
+    const ev = await nowEvent("A");
+    await expect(db.as(u.lectB, "select uniattend.open_event_session($1)", [ev])).rejects.toThrow(/not your class/);
+    await expect(db.as(u.sA1, "select uniattend.open_event_session($1)", [ev])).rejects.toThrow(/not your class/);
+    const s1 = await db.asOne<{ id: string; group_name: string; event_id: string; status: string }>(u.lectA, "select id, group_name, event_id, status from uniattend.open_event_session($1)", [ev]);
+    expect(s1).toMatchObject({ group_name: "A", event_id: ev, status: "open" });
+    const s2 = await db.asOne<{ id: string }>(u.lectA, "select id from uniattend.open_event_session($1)", [ev]);
+    expect(s2.id).toBe(s1.id);
+    // The class can't be cancelled or moved while attendance is open.
+    await expect(db.as(u.lectA, "select uniattend.change_event($1, 'cancel')", [ev])).rejects.toThrow(/Close the session/);
+    // Students check in to it as to any session.
+    const t = await db.asOne<{ session_qr_token: { token: string } }>(u.lectA, "select uniattend.session_qr_token($1)", [s1.id]);
+    expect((await checkIn(u.sA1, s1.id, null, t.session_qr_token.token, gpsAt(0), hex("9"))).outcome).toBe("accepted");
+    await db.as(u.lectA, "select uniattend.close_session($1)", [s1.id]);
+  });
+
+  it("a substitute can run the class they were given, and nothing else", async () => {
+    const ev = await nowEvent();
+    await expect(db.as(subUser, "select uniattend.open_event_session($1)", [ev])).rejects.toThrow(/not your class/);
+    await db.as(u.lectA, "select uniattend.change_event($1, 'substitute', null, $2)", [ev, subLect]);
+    const [n] = await db.as<{ title: string }>(subUser, "select title from uniattend.notifications where kind = 'class_update' order by created_at desc limit 1");
+    expect(n.title).toMatch(/^You are teaching CSC101/);
+    const s = await db.asOne<{ id: string }>(subUser, "select id from uniattend.open_event_session($1)", [ev]);
+    expect(s.id).toBeTruthy();
+    await expect(db.as(subUser, "select uniattend.change_event($1, 'cancel')", [ev])).rejects.toThrow(/module's lecturers or an administrator/);
+    await expect(db.as(u.lectB, "select uniattend.change_event($1, 'substitute', null, $2)", [ev, subLect])).rejects.toThrow(/module's lecturers/);
+    await db.as(u.lectA, "select uniattend.close_session($1)", [s.id]);
+  });
+
+  it("a change reaches the class's own group only", async () => {
+    const [a1] = await db.as<{ id: string }>(u.adminA, "select id from uniattend.students where student_number = 'A001'");
+    const [a2] = await db.as<{ id: string }>(u.adminA, "select id from uniattend.students where student_number = 'A002'");
+    await db.admin("update uniattend.module_enrolments set group_name = 'A' where student_id = $1 and module_id = $2", [a1.id, id.modA]);
+    await db.admin("update uniattend.module_enrolments set group_name = 'B' where student_id = $1 and module_id = $2", [a2.id, id.modA]);
+    const ev = (await db.admin<{ id: string }>(
+      "insert into uniattend.timetable_events (institution_id, module_id, venue_id, kind, group_name, starts_at, ends_at, source) values ($1, $2, $3, 'tutorial', 'A', now() + interval '2 days', now() + interval '2 days 1 hour', 'manual') returning id",
+      [id.instA, id.modA, id.venueA]))[0].id;
+    const r = (await db.asOne<{ change_event: { notified: number } }>(u.lectA, "select uniattend.change_event($1, 'venue', $2, null, null, null, 'Hall 1 is being painted.')", [ev, venue2])).change_event;
+    expect(r.notified).toBeGreaterThanOrEqual(1);
+    const latest = async (who: string) => (await db.as<{ title: string; body: string }>(who, "select title, body from uniattend.notifications where kind = 'class_update' order by created_at desc limit 1"))[0];
+    expect((await latest(u.sA1)).body).toMatch(/Now in Hall 2\. Hall 1 is being painted\./);
+    expect((await latest(u.sA2))?.body ?? "").not.toMatch(/Hall 1 is being painted/);
+  });
+
+  it("a timetable system's events sync by their own id: no duplicates, cancellations follow, bad rows are rejected alone", async () => {
+    const day = (h: number) => { const d = new Date(Date.now() + 3 * 86400_000); return `${d.toISOString().slice(0, 10)} ${String(h).padStart(2, "0")}:00`; };
+    const send = async (rows: object[]) => {
+      const run = (await db.asOne<{ import_start: string }>(u.adminA, "select uniattend.import_start($1, 'celcat', 'events')", [id.instA])).import_start;
+      await db.as(u.adminA, "select uniattend.import_add($1, 'timetable_events', $2)", [run, JSON.stringify(rows)]);
+      return (await db.asOne<{ import_commit: { datasets: Record<string, Record<string, number>> } }>(u.adminA, "select uniattend.import_commit($1)", [run])).import_commit.datasets.timetable_events;
+    };
+    const ev = { external_id: "CEL-1", module_code: "CSC101", starts_at: day(8), ends_at: day(9), venue_name: "Hall 1", staff_number: "L1", kind: "lecture" };
+    expect(await send([ev, { ...ev, external_id: "CEL-2", starts_at: "next Tuesday" }])).toMatchObject({ inserted: 1, rejected: 1 });
+    expect(await send([ev])).toMatchObject({ unchanged: 1, inserted: 0 });
+    expect(await send([{ ...ev, starts_at: day(9), ends_at: day(10) }])).toMatchObject({ updated: 1 });
+    expect(await send([{ ...ev, starts_at: day(9), ends_at: day(10), status: "Cancelled" }])).toMatchObject({ updated: 1 });
+    const [e] = await db.as<{ status: string; note: string; local: string }>(u.adminA,
+      "select status, note, to_char(starts_at at time zone 'Africa/Johannesburg', 'HH24:MI') local from uniattend.timetable_events where external_id = 'CEL-1'");
+    expect(e).toEqual({ status: "cancelled", note: "Cancelled in the timetable system.", local: "09:00" });
+    expect(await db.as(u.adminA, "select 1 from uniattend.timetable_events where external_id like 'CEL-%'")).toHaveLength(1);
+    expect(await db.as(u.adminB, "select 1 from uniattend.timetable_events where external_id like 'CEL-%'")).toHaveLength(0);
+  });
+});

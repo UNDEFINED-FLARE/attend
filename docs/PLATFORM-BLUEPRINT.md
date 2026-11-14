@@ -565,7 +565,7 @@ After each step: type-check, lint, tests, build.
 > read (no policy). The token is handed only to the server worker that holds the
 > dispatch secret; API keys are stored as a SHA-256 hash and shown once.
 > * A sync adds and updates; it never deletes a student, lecturer or attendance
-> record. With "drop_missing" on, it marks as dropped only enrolments that the
+> record. With "drop_0missing" on, it marks as dropped only enrolments that the
 > same connection created, only after a complete run, and never more than half
 > of them at once (a broken or empty feed can't empty the register).
 > * People still get access only by signing up with their own confirmed email
@@ -613,6 +613,27 @@ After each step: type-check, lint, tests, build.
 > the mapping is remembered per institution and dataset, so the next file with
 > the same layout needs no work. A mapping holds column names and tidy-up rules
 > only: no data from any file.
+
+### `20261114000027_timetable_events.sql` (504 lines)
+
+> UniAttend 0027 — classes from the timetable, and attendance sessions prepared from them.
+>
+> * timetable_events: dated classes. Made from the weekly timetable for the next two
+> weeks (nightly, and on demand), or received from a timetable system (CELCAT…)
+> through the sync engine with that system's own event id. Repeating either never
+> creates a second copy of the same class.
+> * A class can be cancelled, moved to another venue or time, or taught by a
+> substitute. Students are told. A change made in UniAttend is never overwritten by
+> the nightly refresh; a timetable system's own update always applies.
+> * institution_settings.attendance_kinds: which kinds of class take attendance
+> (lectures, tutorials and practicals by default; tests and other events not).
+> A lecturer can still take attendance at any class.
+> * open_event_session(): the lecturer presses "Open attendance" on a class. The
+> session gets the class's module, venue, group and end time; only that group's
+> students are notified. Pressing it again returns the same session.
+> A timetable never creates attendance on its own.
+> * Lecture groups: module_enrolments.group_name places a student in a group
+> ("A", "Tut 3"); a class for one group notifies only that group.
 
 ## B. Tables (schema `uniattend`) and their columns
 
@@ -798,6 +819,8 @@ After each step: type-check, lint, tests, build.
   - _foreign key (institution_id, venue_id) references uniattend.venues(institution_id, id)_
   - _foreign key (institution_id, lecturer_id) references uniattend.lecturers(institution_id, id)_
   - `allow_printed_qr` boolean not null default false _(added later)_
+  - `group_name` text check (group_name is null or length(group_name) <= 40) _(added later)_
+  - `event_id` uuid _(added later)_
 - **data_requests**
   - `id` uuid primary key default gen_random_uuid()
   - `user_id` uuid not null references auth.users(id) on delete cascade
@@ -871,6 +894,7 @@ After each step: type-check, lint, tests, build.
   - `alert_consecutive_absences` int not null default 3 check (alert_consecutive_absences between 2 and 20) _(added later)_
   - `auto_retention` boolean not null default false _(added later)_
   - `retention_last_run` timestamptz _(added later)_
+  - `attendance_kinds` text[] not null default array['lecture' _(added later)_
 - **institution_subscriptions**
   - `id` uuid primary key default gen_random_uuid()
   - `institution_id` uuid not null references uniattend.institutions(id) on delete cascade
@@ -1039,6 +1063,7 @@ After each step: type-check, lint, tests, build.
   - _foreign key (institution_id, module_id) references uniattend.modules(institution_id, id) on delete cascade_
   - _foreign key (institution_id, student_id) references uniattend.students(institution_id, id) on delete cascade_
   - `source` uuid _(added later)_
+  - `group_name` text check (group_name is null or length(group_name) <= 40) _(added later)_
 - **modules**
   - `id` uuid primary key default gen_random_uuid()
   - `institution_id` uuid not null references uniattend.institutions(id) on delete cascade
@@ -1175,6 +1200,31 @@ After each step: type-check, lint, tests, build.
   - `created_by_name` text
   - `created_at` timestamptz not null default now()
   - `updated_at` timestamptz not null default now()
+- **timetable_events**
+  - `id` uuid primary key default gen_random_uuid()
+  - `institution_id` uuid not null references uniattend.institutions(id) on delete cascade
+  - `module_id` uuid not null
+  - `timetable_id` uuid references uniattend.timetables(id) on delete set null
+  - `venue_id` uuid
+  - `lecturer_id` uuid
+  - `kind` text not null default 'lecture' check (kind in ('lecture','tutorial','practical','test','other'))
+  - `group_name` text check (group_name is null or length(group_name) <= 40)
+  - `starts_at` timestamptz not null
+  - `ends_at` timestamptz not null
+  - `status` text not null default 'scheduled' check (status in ('scheduled','cancelled'))
+  - `requires_attendance` boolean not null default true
+  - `session_id` uuid references uniattend.class_sessions(id) on delete set null
+  - `source` text not null default 'timetable' check (length(source) between 1 and 80)
+  - `external_id` text check (external_id is null or length(external_id) <= 200)
+  - `edited` boolean not null default false
+  - `note` text check (note is null or length(note) <= 300)
+  - `created_at` timestamptz not null default now()
+  - `updated_at` timestamptz not null default now()
+  - _unique (institution_id, id)_
+  - _check (ends_at > starts_at)_
+  - _foreign key (institution_id, module_id) references uniattend.modules(institution_id, id) on delete cascade_
+  - _foreign key (institution_id, venue_id) references uniattend.venues(institution_id, id)_
+  - _foreign key (institution_id, lecturer_id) references uniattend.lecturers(institution_id, id)_
 - **timetables**
   - `id` uuid primary key default gen_random_uuid()
   - `institution_id` uuid not null references uniattend.institutions(id) on delete cascade
@@ -1283,19 +1333,26 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `subscription_plans`.`subscription_plans_select` — select to authenticated: `using (is_active or uniattend.is_super_admin())`
 - `subscription_plans`.`subscription_plans_write` — all to authenticated: `using (uniattend.is_super_admin()) with check (uniattend.is_super_admin())`
 - `theme_versions`.`theme_versions_select` — select to authenticated: `using (uniattend.is_super_admin() or uniattend.is_inst_admin(institution_id))`
+- `timetable_events`.`timetable_events_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id) or uniattend.teaches_module(module_id) or uniattend.enrolled_in_module(module_id) or exists (select 1 from uniattend.lecturers l where l.id = timetable_events.lecturer_id and l.user_id = (select auth.uid())))`
 - `usage_metrics`.`usage_metrics_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id))`
 - `user_roles`.`user_roles_select` — select to authenticated: `using (user_id = (select auth.uid()) or uniattend.is_super_admin() or (institution_id is not null and uniattend.is_inst_admin(institution_id)))`
 
 ## D. Database functions (last definition wins)
 
+- `_event_local(p_inst uuid, p_at timestamptz)` → text — internal
+- `_generate_events(p_inst uuid, p_days int)` → jsonb — internal
 - `_integration_mark_success()` → trigger — internal
+- `_may_run_event(e uniattend.timetable_events)` → boolean — internal
+- `_notify_event(p_event uuid, p_title text, p_body text)` → int — internal
 - `_sync_apply(p_run uuid)` → jsonb — internal
+- `_sync_apply_events(p_run uuid)` → jsonb — internal
 - `_sync_dupes()` → void — internal
 - `_sync_finish(p_inst uuid, p_src text, p_entity text, p_commit boolean)` → jsonb — internal
 - `_sync_match_ext(p_inst uuid, p_src text, p_entity text)` → void — internal
 - `_sync_process(p_run uuid, p_commit boolean)` → jsonb — internal
 - `_sync_stage(p_run uuid, p_dataset text, p_rows jsonb, p_first_row int)` → int — internal
 - `_sync_totals(p_res jsonb)` → jsonb — internal
+- `_try_ts(p text, tz text)` → timestamptz — internal
 - `alert_history(p_alert uuid)` → table (at timestamptz, action text, note text, actor_name text) — callable by: authenticated
 - `alerts_on_records_changed()` → trigger — internal
 - `alerts_on_session_closed()` → trigger — internal
@@ -1307,6 +1364,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `audit_trigger()` → trigger — internal
 - `can_bulk_import(p_inst uuid)` → boolean — callable by: authenticated
 - `can_write_branding(p_name text)` → boolean — callable by: authenticated
+- `change_event(p_event uuid, p_action text, p_venue uuid default null, p_lecturer uuid default null, p_starts timestamptz default null, p_ends timestamptz default null, p_note text default null)` → jsonb — callable by: authenticated
 - `change_subscription(p_inst uuid, p_plan_code text, p_status text, p_period_end timestamptz)` → void — internal
 - `check_in(p_session uuid, p_code text, p_token text, p_gps jsonb, p_device_hash text)` → jsonb — internal
 - `check_in_offline(p_session uuid, p_code text, p_token text, p_gps jsonb, p_device_hash text, p_captured_at timestamptz)` → jsonb — callable by: authenticated
@@ -1320,6 +1378,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `evaluate_module_alerts(p_module uuid)` → int — internal
 - `fan_out_announcement()` → trigger — internal
 - `generate_join_code(p_inst uuid)` → text — internal
+- `generate_timetable_events(p_inst uuid, p_days int default 14)` → jsonb — callable by: authenticated
 - `geo_distance_m(lat1 float8, lng1 float8, lat2 float8, lng2 float8)` → float8 — internal
 - `grant_role(p_inst uuid, p_email text, p_role text)` → uuid — internal
 - `guard_institution_update()` → trigger — internal
@@ -1360,6 +1419,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `my_personal_data()` → jsonb — callable by: authenticated
 - `my_roles()` → table (institution_id uuid, institution_name text, institution_slug text, institution_status text, brand_primary text, role text) — internal
 - `notify_joined(p_user uuid, p_inst uuid, p_role text)` → void — internal
+- `open_event_session(p_event uuid, p_late_minutes int default null)` → uniattend.class_sessions — callable by: authenticated
 - `open_session(p_module uuid, p_venue uuid, p_title text, p_minutes int default 90, p_late_minutes int default null)` → uniattend.class_sessions — internal
 - `override_attendance(p_session uuid, p_student uuid, p_status text, p_note text)` → uniattend.attendance_records — internal
 - `plan_feature(p_inst uuid, p_feature text)` → boolean — internal
@@ -1390,6 +1450,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `roster_apply(p_inst uuid, p_integration uuid, p_run uuid, p_payload jsonb)` → jsonb — internal
 - `roster_push(p_key text, p_payload jsonb)` → jsonb — callable by: anon, authenticated
 - `run_retention()` → int — internal
+- `run_timetable_events()` → int — internal
 - `save_integration(p_inst uuid, p_id uuid, p_kind text, p_name text, p_base_url text, p_token text, p_options jsonb, p_schedule text)` → jsonb — callable by: authenticated
 - `save_push_subscription(p_endpoint text, p_p256dh text, p_auth text, p_user_agent text default null, p_prefs jsonb default null)` → uuid — callable by: authenticated
 - `save_register(p_session uuid, p_entries jsonb, p_note text default null)` → jsonb — callable by: authenticated
@@ -1399,6 +1460,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `send_class_message(p_module uuid, p_category text, p_title text, p_body text)` → int — callable by: authenticated
 - `session_control(p_session uuid, p_action text, p_closes_in_min int default null, p_late_in_min int default null)` → jsonb — callable by: authenticated
 - `session_qr_token(p_session uuid)` → jsonb — internal
+- `set_attendance_kinds(p_inst uuid, p_kinds text[])` → void — callable by: authenticated
 - `set_auto_retention(p_inst uuid, p_on boolean)` → void — callable by: authenticated
 - `set_institution_status(p_inst uuid, p_status text)` → void — internal
 - `set_push_secret(p_secret text, p_reminder_minutes int default 15)` → void — callable by: authenticated
@@ -1466,8 +1528,10 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/admin/structure/map-actions.ts` (37 lines) — Auto-map: place many existing venues at once on the building outlines/points chosen by the admin.
 - `src/app/admin/structure/outline-all.tsx` (131 lines) — Outlines every venue automatically from OpenStreetMap building footprints, with
 - `src/app/admin/structure/page.tsx` (84 lines)
+- `src/app/admin/timetable/class-actions.ts` (26 lines) — Make the dated classes for the next two weeks now (it also happens every night).
+- `src/app/admin/timetable/classes-card.tsx` (40 lines) — Dated classes from the weekly timetable, and which kinds take attendance.
 - `src/app/admin/timetable/import-actions.ts` (305 lines) — The institution always comes from the admin's own role, never from the form.
-- `src/app/admin/timetable/page.tsx` (115 lines) — Fetching a batch from the university timetable site can take ~15 s.
+- `src/app/admin/timetable/page.tsx` (121 lines) — Fetching a batch from the university timetable site can take ~15 s.
 - `src/app/admin/timetable/pdf-import.tsx` (117 lines)
 - `src/app/admin/timetable/source-import.tsx` (115 lines) — Collect classes from the institution's own timetable source, set up by
 - `src/app/api/health/route.ts` (23 lines) — For an uptime monitor (e.g. UptimeRobot, every 5 minutes): 200 when the app and
@@ -1482,12 +1546,13 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/globals.css` (85 lines) — UniAttend: navy and white, with a bright accent blue for highlights and charts.
 - `src/app/layout.tsx` (27 lines) — System font stack (see globals.css): no font download at build time or on a
 - `src/app/lecturer/actions.ts` (180 lines)
+- `src/app/lecturer/class-actions.ts` (51 lines) — "Open attendance" on a class: the database checks it is this lecturer's class and the right time.
 - `src/app/lecturer/disputes/page.tsx` (70 lines) — RLS already limits both lists to modules this lecturer teaches.
 - `src/app/lecturer/early-warning/page.tsx` (38 lines)
 - `src/app/lecturer/layout.tsx` (12 lines)
 - `src/app/lecturer/modules/[id]/export/route.ts` (26 lines) — The report comes from module_report(), which refuses anyone who does not
 - `src/app/lecturer/modules/[id]/page.tsx` (98 lines)
-- `src/app/lecturer/page.tsx` (130 lines)
+- `src/app/lecturer/page.tsx` (148 lines)
 - `src/app/lecturer/sessions/[id]/controls.tsx` (69 lines) — Pause or resume, regenerate, change the window, allow a printed QR, and the card scanner.
 - `src/app/lecturer/sessions/[id]/late-arrivals.tsx` (102 lines)
 - `src/app/lecturer/sessions/[id]/live.tsx` (78 lines) — Re-fetches a freshly signed token at each 20-second step boundary. The QR
@@ -1525,7 +1590,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/student/navigate/page.tsx` (32 lines)
 - `src/app/student/page.tsx` (82 lines) — Monday (SAST) of the week containing this date, as YYYY-MM-DD.
 - `src/app/student/timetable/calendar.ics/route.ts` (12 lines) — The student's timetable as a calendar file (Google, Outlook, Apple Calendar).
-- `src/app/student/timetable/page.tsx` (59 lines)
+- `src/app/student/timetable/page.tsx` (69 lines)
 - `src/app/student/trend-card.tsx` (80 lines) — Weekly attendance as a line, per module or overall; tap a point for its numbers.
 - `src/app/super/actions.ts` (79 lines) — requireRole("super_admin") is the page gate; the RPCs re-check is_super_admin()
 - `src/app/super/directory/[id]/page.tsx` (74 lines)
@@ -1546,6 +1611,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/components/app-lock.tsx` (102 lines) — Covers the signed-in app until the device confirms its owner (fingerprint,
 - `src/components/captcha.tsx` (39 lines) — Bot protection for sign-up, sign-in and password reset (Cloudflare Turnstile,
 - `src/components/charts.tsx` (149 lines) — Dependency-free SVG charts, rendered on the server. Each one has a text
+- `src/components/class-list.tsx` (111 lines) — Upcoming dated classes, grouped by day. Lecturers get "Open attendance" and changes; students see what's on.
 - `src/components/company-mark.tsx` (13 lines) — "UniAttend is a product of …": the operating company, as the legal pages and footer show it.
 - `src/components/data-requests.tsx` (60 lines) — Personal-information requests, with the 30-day clock and a form to record the outcome.
 - `src/components/early-warning.tsx` (81 lines) — Every alert the signed-in user may see in this institution (admins: all, lecturers: their modules).
@@ -1578,6 +1644,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/lib/building-match.ts` (44 lines) — Matches timetable building names ("E-BLOCK", "NATURAL SCIENCE") to named
 - `src/lib/campus-schema.ts` (16 lines) — A campus as the super admin edits it (directory entries and institution setup).
 - `src/lib/campuses.ts` (126 lines) — Campus geometry helpers. Nothing about any institution is hard-coded: each
+- `src/lib/class-events.ts` (33 lines) — The next seven days of dated classes the signed-in person may see (RLS decides:
 - `src/lib/csv.ts` (44 lines) — CSV with formula-injection protection: a cell beginning with = + - @ tab or CR
 - `src/lib/dashboard.ts` (98 lines)
 - `src/lib/data-manager.ts` (103 lines) — The admin Data page: one table per kind of record, with search, archived view,
@@ -1588,7 +1655,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/lib/evidence.ts` (66 lines) — Client-side evidence collection. Everything here is *input* to the server's
 - `src/lib/geo.ts` (60 lines) — Small geometry helpers for the live map and walking navigation.
 - `src/lib/ics.ts` (73 lines) — A weekly timetable as an iCalendar (.ics) file: each class becomes a weekly
-- `src/lib/integrations/datasets.ts` (208 lines) — What each kind of academic data looks like to UniAttend, whatever the source calls
+- `src/lib/integrations/datasets.ts` (228 lines) — What each kind of academic data looks like to UniAttend, whatever the source calls
 - `src/lib/integrations/providers.ts` (104 lines) — The systems a university might connect, and how. Honest by design: a method is
 - `src/lib/integrations/roster.ts` (128 lines) — The one shape every source is turned into before it reaches the database
 - `src/lib/integrations/runner.ts` (79 lines) — The sync worker. The database decides what is due and hands over one connection
@@ -1640,7 +1707,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `tests/db/harness.ts` (88 lines) — Runs the real migrations against an in-process Postgres (PGlite) with a
 - `tests/db/install-script.test.ts` (30 lines) — The bundled SQL-editor script must install cleanly next to another app's
 - `tests/db/location.test.ts` (90 lines) — Campus boundaries and class navigation (migration 0013). Live location sharing
-- `tests/db/platform.test.ts` (1189 lines) — UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
+- `tests/db/platform.test.ts` (1316 lines) — UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
 - `tests/db/safeupdate.test.ts` (49 lines) — Supabase loads pg_safeupdate for API requests: an UPDATE or DELETE without a
 - `tests/db/security.test.ts` (78 lines) — Regression tests for the 2026-11-10 security review:
 
@@ -1650,7 +1717,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `tests/unit/auth-cookies.test.ts` (14 lines)
 - `tests/unit/building-match.test.ts` (35 lines) — Real building names from OpenStreetMap on a South African campus (2026-11-09).
 - `tests/unit/csv.test.ts` (32 lines)
-- `tests/unit/datasets.test.ts` (70 lines) — What nothing uses is reported, not silently dropped.
+- `tests/unit/datasets.test.ts` (78 lines) — What nothing uses is reported, not silently dropped.
 - `tests/unit/doc-rows.test.ts` (56 lines) — A minimal ZIP writer (CRC left as 0: the reader doesn't check it).
 - `tests/unit/early-warning.test.ts` (23 lines)
 - `tests/unit/geo.test.ts` (41 lines)

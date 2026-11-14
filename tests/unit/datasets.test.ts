@@ -33,7 +33,15 @@ describe("matching a file's columns to UniAttend's fields", () => {
       expect(d.fields.some((f) => f.required) || d.key === "assignments").toBe(true);
       expect(new Set(d.fields.map((f) => f.key)).size).toBe(d.fields.length);
     }
-    expect(DATASETS).toHaveLength(10);
+    expect(DATASETS).toHaveLength(11);
+  });
+
+  it("a timetable event needs its start and end, as date-times or as a date with times", () => {
+    const ev = datasetDef("timetable_events")!;
+    const base = { external_id: { column: "id" }, module_code: { column: "mod" } };
+    expect(mappingProblems(ev, base, ["id", "mod"])).toEqual(["Choose the start and end: full date-times, or a date with a start and end time."]);
+    expect(mappingProblems(ev, { ...base, starts_at: { column: "s" }, ends_at: { column: "e" } }, ["id", "mod", "s", "e"])).toEqual([]);
+    expect(mappingProblems(ev, { ...base, date: { column: "d" }, start_time: { column: "s" }, end_time: { column: "e" } }, ["id", "mod", "d", "s", "e"])).toEqual([]);
   });
 });
 

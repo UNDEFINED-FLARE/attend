@@ -15,7 +15,7 @@
 --   read (no policy). The token is handed only to the server worker that holds the
 --   dispatch secret; API keys are stored as a SHA-256 hash and shown once.
 -- * A sync adds and updates; it never deletes a student, lecturer or attendance
---   record. With "drop_missing" on, it marks as dropped only enrolments that the
+--   record. With "drop_0missing" on, it marks as dropped only enrolments that the
 --   same connection created, only after a complete run, and never more than half
 --   of them at once (a broken or empty feed can't empty the register).
 -- * People still get access only by signing up with their own confirmed email

@@ -7,6 +7,7 @@ import { requireRole } from "@/lib/auth";
 import { addTimetableSlots, removeTimetableSlot } from "../actions";
 import { PdfImport } from "./pdf-import";
 import { SourceImport } from "./source-import";
+import { ClassesCard } from "./classes-card";
 
 export const metadata = { title: "Timetable" };
 // Fetching a batch from the university timetable site can take ~15 s.
@@ -20,12 +21,16 @@ export default async function Timetable({ searchParams }: { searchParams: Promis
   const source = settings as { timetable_source_type?: string; timetable_source_url?: string | null } | null;
   const hasSource = !!source?.timetable_source_url && !!source.timetable_source_type && source.timetable_source_type !== "none";
   const sourceLabel = hasSource ? new URL(source!.timetable_source_url!).host.replace(/^www\./, "") : "";
-  const [{ data: modules }, { data: venues }, { data: rows }] = await Promise.all([
+  const soon = new Date(Date.now() + 14 * 86400_000).toISOString();
+  const [{ data: modules }, { data: venues }, { data: rows }, upcoming, cancelled] = await Promise.all([
     supabase.from("modules").select("id, code, title").eq("institution_id", institutionId).is("deleted_at", null).order("code"),
     supabase.from("venues").select("id, name").eq("institution_id", institutionId).is("deleted_at", null).order("name"),
     supabase.from("timetables").select("id, weekday, starts_at, ends_at, kind, group_name, module_id, modules(code, title), venues(name)")
       .eq("institution_id", institutionId).order("weekday").order("starts_at"),
+    supabase.from("timetable_events").select("id", { count: "exact", head: true }).eq("institution_id", institutionId).gte("starts_at", new Date().toISOString()).lt("starts_at", soon),
+    supabase.from("timetable_events").select("id", { count: "exact", head: true }).eq("institution_id", institutionId).eq("status", "cancelled").gte("starts_at", new Date().toISOString()).lt("starts_at", soon),
   ]);
+  const kinds = upcoming.error ? null : ((settings as { attendance_kinds?: string[] } | null)?.attendance_kinds ?? ["lecture", "tutorial", "practical"]);
   const all: (Slot & { module_id: string })[] = (rows ?? []).map((r) => {
     const m = r.modules as unknown as { code: string; title: string };
     return { id: r.id, weekday: r.weekday, starts_at: r.starts_at, ends_at: r.ends_at, kind: r.kind, group_name: r.group_name,
@@ -37,6 +42,7 @@ export default async function Timetable({ searchParams }: { searchParams: Promis
   return (
     <>
       <PageHeader title="Timetable" subtitle="Classes added here appear on every enrolled student's timetable and campus map." />
+      <ClassesCard kinds={kinds} upcoming={upcoming.count ?? null} cancelled={cancelled.count ?? null} />
       <Card className="mb-6">
         <CardTitle>Import from your timetable source</CardTitle>
         {hasSource

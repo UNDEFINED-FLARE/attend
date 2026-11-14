@@ -6,6 +6,8 @@ import { Icon } from "@/components/icons";
 import { Badge, Card, CardTitle, pct } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { greeting, groupBy, rate, sastMidnight, timeOf } from "@/lib/stats";
+import { ClassList } from "@/components/class-list";
+import { upcomingClasses } from "@/lib/class-events";
 
 export const metadata = { title: "Home" };
 
@@ -30,6 +32,13 @@ export default async function LecturerHome() {
     // Early warning (0015); empty if the institution hasn't run that update yet.
     supabase.rpc("list_student_alerts", { p_inst: institutionId, p_live_only: true }),
   ]);
+  // Dated classes from the timetable (0027), with what's needed to change one.
+  const [classes, { data: venueRows }, { data: lectRows }] = await Promise.all([
+    upcomingClasses(supabase, { moduleIds: ids, myLecturerId: me?.id ?? null }),
+    supabase.from("venues").select("id, name").eq("institution_id", institutionId).is("deleted_at", null).order("name").limit(500),
+    supabase.from("lecturers").select("id, full_name").eq("institution_id", institutionId).is("deleted_at", null).eq("status", "active").order("full_name").limit(500),
+  ]);
+  const now = Date.now();
   const needFollowUp = (await loadTheme(supabase, institutionId)).features.earlyWarning && Array.isArray(alerts) ? alerts.length : 0;
   const open = (sessions ?? []).filter((s) => s.status === "open");
   const week = (sessions ?? []).filter((s) => s.opens_at >= sastMidnight(6)).length;
@@ -61,6 +70,15 @@ export default async function LecturerHome() {
             ))}
           </ul>
         </section>
+      )}
+
+      {classes.length > 0 && (
+        <Card className="mb-6">
+          <CardTitle>My classes</CardTitle>
+          <ClassList events={classes} role="lecturer" now={now}
+            venues={(venueRows ?? []).map((v) => ({ id: v.id, label: v.name }))}
+            lecturers={(lectRows ?? []).filter((l) => l.id !== me?.id).map((l) => ({ id: l.id, label: l.full_name }))} />
+        </Card>
       )}
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
