@@ -12,9 +12,11 @@ beforeAll(async () => {
   db = await createDb();
   superId = await db.newUser("root@uniattend.app");
   await db.admin("insert into public.user_roles (user_id, role) values ($1, 'super_admin')", [superId]);
+  await db.stepUp(superId);
   adminId = await db.newUser("admin@sec.ac.za");
   inst = (await db.asOne<{ request_institution: string }>(adminId,
     "select public.request_institution('Security U', 'sec-u')")).request_institution;
+  await db.stepUp(adminId); // admin confirmed identity, so grant_role tests exercise the real path
   await db.as(superId, "select public.set_institution_status($1, 'active')", [inst]);
   await db.admin("update public.subscription_plans set price_cents = 120000, currency = 'ZAR', billing_interval = 'year' where code = 'starter'");
 }, 120_000);

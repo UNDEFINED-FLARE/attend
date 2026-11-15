@@ -33,6 +33,10 @@ export type Db = PGlite & {
   admin<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
   asService<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
   newUser(email: string, opts?: { confirmed?: boolean; meta?: object }): Promise<string>;
+  /** Simulate the "confirm it's you" step-up the Edge Function sets after a password re-check. */
+  stepUp(user: string): Promise<unknown>;
+  /** Make a user's step-up look older than the 20-minute window. */
+  expireStepUp(user: string): Promise<unknown>;
 };
 
 export async function createDb(): Promise<Db> {
@@ -89,5 +93,12 @@ export async function createDb(): Promise<Db> {
     );
     return r.id;
   };
+
+  db.stepUp = (user) => db.admin(
+    `insert into public.admin_step_up (user_id, verified_at) values ($1, now())
+     on conflict (user_id) do update set verified_at = now()`, [user]);
+  db.expireStepUp = (user) => db.admin(
+    `update public.admin_step_up set verified_at = now() - interval '1 hour' where user_id = $1`, [user]);
+
   return db;
 }

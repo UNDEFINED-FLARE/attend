@@ -40,6 +40,7 @@ beforeAll(async () => {
   db = await createDb();
   u.super = await db.newUser("root@uniattend.app");
   await db.admin("insert into public.user_roles (user_id, role) values ($1, 'super_admin')", [u.super]);
+  await db.stepUp(u.super);
 
   ({ admin: u.admin, inst: id.inst } = await institution("loc"));
   ({ admin: u.otherAdmin, inst: id.other } = await institution("far"));

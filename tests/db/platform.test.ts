@@ -67,6 +67,7 @@ beforeAll(async () => {
   db = await createDb();
   u.super = await db.newUser("root@uniattend.app");
   await db.admin("insert into public.user_roles (user_id, role) values ($1, 'super_admin')", [u.super]);
+  await db.stepUp(u.super); // the super admin confirmed their identity (lasts the 20-min window)
   await setupInstitution("A");
   await setupInstitution("B");
 }, 120_000);
