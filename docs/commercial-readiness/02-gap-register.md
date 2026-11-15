@@ -12,6 +12,7 @@ Priority: **P0** blocks any real pilot · **P1** needed before a paid contract �
 | Database shared with other apps | At risk | `public` holds marketplace, `acvosa` and `aa`/`uvn` tables; two foreign edge functions | Move UniAttend to its own Supabase project (paid plan) | P0 | Production project contains only `uniattend` objects |
 | Dispatch secret reuse | At risk | push secret = a Supabase secret API key | Rotate the key; new random 32-byte dispatch secret in Vercel and `push_config` | P0 | Old key revoked; push and integration runs still work |
 | Migration tracking | Implemented, tested; database live (0028 applied 15 Nov), app change deploys with the next push | 0028 adds `schema_versions`; `/api/health` compares it with the version the build expects | Run 0028 live; every new migration inserts its own version | P1 | One query lists applied UniAttend migrations; health turns degraded when the database is behind |
+| Platform administrator's standing access to university records | **At risk** | `is_inst_admin()` includes `is_super_admin()`, so UniAttend's own administrators can read every institution's records through the database | Support access by explicit, time-limited, logged grant from the institution | P1 | A platform administrator sees no student or attendance record without a grant (tested) |
 | Multi-tenant isolation | Implemented, tested | `tests/db/security.test.ts`, `platform.test.ts` cross-institution cases | Add isolation tests for every new table (ongoing) | P0 | Zero cross-institution reads/writes in tests |
 | Staging environment | Missing | One project only | Separate Supabase project + Vercel preview env | P0 | Migrations and load tests run on staging first |
 | Backups and restore | Missing | Free plan; no PITR | Paid plan, PITR, documented and executed restore test | P0 | Restore of a copy succeeds within the stated RTO |
@@ -74,7 +75,7 @@ Priority: **P0** blocks any real pilot · **P1** needed before a paid contract �
 
 | Feature | Current status | Evidence | Required improvement | Priority | Acceptance criteria |
 |---|---|---|---|---|---|
-| Plans, trials, manual billing | Implemented | 0022 | — | P1 | — |
+| Plans, trials, manual billing | Partial | 0022; prices not set; Starter allows 15,000 modules but Professional 2,000; feature flags do not gate the new reports, exports and roles | Set prices, fix limits, decide what each plan includes | P1 | Each plan's price and limits are consistent and enforced |
 | Paystack payments | **Not deployed** | Webhook function absent; 0 payments | Deploy and verify webhook in test mode | P2 | Payment only recorded after server verification |
 | Institution onboarding | Implemented, tested; live 15 Nov 2026 (0032) | Twelve-step go-live checklist: data-driven steps tick themselves; policy and training signed off by the institution; verification and go-live by UniAttend; go-live refused until every step is done; 3 database tests | First real onboarding | P1 | New university onboarded without code changes |
 | Support desk | Missing | — | Tickets, priority, assignment | P2 | — |
