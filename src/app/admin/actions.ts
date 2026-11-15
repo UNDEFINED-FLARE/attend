@@ -194,6 +194,40 @@ export async function grantAdmin(_: S, f: FormData): Promise<S> {
   return fail(error) ?? { ok: "Administrator added." };
 }
 
+const STAFF_ROLE = z.enum(["institution_admin", "faculty_admin", "department_admin", "attendance_officer", "integration_admin", "auditor"]);
+
+/** Give a colleague a staff role. Faculty and department administrators need their faculty or department. */
+export async function grantStaff(_: S, f: FormData): Promise<S> {
+  const p = z.object({
+    email: z.string().trim().email("Enter their email."),
+    role: STAFF_ROLE,
+    faculty_id: z.string().uuid().or(z.literal("")),
+    department_id: z.string().uuid().or(z.literal("")),
+  }).safeParse({ email: f.get("email"), role: f.get("role"), faculty_id: f.get("faculty_id") ?? "", department_id: f.get("department_id") ?? "" });
+  if (!p.success) return { error: p.error.issues[0].message };
+  if (p.data.role === "faculty_admin" && !p.data.faculty_id) return { error: "Choose the faculty they will administer." };
+  if (p.data.role === "department_admin" && !p.data.department_id) return { error: "Choose the department they will administer." };
+  const { supabase, institutionId } = await ctx();
+  const { error } = await supabase.rpc("grant_role", {
+    p_inst: institutionId, p_email: p.data.email, p_role: p.data.role,
+    p_faculty: p.data.role === "faculty_admin" ? p.data.faculty_id : null,
+    p_department: p.data.role === "department_admin" ? p.data.department_id : null,
+  });
+  revalidatePath("/admin/people");
+  if (error?.code === "PGRST202") return { error: "Staff roles need the latest database update (migration 0030)." };
+  return fail(error) ?? { ok: "Role given. They see it the next time they open UniAttend." };
+}
+
+/** Suspend or restore a staff role. */
+export async function setStaffRole(_: S, f: FormData): Promise<S> {
+  const p = z.object({ id: z.string().uuid(), status: z.enum(["active", "suspended"]) }).safeParse(Object.fromEntries(f));
+  if (!p.success) return { error: "Something went wrong. Reload the page." };
+  const { supabase } = await ctx();
+  const { error } = await supabase.rpc("set_role_status", { p_role_id: p.data.id, p_status: p.data.status });
+  revalidatePath("/admin/people");
+  return fail(error) ?? { ok: p.data.status === "active" ? "Restored." : "Suspended. They no longer have this role." };
+}
+
 export async function saveSettings(_: S, f: FormData): Promise<S> {
   const bool = z.preprocess((v) => v === "on", z.boolean());
   const p = z.object({

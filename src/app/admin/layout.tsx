@@ -1,11 +1,14 @@
 import { Shell } from "@/components/shell";
 import { Notice } from "@/components/ui";
-import { requireRole } from "@/lib/auth";
+import { INTEGRATION_ROLES, requireAnyRole } from "@/lib/auth";
 import { menuFor } from "@/lib/nav-config";
 import { shellData } from "@/lib/shell-data";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const s = await requireRole("institution_admin");
+  // Integration administrators share this area but only see the integration pages;
+  // every other admin page still requires an institution administrator.
+  const s = await requireAnyRole(INTEGRATION_ROLES);
+  const integrationOnly = !s.roles.some((r) => r.role === "institution_admin");
   const { current, choices } = s;
   const [shell, { data: notice }] = await Promise.all([
     shellData(s),
@@ -14,7 +17,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const sub = notice as { plan: string; status: string; ends_at: string | null; days_left: number | null; operating: boolean } | null;
   const ends = sub?.ends_at ? new Date(sub.ends_at).toLocaleDateString("en-ZA", { day: "numeric", month: "long", year: "numeric", timeZone: "Africa/Johannesburg" }) : null;
   return (
-    <Shell area="Administration" current={current} choices={choices} {...shell} nav={menuFor("admin", shell.theme)}>
+    <Shell area={integrationOnly ? "Integrations" : "Administration"} current={current} choices={choices} {...shell}
+      nav={integrationOnly ? menuFor("admin", shell.theme).filter((n) => n.href.startsWith("/admin/integrations")) : menuFor("admin", shell.theme)}>
       {current.institution_status !== "active" && (
         <div className="mb-6"><Notice tone="warn">
           {current.institution_status === "pending"

@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { requireRole } from "@/lib/auth";
+import { INTEGRATION_ROLES, requireAnyRole } from "@/lib/auth";
 import { documentRows } from "@/lib/doc-rows";
 import { autoMap, datasetDef, mappingProblems, mapRows, tableFromJson, TRANSFORMS, unusedColumns, type Mapping } from "@/lib/integrations/datasets";
 
@@ -43,7 +43,7 @@ export type Inspected = {
 
 /** Step 1: read the file's columns and a few rows, and suggest a mapping. Nothing is stored. */
 export async function inspectFile(f: FormData): Promise<Inspected> {
-  const { supabase, institutionId } = await requireRole("institution_admin");
+  const { supabase, institutionId } = await requireAnyRole(INTEGRATION_ROLES);
   const ds = datasetDef(String(f.get("dataset") ?? ""));
   const file = f.get("file");
   if (!ds) return { error: "Choose what the file contains." };
@@ -67,7 +67,7 @@ const MappingSchema = z.record(z.string().max(40), z.object({
  * the administrator confirms on the next page.
  */
 export async function stageImport(_: { error?: string } | undefined, f: FormData): Promise<{ error?: string }> {
-  const { supabase, institutionId } = await requireRole("institution_admin");
+  const { supabase, institutionId } = await requireAnyRole(INTEGRATION_ROLES);
   const ds = datasetDef(String(f.get("dataset") ?? ""));
   const file = f.get("file");
   if (!ds || !(file instanceof File)) return { error: "Choose the file again." };
@@ -109,7 +109,7 @@ export async function confirmImport(_: S, f: FormData): Promise<S> {
   const run = z.string().uuid().safeParse(f.get("run"));
   if (!run.success) return { error: "Unknown import." };
   if (f.get("confirm") !== "on") return { error: "Tick the box to confirm." };
-  const { supabase } = await requireRole("institution_admin");
+  const { supabase } = await requireAnyRole(INTEGRATION_ROLES);
   const { error } = await supabase.rpc("import_commit", { p_run: run.data });
   if (error) return { error: error.message };
   for (const p of ["/admin/integrations/import", "/admin/people", "/admin/modules", "/admin/structure", "/admin/connections"]) revalidatePath(p);
@@ -120,7 +120,7 @@ export async function confirmImport(_: S, f: FormData): Promise<S> {
 export async function cancelImport(f: FormData): Promise<void> {
   const run = z.string().uuid().safeParse(f.get("run"));
   if (!run.success) return;
-  const { supabase } = await requireRole("institution_admin");
+  const { supabase } = await requireAnyRole(INTEGRATION_ROLES);
   await supabase.rpc("import_cancel", { p_run: run.data });
   revalidatePath("/admin/integrations/import");
   redirect("/admin/integrations/import");
@@ -129,7 +129,7 @@ export async function cancelImport(f: FormData): Promise<void> {
 export async function deleteMapping(f: FormData): Promise<void> {
   const p = z.object({ dataset: z.string().max(40), name: z.string().max(80) }).safeParse(Object.fromEntries(f));
   if (!p.success) return;
-  const { supabase, institutionId } = await requireRole("institution_admin");
+  const { supabase, institutionId } = await requireAnyRole(INTEGRATION_ROLES);
   await supabase.from("integration_mappings").delete().eq("institution_id", institutionId).eq("dataset", p.data.dataset).eq("name", p.data.name);
   revalidatePath("/admin/integrations/import");
 }

@@ -1448,3 +1448,113 @@ describe("attendance exceptions: one review queue, and no absence from weak evid
     expect(await missing(u.adminB, id.instB)).not.toContain(ev.id);
   });
 });
+
+describe("staff roles: each sees and changes only what the role allows", () => {
+  const s: Ids = {};      // staff user ids
+  let his: string;        // a History module, outside the Science faculty
+  let facSci: string, depHist: string;
+  const count = async (who: string, sql: string, params: unknown[] = []) => (await db.as(who, sql, params)).length;
+  const grant = (role: string, email: string, faculty: string | null = null, dept: string | null = null, by = u.adminA) =>
+    db.as(by, "select uniattend.grant_role($1, $2, $3, $4, $5)", [id.instA, email, role, faculty, dept]);
+
+  beforeAll(async () => {
+    facSci = (await db.admin<{ id: string }>("select faculty_id as id from uniattend.departments where id = $1", [id.depA]))[0].id;
+    const hum = await db.asOne<{ id: string }>(u.adminA, "insert into uniattend.faculties (institution_id, name, code) values ($1, 'Humanities', 'HUM') returning id", [id.instA]);
+    depHist = (await db.asOne<{ id: string }>(u.adminA, "insert into uniattend.departments (institution_id, faculty_id, name, code) values ($1, $2, 'History', 'HIS') returning id", [id.instA, hum.id])).id;
+    his = (await db.asOne<{ id: string }>(u.adminA, "insert into uniattend.modules (institution_id, department_id, code, title) values ($1, $2, 'HIS101', 'World History') returning id", [id.instA, depHist])).id;
+    const a1 = (await db.admin<{ id: string }>("select id from uniattend.students where student_number = 'A001'"))[0].id;
+    await db.as(u.adminA, "insert into uniattend.module_enrolments (institution_id, module_id, student_id) values ($1, $2, $3)", [id.instA, his, a1]);
+    for (const k of ["fac", "dep", "officer", "integ", "auditor"]) s[k] = await db.newUser(`${k}@uniA.ac.za`);
+    await grant("faculty_admin", "fac@uniA.ac.za", facSci);
+    await grant("department_admin", "dep@uniA.ac.za", null, depHist);
+    await grant("attendance_officer", "officer@uniA.ac.za");
+    await grant("integration_admin", "integ@uniA.ac.za");
+    await grant("auditor", "auditor@uniA.ac.za");
+  });
+
+  it("only an institution admin grants roles, and scoped roles need a scope in that institution", async () => {
+    await expect(grant("faculty_admin", "fac@uniA.ac.za")).rejects.toThrow(/Choose one of your faculties/);
+    const facB = (await db.admin<{ id: string }>("select faculty_id as id from uniattend.departments where id = $1", [id.depB]))[0].id;
+    await expect(grant("faculty_admin", "fac@uniA.ac.za", facB)).rejects.toThrow(/Choose one of your faculties/);
+    await expect(grant("department_admin", "dep@uniA.ac.za")).rejects.toThrow(/Choose one of your departments/);
+    for (const by of [s.integ, s.officer, s.auditor, s.fac, u.lectA, u.sA1]) {
+      await expect(grant("auditor", "fac@uniA.ac.za", null, null, by)).rejects.toThrow(/institution admin only/);
+    }
+    await expect(db.admin("insert into uniattend.user_roles (user_id, institution_id, role) values ($1, $2, 'faculty_admin')", [s.dep, id.instA])).rejects.toThrow();
+    const roles = await db.as<{ role: string; scope_name: string | null }>(s.fac, "select role, scope_name from uniattend.my_roles()");
+    expect(roles).toEqual([expect.objectContaining({ role: "faculty_admin", scope_name: "Science" })]);
+  });
+
+  it("faculty and department admins see their own modules' attendance, and nothing else", async () => {
+    const recs = (who: string, mod: string) => count(who, "select 1 from uniattend.attendance_records where module_id = $1", [mod]);
+    const enrol = (who: string, mod: string) => count(who, "select 1 from uniattend.module_enrolments where module_id = $1", [mod]);
+    const all = await recs(u.adminA, id.modA);
+    expect(all).toBeGreaterThan(0);
+    expect(await recs(s.fac, id.modA)).toBe(all);
+    expect(await enrol(s.fac, his)).toBe(0);
+    expect(await recs(s.dep, id.modA)).toBe(0);
+    expect(await enrol(s.dep, his)).toBe(1);
+    expect(await count(s.dep, "select 1 from uniattend.students")).toBe(1);   // only History's one student
+    const ov = async (who: string) => ((await db.asOne<{ scope_overview: { code: string }[] }>(who, "select uniattend.scope_overview($1)", [id.instA])).scope_overview).map((m) => m.code).sort();
+    expect(await ov(s.fac)).toEqual(["CSC101"]);
+    expect(await ov(s.dep)).toEqual(["HIS101"]);
+    expect(await ov(s.officer)).toEqual(expect.arrayContaining(["CSC101", "HIS101"]));
+    await expect(ov(u.sA1)).rejects.toThrow(/Not allowed/);
+    await expect(ov(s.integ)).rejects.toThrow(/Not allowed/);
+  });
+
+  it("officers and auditors see the whole institution; the integration admin sees no attendance or students", async () => {
+    const all = await count(u.adminA, "select 1 from uniattend.attendance_records");
+    expect(await count(s.officer, "select 1 from uniattend.attendance_records")).toBe(all);
+    expect(await count(s.auditor, "select 1 from uniattend.attendance_records")).toBe(all);
+    expect(await count(s.integ, "select 1 from uniattend.attendance_records")).toBe(0);
+    expect(await count(s.integ, "select 1 from uniattend.students")).toBe(0);
+    expect(await count(s.integ, "select 1 from uniattend.modules where id = $1", [his])).toBe(1);   // structure is readable
+    // Nobody here sees the other institution.
+    for (const k of ["fac", "dep", "officer", "integ", "auditor"]) {
+      expect(await count(s[k], "select 1 from uniattend.attendance_records where institution_id = $1", [id.instB])).toBe(0);
+      expect(await count(s[k], "select 1 from uniattend.students where institution_id = $1", [id.instB])).toBe(0);
+    }
+  });
+
+  it("officers and scoped admins correct attendance in scope; auditors never change anything", async () => {
+    const [r] = await db.admin<{ session_id: string; student_id: string }>(
+      "select session_id, student_id from uniattend.attendance_records where module_id = $1 and status = 'absent' limit 1", [id.modA]);
+    const fix = (who: string, status: string) => db.as(who, "select uniattend.override_attendance($1, $2, $3, 'Medical certificate seen')", [r.session_id, r.student_id, status]);
+    await fix(s.officer, "excused");
+    await fix(s.fac, "absent");
+    await expect(fix(s.dep, "present")).rejects.toThrow(/only the module lecturer/);
+    await expect(fix(s.auditor, "present")).rejects.toThrow(/only the module lecturer/);
+    await expect(fix(s.integ, "present")).rejects.toThrow(/only the module lecturer/);
+    // The auditor can read the review queue and decisions, but not decide.
+    await db.as(s.auditor, "select uniattend.review_queue($1, 'decided')", [id.instA]);
+    const anyRec = (await db.admin<{ id: string }>("select id from uniattend.attendance_records where module_id = $1 limit 1", [id.modA]))[0].id;
+    await expect(db.as(s.auditor, "select uniattend.decide_review($1, 'present')", [[anyRec]])).rejects.toThrow(/Not allowed/);
+    await expect(db.as(s.integ, "select uniattend.review_queue($1)", [id.instA])).rejects.toThrow(/Only lecturers and administrators/);
+    // No new role can write the tables directly: there is no write policy, so nothing changes.
+    const before = await db.admin("select id, status from uniattend.attendance_records where module_id = $1 order by id", [id.modA]);
+    for (const k of ["officer", "auditor", "fac"]) {
+      expect(await db.as(s[k], "update uniattend.attendance_records set status = 'present' where module_id = $1 returning id", [id.modA])).toEqual([]);
+    }
+    expect(await db.admin("select id, status from uniattend.attendance_records where module_id = $1 order by id", [id.modA])).toEqual(before);
+  });
+
+  it("the auditor reads the audit log and who holds which role; others in these roles do not", async () => {
+    expect(await count(s.auditor, "select 1 from uniattend.audit_logs where institution_id = $1", [id.instA])).toBeGreaterThan(0);
+    expect(await count(s.auditor, "select 1 from uniattend.user_roles where institution_id = $1", [id.instA])).toBeGreaterThan(5);
+    for (const k of ["officer", "fac", "integ"]) {
+      expect(await count(s[k], "select 1 from uniattend.audit_logs")).toBe(0);
+      expect(await count(s[k], "select 1 from uniattend.user_roles where user_id <> $1", [s[k]])).toBe(0);
+    }
+  });
+
+  it("the integration admin runs imports; other staff roles cannot", async () => {
+    const run = (await db.asOne<{ import_start: string }>(s.integ, "select uniattend.import_start($1, 'test', 'by the integration admin')", [id.instA])).import_start;
+    expect(await count(s.integ, "select 1 from uniattend.integration_runs where id = $1", [run])).toBe(1);
+    expect(await count(s.officer, "select 1 from uniattend.integration_runs")).toBe(0);
+    for (const k of ["officer", "auditor", "fac"]) {
+      await expect(db.as(s[k], "select uniattend.import_start($1, 'x', 'x')", [id.instA])).rejects.toThrow(/institution admin only/);
+    }
+    await expect(db.as(s.integ, "select uniattend.import_start($1, 'x', 'x')", [id.instB])).rejects.toThrow(/institution admin only/);
+  });
+});

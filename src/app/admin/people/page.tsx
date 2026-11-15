@@ -1,7 +1,8 @@
 import { ActionForm } from "@/components/form";
 import { Badge, Card, CardTitle, Field, Input, PageHeader, Select } from "@/components/ui";
-import { requireRole } from "@/lib/auth";
-import { addLecturer, addStudent, grantAdmin, importStudents, pasteStudents } from "../actions";
+import { requireRole, ROLE_LABEL, type Role } from "@/lib/auth";
+import { StaffGrant } from "./staff-grant";
+import { addLecturer, addStudent, importStudents, pasteStudents, setStaffRole } from "../actions";
 import { StudentAdder } from "./student-adder";
 import { DeleteButton, EditToggle } from "@/components/row-actions";
 import { updatePerson } from "../data-actions";
@@ -15,13 +16,16 @@ export default async function People({ searchParams }: { searchParams: Promise<{
   let students = supabase.from("students").select("id, student_number, full_name, email, user_id, status", { count: "exact" })
     .eq("institution_id", institutionId).is("deleted_at", null).order("student_number").limit(50);
   if (term) students = students.or(`student_number.ilike.%${term}%,full_name.ilike.%${term}%`);
-  const [{ data: lecturers }, { data: studentRows, count }, { data: departments }, { data: admins }, { data: modules }] = await Promise.all([
+  const [{ data: lecturers }, { data: studentRows, count }, { data: departments }, { data: admins }, { data: modules }, { data: faculties }] = await Promise.all([
     supabase.from("lecturers").select("*").eq("institution_id", institutionId).is("deleted_at", null).order("full_name"),
     students,
     supabase.from("departments").select("id, name").eq("institution_id", institutionId).is("deleted_at", null).order("name"),
-    supabase.from("user_roles").select("id, user_id, status").eq("institution_id", institutionId).eq("role", "institution_admin"),
+    supabase.from("user_roles").select("id, user_id, role, status, faculty_id, department_id").eq("institution_id", institutionId)
+      .not("role", "in", "(lecturer,student)").order("role"),
     supabase.from("modules").select("code, title").eq("institution_id", institutionId).is("deleted_at", null).order("code"),
+    supabase.from("faculties").select("id, name").eq("institution_id", institutionId).is("deleted_at", null).order("name"),
   ]);
+  const scopeName = new Map([...(faculties ?? []), ...(departments ?? [])].map((x) => [x.id, x.name]));
   const { data: adminProfiles } = await supabase.from("profiles").select("id, full_name, email")
     .in("id", (admins ?? []).map((a) => a.user_id));
   const profileOf = new Map((adminProfiles ?? []).map((p) => [p.id, p]));
@@ -73,16 +77,26 @@ export default async function People({ searchParams }: { searchParams: Promise<{
       </Card>
 
       <Card className="mt-6">
-        <CardTitle>Administrators</CardTitle>
+        <CardTitle>Administrators and staff roles</CardTitle>
+        <p className="mb-3 text-sm text-muted">Faculty and department administrators see their own modules&apos; attendance and reviews. Attendance officers handle the whole
+          institution&apos;s reviews, disputes and corrections. Integration administrators manage connections and imports only. Auditors can read, never change.</p>
         <ul className="mb-4 divide-y divide-line text-sm">
           {(admins ?? []).map((a) => {
             const p = profileOf.get(a.user_id);
-            return <li key={a.id} className="flex justify-between py-2"><span>{p?.full_name || p?.email || a.user_id}</span><Badge status={a.status} /></li>;
+            const scope = scopeName.get(a.faculty_id ?? a.department_id ?? "");
+            return (
+              <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <span className="min-w-0"><span className="font-medium">{p?.full_name || p?.email || "Account"}</span>
+                  <span className="block text-xs text-muted">{ROLE_LABEL[a.role as Role] ?? a.role}{scope ? ` · ${scope}` : ""}</span></span>
+                <span className="flex items-center gap-2"><Badge status={a.status} />
+                  <ActionForm action={setStaffRole} submit={a.status === "active" ? "Suspend" : "Restore"} pending="…" className="[&>button]:h-8 [&>button]:px-3 [&>button]:text-xs">
+                    <input type="hidden" name="id" value={a.id} /><input type="hidden" name="status" value={a.status === "active" ? "suspended" : "active"} />
+                  </ActionForm></span>
+              </li>
+            );
           })}
         </ul>
-        <ActionForm action={grantAdmin} submit="Add administrator" className="flex flex-wrap items-start gap-2 [&>[role]]:w-full">
-          <Input name="email" type="email" placeholder="colleague@university.ac.za" className="max-w-xs" required />
-        </ActionForm>
+        <StaffGrant faculties={faculties ?? []} departments={departments ?? []} />
       </Card>
     </>
   );

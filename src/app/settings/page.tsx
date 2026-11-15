@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { AppLock } from "@/components/app-lock";
 import { ActionForm } from "@/components/form";
 import { Icon } from "@/components/icons";
-import { getSession, INST_COOKIE, ROLE_HOME } from "@/lib/auth";
+import { getSession, INST_COOKIE, ROLE_HOME, ROLE_LABEL } from "@/lib/auth";
 import { loadTheme } from "@/lib/shell-data";
 import { themeStyle } from "@/lib/theme";
 import { requestDataAction } from "@/app/data-actions";
@@ -25,7 +25,7 @@ export default async function Settings() {
   const myRequests = (reqRows ?? []) as { id: string; kind: string; status: string; response: string | null }[];
   const name = (s.user.user_metadata as { full_name?: string } | undefined)?.full_name || s.user.email || "you";
   const instName = theme.header.title || role?.institution_name || "UniAttend";
-  const ROLE_NAME: Record<string, string> = { institution_admin: "Administrator", lecturer: "Lecturer", student: "Student" };
+  const ROLE_NAME: Record<string, string> = ROLE_LABEL;
   const memberships = [...new Set(s.roles.filter((r) => r.institution_id).map((r) => r.institution_id as string))].map((iid) => ({
     id: iid,
     name: s.roles.find((r) => r.institution_id === iid)?.institution_name ?? "Institution",

@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth";
+import { INTEGRATION_ROLES, requireAnyRole } from "@/lib/auth";
 import { toCsv } from "@/lib/csv";
 import { auditExport } from "@/lib/audit-export";
 
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export async function GET(_: Request, { params }: { params: Promise<{ run: string }> }) {
   const { run } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(run)) return new Response("Not found", { status: 404 });
-  const { supabase, institutionId } = await requireRole("institution_admin");
+  const { supabase, institutionId } = await requireAnyRole(INTEGRATION_ROLES);
   const { data: r } = await supabase.from("integration_runs").select("status").eq("id", run).eq("institution_id", institutionId).maybeSingle();
   if (!r) return new Response("Not found", { status: 404 });
 

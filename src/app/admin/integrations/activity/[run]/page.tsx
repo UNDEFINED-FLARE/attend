@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ActionForm } from "@/components/form";
 import { Badge, Card, CardTitle, Notice, PageHeader, Stat, Table, Td } from "@/components/ui";
-import { requireRole } from "@/lib/auth";
+import { INTEGRATION_ROLES, requireAnyRole } from "@/lib/auth";
 import { datasetDef, RUN_STATUS } from "@/lib/integrations/datasets";
 import { runCounts } from "@/lib/integrations/providers";
 import { retryRun } from "../actions";
@@ -14,7 +14,7 @@ const at = (iso: string | null) => iso ? new Date(iso).toLocaleString("en-ZA", {
 export default async function RunDetail({ params }: { params: Promise<{ run: string }> }) {
   const { run } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(run)) notFound();
-  const { supabase, institutionId } = await requireRole("institution_admin");
+  const { supabase, institutionId } = await requireAnyRole(INTEGRATION_ROLES);
   const { data: r } = await supabase.from("integration_runs").select("*").eq("id", run).eq("institution_id", institutionId).maybeSingle();
   if (!r) notFound();
   if (!r.integration_id) redirect(`/admin/integrations/import/${run}`);

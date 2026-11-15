@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Badge, Card, Notice, PageHeader, Table, Td } from "@/components/ui";
-import { requireRole } from "@/lib/auth";
+import { INTEGRATION_ROLES, requireAnyRole } from "@/lib/auth";
 import { RUN_STATUS } from "@/lib/integrations/datasets";
 import { runCounts } from "@/lib/integrations/providers";
 
@@ -20,7 +20,7 @@ const PAGE = 50;
 export default async function Activity({ searchParams }: { searchParams: Promise<{ status?: string; source?: string; page?: string }> }) {
   const { status = "", source = "", page = "1" } = await searchParams;
   const pg = Math.max(1, Number(page) || 1);
-  const { supabase, institutionId } = await requireRole("institution_admin");
+  const { supabase, institutionId } = await requireAnyRole(INTEGRATION_ROLES);
   let q = supabase.from("integration_runs").select("id, integration_id, trigger, status, summary, label, started_at, finished_at, error", { count: "exact" })
     .eq("institution_id", institutionId).order("started_at", { ascending: false }).range((pg - 1) * PAGE, pg * PAGE - 1);
   if (status) q = q.eq("status", status);

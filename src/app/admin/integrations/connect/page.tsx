@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ConnectionForm } from "@/app/admin/connections/connection-forms";
 import { Card, CardTitle, Notice, PageHeader } from "@/components/ui";
-import { requireRole } from "@/lib/auth";
+import { INTEGRATION_ROLES, requireAnyRole } from "@/lib/auth";
 import { METHODS, PROVIDERS, providerDef, type MethodKey } from "@/lib/integrations/providers";
 import { encryptionReady } from "@/lib/integrations/secrets";
 import { dispatchSecret } from "@/lib/push";
@@ -18,7 +18,7 @@ const STEPS = ["System", "Method", "Configure and test", "Data and schedule"];
  */
 export default async function Connect({ searchParams }: { searchParams: Promise<{ provider?: string; method?: string }> }) {
   const { provider: pk, method: mk } = await searchParams;
-  const { current } = await requireRole("institution_admin");
+  const { current } = await requireAnyRole(INTEGRATION_ROLES);
   const p = providerDef(pk);
   const method = p && mk && (p.methods as string[]).includes(mk) ? (mk as MethodKey) : null;
   if (p && method === "upload") redirect("/admin/integrations/import");

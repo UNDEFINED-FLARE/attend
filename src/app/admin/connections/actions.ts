@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { z } from "zod";
-import { requireRole } from "@/lib/auth";
+import { INTEGRATION_ROLES, requireAnyRole } from "@/lib/auth";
 import { ConnectionOptions, rosterFromText } from "@/lib/integrations/roster";
 import { kickIntegrations } from "@/lib/integrations/runner";
 import { fetchRosterFeed, moodleTest } from "@/lib/integrations/sources";
@@ -45,7 +45,7 @@ export async function saveConnection(_: S, f: FormData): Promise<S> {
   const url = (d.base_url ?? "").replace(/\/+$/, "");
   let note = "";
   // Who's asking comes first: the test below makes the server contact the address.
-  const { supabase, institutionId } = await requireRole("institution_admin");
+  const { supabase, institutionId } = await requireAnyRole(INTEGRATION_ROLES);
   if (d.token && d.kind !== "api" && !encryptionReady()) {
     return { error: "This server can't store credentials safely yet: set INTEGRATION_ENCRYPTION_KEY in Vercel's environment variables, redeploy, then save again." };
   }
@@ -90,7 +90,7 @@ export async function connectionAction(_: S, f: FormData): Promise<S> {
   const p = z.object({ id: z.string().uuid(), action: z.enum(["sync", "pause", "resume", "delete", "new_key"]) }).safeParse(Object.fromEntries(f));
   if (!p.success) return { error: "Unknown action." };
   if (p.data.action === "delete" && f.get("confirm") !== "on") return { error: "Tick the box to confirm." };
-  const { supabase } = await requireRole("institution_admin");
+  const { supabase } = await requireAnyRole(INTEGRATION_ROLES);
   const { data, error } = await supabase.rpc("integration_action", { p_id: p.data.id, p_action: p.data.action });
   if (error) return { error: error.code === "PGRST202" ? NEEDS_0024 : error.message };
   revalidatePath("/admin/connections");
@@ -108,7 +108,7 @@ export async function connectionAction(_: S, f: FormData): Promise<S> {
 export async function testConnection(_: S, f: FormData): Promise<S> {
   const id = z.string().uuid().safeParse(f.get("id"));
   if (!id.success) return { error: "Unknown connection." };
-  const { supabase } = await requireRole("institution_admin");
+  const { supabase } = await requireAnyRole(INTEGRATION_ROLES);
   // As the administrator: RLS only returns their own institution's connection.
   const { data: c } = await supabase.from("integrations").select("id, kind, base_url").eq("id", id.data).maybeSingle();
   if (!c) return { error: "Unknown connection." };
@@ -148,7 +148,7 @@ export async function uploadRoster(_: S, f: FormData): Promise<S> {
   catch { return { error: "The file couldn't be read. Use CSV with a header row: role, number, full_name, email, module_code." }; }
   if (!roster.people.length) return { error: "No people found. The first row must name the columns: role, number, full_name, email, module_code." };
   if (roster.people.length > 20000) return { error: "Upload at most 20,000 people at a time." };
-  const { supabase, institutionId } = await requireRole("institution_admin");
+  const { supabase, institutionId } = await requireAnyRole(INTEGRATION_ROLES);
   const { data, error } = await supabase.rpc("import_roster", { p_inst: institutionId, p_payload: roster });
   if (error) return { error: error.code === "PGRST202" ? NEEDS_0024 : error.message };
   revalidatePath("/admin/connections"); revalidatePath("/admin/people"); revalidatePath("/admin/modules");

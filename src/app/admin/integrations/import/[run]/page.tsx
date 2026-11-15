@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ActionForm } from "@/components/form";
 import { Badge, Card, CardTitle, Notice, PageHeader, Stat, Table, Td } from "@/components/ui";
-import { requireRole } from "@/lib/auth";
+import { INTEGRATION_ROLES, requireAnyRole } from "@/lib/auth";
 import { datasetDef, RUN_STATUS } from "@/lib/integrations/datasets";
 import { cancelImport, confirmImport } from "../actions";
 
@@ -18,7 +18,7 @@ const show = (p: Record<string, string>) => Object.entries(p).filter(([k]) => k 
 export default async function ImportRun({ params }: { params: Promise<{ run: string }> }) {
   const { run } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(run)) notFound();
-  const { supabase, institutionId } = await requireRole("institution_admin");
+  const { supabase, institutionId } = await requireAnyRole(INTEGRATION_ROLES);
   const { data: r } = await supabase.from("integration_runs").select("id, status, label, summary, started_at, finished_at, error, trigger")
     .eq("id", run).eq("institution_id", institutionId).maybeSingle();
   if (!r) notFound();

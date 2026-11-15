@@ -231,7 +231,7 @@ Plans with limits enforced by triggers (`enforce_plan_limits`). New institutions
 
 ## 13. State at the time of writing
 
-**Live database (checked 15 November 2026):** all 29 migrations, 0001–0029, are applied; from 0028 on, `uniattend.schema_versions` lists them. They were run by hand, so Supabase's migration history does not list them; see `docs/commercial-readiness/01-technical-audit.md` §2 for how this was checked against the live schema.
+**Live database (checked 15 November 2026):** all 30 migrations, 0001–0030, are applied; from 0028 on, `uniattend.schema_versions` lists them. They were run by hand, so Supabase's migration history does not list them; see `docs/commercial-readiness/01-technical-audit.md` §2 for how this was checked against the live schema.
 
 **Live data:** 3 institutions (UNIVEN, UL, TUT), all on Starter trials ending 8–9 December 2026; 142 students, 25 lecturers, 724 modules, 4,366 dated classes, 0 integrations configured.
 
@@ -239,7 +239,7 @@ Plans with limits enforced by triggers (`enforce_plan_limits`). New institutions
 
 **Not done or not verified:**
 - Integration brief: the Import Centre, the Integration Centre and dated timetable classes are built. Still missing: a configurable REST connector with OAuth, and the platform integrations view. No connector has been tested against a real Moodle, ITS, CELCAT, Banner, PeopleSoft or Blackboard.
-- The extra roles from the multi-university brief (faculty admin, department admin, attendance officer, auditor) do not exist.
+- Staff roles (migration 0030): faculty admin and department admin (scoped to one faculty or department), attendance officer, integration admin, auditor (read-only). Granted on the People page; staff use `/staff`, integration admins use `/admin/integrations`. A person who is also a lecturer lands on `/staff` first and opens `/lecturer` directly (no role switcher yet).
 - Hosting is on Supabase's free plan, shared with other apps; no backups; custom SMTP not configured; CAPTCHA and error alerts not switched on.
 - Load tests in `loadtest/` have never been run. Fingerprint unlock and offline check-ins are untested on real phones. Android has only a debug build; no Firebase push for the closed app.
 - Legal: head of company and Information Officer not chosen; attorney review outstanding (`docs/legal/README.md`).
@@ -672,6 +672,27 @@ After each step: type-check, lint, tests, build.
 > as evidence on the record, the student is told, and it is audited.
 > * missing_registers(): classes from the timetable that should have taken
 > attendance, have ended, and have no attendance session — "not recorded".
+
+### `20261115000030_staff_roles.sql` (327 lines)
+
+> UniAttend 0030 — staff roles for real university administration.
+>
+> New roles, granted by an institution administrator (never chosen at sign-up):
+> faculty_admin       one faculty: its modules' attendance, reviews and reports.
+> department_admin    one department: the same, for that department's modules.
+> attendance_officer  the whole institution's attendance: reviews, disputes,
+> corrections and exports. No structure, people or settings.
+> integration_admin   connections, imports and sync runs. No attendance records.
+> auditor             read-only: attendance, decisions, the audit log and who
+> holds which role. Cannot change anything.
+> A person holds at most one of each role per institution; granting it again
+> moves the scope (another faculty or department).
+>
+> How it is enforced: the database decides, not the app. Two checks cover every
+> module-level rule — may_view_module() (read) and may_correct_module() (change).
+> The existing read policies and functions are widened to use them. Functions
+> are edited in place by exact text replacement, and the migration stops if a
+> piece of text it expects to change is not there, so nothing is altered silently.
 
 ## B. Tables (schema `uniattend`) and their columns
 
@@ -1302,6 +1323,8 @@ After each step: type-check, lint, tests, build.
   - _check ((role = 'super_admin') = (institution_id is null))_
   - _unique nulls not distinct (user_id, institution_id, role)_
   - `left_at` timestamptz _(added later)_
+  - `faculty_id` uuid _(added later)_
+  - `department_id` uuid _(added later)_
 - **venues**
   - `id` uuid primary key default gen_random_uuid()
   - `institution_id` uuid not null references uniattend.institutions(id) on delete cascade
@@ -1327,14 +1350,14 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `acoustic_windows`.`acoustic_windows_select` — select to authenticated: `using (exists (select 1 from uniattend.class_sessions cs where cs.id = session_id and (uniattend.teaches_module(cs.module_id) or uniattend.enrolled_in_module(cs.module_id))))`
 - `announcements`.`announcements_select` — select to authenticated: `using (uniattend.is_super_admin() or (institution_id is not null and uniattend.is_inst_admin(institution_id)) or (target_kind = 'all' and published_at <= now() and (expires_at is null or expires_at > now()) and (institution_id is null or uniattend.is_member(institution_id))))`
 - `announcements`.`announcements_write` — all to authenticated: `using (case when institution_id is null then uniattend.is_super_admin() else uniattend.is_inst_admin(institution_id) end) with check (case when institution_id is null then uniattend.is_super_admin() else uniattend.is_inst_admin(institution_id) end)`
-- `attendance_disputes`.`attendance_disputes_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id) or uniattend.is_own_student(student_id) or uniattend.teaches_module(uniattend.module_of_record(record_id)))`
-- `attendance_evidence`.`attendance_evidence_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id) or uniattend.teaches_module(uniattend.module_of_record(record_id)) or exists (select 1 from uniattend.attendance_records ar where ar.id = record_id and uniattend.is_own_student(ar.student_id)))`
-- `attendance_records`.`attendance_records_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id) or uniattend.teaches_module(module_id) or uniattend.is_own_student(student_id))`
+- `attendance_disputes`.`attendance_disputes_select` — select to authenticated: `using (uniattend.is_own_student(student_id) or uniattend.may_view_module(uniattend.module_of_record(record_id)))`
+- `attendance_evidence`.`attendance_evidence_select` — select to authenticated: `using (uniattend.may_view_module(uniattend.module_of_record(record_id)) or exists (select 1 from uniattend.attendance_records ar where ar.id = record_id and uniattend.is_own_student(ar.student_id)))`
+- `attendance_records`.`attendance_records_select` — select to authenticated: `using (uniattend.may_view_module(module_id) or uniattend.is_own_student(student_id))`
 - `attendance_statuses`.`attendance_statuses_select` — select to authenticated: `using (uniattend.is_member(institution_id) or uniattend.is_super_admin())`
 - `attendance_statuses`.`attendance_statuses_write` — all to authenticated: `using (uniattend.is_inst_admin(institution_id)) with check (uniattend.is_inst_admin(institution_id))`
-- `attendance_verification_events`.`verification_events_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id) or uniattend.is_own_student(student_id) or exists (select 1 from uniattend.class_sessions cs where cs.id = session_id and uniattend.teaches_module(cs.module_id)))`
-- `audit_logs`.`audit_logs_select` — select to authenticated: `using (uniattend.is_super_admin() or (institution_id is not null and uniattend.is_inst_admin(institution_id)))`
-- `class_sessions`.`class_sessions_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id) or uniattend.teaches_module(module_id) or uniattend.enrolled_in_module(module_id))`
+- `attendance_verification_events`.`verification_events_select` — select to authenticated: `using (uniattend.sees_all_attendance(institution_id) or uniattend.is_own_student(student_id) or exists (select 1 from uniattend.class_sessions cs where cs.id = session_id and uniattend.may_view_module(cs.module_id)))`
+- `audit_logs`.`audit_logs_select` — select to authenticated: `using (uniattend.is_super_admin() or (institution_id is not null and (uniattend.is_inst_admin(institution_id) or uniattend.is_auditor(institution_id))))`
+- `class_sessions`.`class_sessions_select` — select to authenticated: `using (uniattend.may_view_module(module_id) or uniattend.enrolled_in_module(module_id))`
 - `data_requests`.`data_requests_select` — select to authenticated: `using (user_id = (select auth.uid()) or uniattend.is_super_admin() or exists (select 1 from uniattend.user_roles r where r.user_id = data_requests.user_id and r.institution_id is not null and uniattend.is_inst_admin(r.institution_id)))`
 - `institution_directory`.`institution_directory_super` — all to authenticated: `using (uniattend.is_super_admin()) with check (uniattend.is_super_admin())`
 - `institution_domains`.`institution_domains_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id))`
@@ -1361,10 +1384,10 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `live_locations`.`live_locations_select` — select to authenticated: `using (user_id = (select auth.uid()) or uniattend.is_inst_admin(institution_id))`
 - `location_consents`.`location_consents_select` — select to authenticated: `using (user_id = (select auth.uid()) or uniattend.is_inst_admin(institution_id))`
 - `module_enrolments`.`module_enrolments_admin_write` — all to authenticated: `using (uniattend.is_inst_admin(institution_id)) with check (uniattend.is_inst_admin(institution_id))`
-- `module_enrolments`.`module_enrolments_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id) or uniattend.teaches_module(module_id) or uniattend.is_own_student(student_id))`
+- `module_enrolments`.`module_enrolments_select` — select to authenticated: `using (uniattend.may_view_module(module_id) or uniattend.is_own_student(student_id))`
 - `notifications`.`notifications_select` — select to authenticated: `using (user_id = (select auth.uid()))`
 - `payments`.`payments_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id))`
-- `profiles`.`profiles_select` — select to authenticated: `using (id = (select auth.uid()) or uniattend.is_super_admin() or exists (select 1 from uniattend.user_roles r where r.user_id = profiles.id and uniattend.is_inst_admin(r.institution_id)))`
+- `profiles`.`profiles_select` — select to authenticated: `using (id = (select auth.uid()) or uniattend.is_super_admin() or exists (select 1 from uniattend.user_roles r where r.user_id = profiles.id and (uniattend.is_inst_admin(r.institution_id) or uniattend.is_auditor(r.institution_id))))`
 - `profiles`.`profiles_update` — update to authenticated: `using (id = (select auth.uid())) with check (id = (select auth.uid()))`
 - `push_subscriptions`.`push_subscriptions_delete` — delete to authenticated: `using (user_id = (select auth.uid()))`
 - `push_subscriptions`.`push_subscriptions_own` — select to authenticated: `using (user_id = (select auth.uid()))`
@@ -1372,13 +1395,13 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `student_alert_events`.`student_alert_events_select` — select to authenticated: `using (exists (select 1 from uniattend.student_alerts a where a.id = alert_id and (uniattend.is_inst_admin(a.institution_id) or uniattend.teaches_module(a.module_id))))`
 - `student_alerts`.`student_alerts_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id) or uniattend.teaches_module(module_id))`
 - `students`.`students_admin_write` — all to authenticated: `using (uniattend.is_inst_admin(institution_id)) with check (uniattend.is_inst_admin(institution_id))`
-- `students`.`students_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id) or user_id = (select auth.uid()) or uniattend.lecturer_sees_student(id))`
+- `students`.`students_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id) or user_id = (select auth.uid()) or uniattend.lecturer_sees_student(id) or uniattend.staff_sees_student(id))`
 - `subscription_plans`.`subscription_plans_select` — select to authenticated: `using (is_active or uniattend.is_super_admin())`
 - `subscription_plans`.`subscription_plans_write` — all to authenticated: `using (uniattend.is_super_admin()) with check (uniattend.is_super_admin())`
 - `theme_versions`.`theme_versions_select` — select to authenticated: `using (uniattend.is_super_admin() or uniattend.is_inst_admin(institution_id))`
 - `timetable_events`.`timetable_events_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id) or uniattend.teaches_module(module_id) or uniattend.enrolled_in_module(module_id) or exists (select 1 from uniattend.lecturers l where l.id = timetable_events.lecturer_id and l.user_id = (select auth.uid())))`
 - `usage_metrics`.`usage_metrics_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id))`
-- `user_roles`.`user_roles_select` — select to authenticated: `using (user_id = (select auth.uid()) or uniattend.is_super_admin() or (institution_id is not null and uniattend.is_inst_admin(institution_id)))`
+- `user_roles`.`user_roles_select` — select to authenticated: `using (user_id = (select auth.uid()) or uniattend.is_super_admin() or (institution_id is not null and (uniattend.is_inst_admin(institution_id) or uniattend.is_auditor(institution_id))))`
 
 ## D. Database functions (last definition wins)
 
@@ -1388,6 +1411,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `_may_review(p_inst uuid, p_module uuid)` → boolean — internal
 - `_may_run_event(e uniattend.timetable_events)` → boolean — internal
 - `_notify_event(p_event uuid, p_title text, p_body text)` → int — internal
+- `_rewrite(p_fn text, p_from text, p_to text, p_times int default 1)` → void — internal
 - `_sync_apply(p_run uuid)` → jsonb — internal
 - `_sync_apply_events(p_run uuid)` → jsonb — internal
 - `_sync_dupes()` → void — internal
@@ -1407,6 +1431,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `apply_retention(p_inst uuid)` → jsonb — callable by: authenticated
 - `audit_trigger()` → trigger — internal
 - `can_bulk_import(p_inst uuid)` → boolean — callable by: authenticated
+- `can_integrate(p_inst uuid)` → boolean — internal
 - `can_write_branding(p_name text)` → boolean — callable by: authenticated
 - `change_event(p_event uuid, p_action text, p_venue uuid default null, p_lecturer uuid default null, p_starts timestamptz default null, p_ends timestamptz default null, p_note text default null)` → jsonb — callable by: authenticated
 - `change_subscription(p_inst uuid, p_plan_code text, p_status text, p_period_end timestamptz)` → void — internal
@@ -1425,7 +1450,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `generate_join_code(p_inst uuid)` → text — internal
 - `generate_timetable_events(p_inst uuid, p_days int default 14)` → jsonb — callable by: authenticated
 - `geo_distance_m(lat1 float8, lng1 float8, lat2 float8, lng2 float8)` → float8 — internal
-- `grant_role(p_inst uuid, p_email text, p_role text)` → uuid — internal
+- `grant_role(p_inst uuid, p_email text, p_role text, p_faculty uuid default null, p_department uuid default null)` → uuid — callable by: authenticated
 - `guard_institution_update()` → trigger — internal
 - `guard_timetable_source()` → trigger — internal
 - `handle_new_user()` → trigger — internal
@@ -1448,6 +1473,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `integration_finish(p_run uuid, p_status text, p_error text, p_complete boolean)` → jsonb — internal
 - `integration_secret(p_secret text, p_id uuid)` → text — callable by: anon, authenticated
 - `integration_test_result(p_secret text, p_id uuid, p_status text, p_message text)` → void — callable by: anon, authenticated
+- `is_auditor(p_inst uuid)` → boolean — internal
 - `is_inst_admin(p_inst uuid)` → boolean — internal
 - `is_member(p_inst uuid)` → boolean — internal
 - `is_own_student(p_student uuid)` → boolean — internal
@@ -1459,13 +1485,15 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `live_plan(p_inst uuid)` → table (plan uniattend.subscription_plans, sub_status text, period_end timestamptz) — internal
 - `log_export(p_kind text, p_rows integer, p_inst uuid default null, p_module uuid default null, p_details jsonb default '{}')` → void — callable by: authenticated
 - `mark_notifications_read(p_ids uuid[] default null)` → void — internal
+- `may_correct_module(p_module uuid)` → boolean — internal
+- `may_view_module(p_module uuid)` → boolean — internal
 - `missing_registers(p_inst uuid, p_days int default 14)` → jsonb — callable by: authenticated
 - `module_of_record(p_record uuid)` → uuid — internal
 - `module_report(p_module uuid)` → table (student_id uuid, student_number text, full_name text, sessions int, attended int, late int, absent int, excused int, unresolved int, percent numeric, worst_case_percent numeric, meets_requirement boolean, at_risk boolean) — internal
 - `my_attendance()` → table (institution_id uuid, module_id uuid, code text, title text, attended int, absent int, excused int, unresolved int, percent numeric, min_pct int) — internal
 - `my_next_classes(p_inst uuid, p_limit int default 5)` → table (module_code text, module_title text, venue_id uuid, venue_name text, venue_code text, lat float8, lng float8, radius_m int, starts_at timestamptz, ends_at timestamptz) — internal
 - `my_personal_data()` → jsonb — callable by: authenticated
-- `my_roles()` → table (institution_id uuid, institution_name text, institution_slug text, institution_status text, brand_primary text, role text) — internal
+- `my_roles()` → table (institution_id uuid, institution_name text, institution_slug text, institution_status text, brand_primary text, role text) — callable by: authenticated
 - `notify_joined(p_user uuid, p_inst uuid, p_role text)` → void — internal
 - `open_event_session(p_event uuid, p_late_minutes int default null)` → uniattend.class_sessions — callable by: authenticated
 - `open_session(p_module uuid, p_venue uuid, p_title text, p_minutes int default 90, p_late_minutes int default null)` → uniattend.class_sessions — internal
@@ -1505,7 +1533,10 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `save_register(p_session uuid, p_entries jsonb, p_note text default null)` → jsonb — callable by: authenticated
 - `save_theme_draft(p_institution uuid, p_theme jsonb)` → timestamptz — callable by: authenticated
 - `scan_student(p_session uuid, p_code text, p_direction text default 'in')` → jsonb — callable by: authenticated
+- `scope_has_module(p_module uuid)` → boolean — internal
+- `scope_overview(p_inst uuid)` → jsonb — callable by: authenticated
 - `seed_attendance_statuses()` → trigger — internal
+- `sees_all_attendance(p_inst uuid)` → boolean — internal
 - `send_class_message(p_module uuid, p_category text, p_title text, p_body text)` → int — callable by: authenticated
 - `session_control(p_session uuid, p_action text, p_closes_in_min int default null, p_late_in_min int default null)` → jsonb — callable by: authenticated
 - `session_qr_token(p_session uuid)` → jsonb — internal
@@ -1514,6 +1545,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `set_institution_status(p_inst uuid, p_status text)` → void — internal
 - `set_push_secret(p_secret text, p_reminder_minutes int default 15)` → void — callable by: authenticated
 - `set_role_status(p_role_id uuid, p_status text)` → void — internal
+- `staff_sees_student(p_student uuid)` → boolean — internal
 - `submit_dispute(p_record uuid, p_reason text)` → uuid — internal
 - `subscription_notice(p_inst uuid)` → jsonb — callable by: authenticated
 - `sync_begin(p_secret text, p_integration uuid, p_mode text, p_trigger text)` → jsonb — callable by: anon, authenticated
@@ -1540,7 +1572,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/(auth)/reset-password/page.tsx` (18 lines)
 - `src/app/(auth)/signup/page.tsx` (36 lines)
 - `src/app/actions.ts` (35 lines) — Keep the institution's branding on the sign-in page for whoever signs in next on this device.
-- `src/app/admin/actions.ts` (325 lines) — "" must be tested first: z.coerce.number() would turn it into 0.
+- `src/app/admin/actions.ts` (359 lines) — "" must be tested first: z.coerce.number() would turn it into 0.
 - `src/app/admin/announce-form.tsx` (56 lines) — Send an announcement to everyone, a faculty, a department, a module, one student or one lecturer.
 - `src/app/admin/audit/page.tsx` (27 lines)
 - `src/app/admin/connections/actions.ts` (162 lines) — Server-to-database client for the steps that need the dispatch secret (never the user's session).
@@ -1565,12 +1597,13 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/admin/integrations/import/import-wizard.tsx` (145 lines) — Upload → match the file's columns to UniAttend's fields → preview. The file stays in the browser until step 2 is submitted.
 - `src/app/admin/integrations/import/page.tsx` (80 lines)
 - `src/app/admin/integrations/page.tsx` (149 lines)
-- `src/app/admin/layout.tsx` (39 lines)
+- `src/app/admin/layout.tsx` (43 lines) — Integration administrators share this area but only see the integration pages;
 - `src/app/admin/modules/assign-actions.ts` (111 lines) — The institution always comes from the admin's own role, never from the form.
 - `src/app/admin/modules/assign-import.tsx` (105 lines) — Upload a PDF, Word, Excel or CSV list; review the matches; assign lecturers to modules.
 - `src/app/admin/modules/page.tsx` (121 lines)
 - `src/app/admin/page.tsx` (141 lines)
-- `src/app/admin/people/page.tsx` (116 lines)
+- `src/app/admin/people/page.tsx` (130 lines)
+- `src/app/admin/people/staff-grant.tsx` (48 lines) — Give a colleague a role; faculty and department administrators also get their faculty or department.
 - `src/app/admin/people/student-adder.tsx` (85 lines)
 - `src/app/admin/requests/page.tsx` (18 lines)
 - `src/app/admin/review/page.tsx` (42 lines) — The whole institution's queue: what lecturers have not decided yet, classes that
@@ -1627,6 +1660,10 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/settings/app-lock-settings.tsx` (111 lines) — Turn the fingerprint / face app lock on or off for this device.
 - `src/app/settings/my-data/route.ts` (25 lines) — "Download my data": everything UniAttend holds about the signed-in person (POPIA s 23).
 - `src/app/settings/page.tsx` (122 lines)
+- `src/app/staff/audit/page.tsx` (51 lines) — Auditors: the audit log and who holds which role. Read-only by design (no write policies).
+- `src/app/staff/layout.tsx` (18 lines) — Faculty and department administrators, attendance officers and auditors.
+- `src/app/staff/page.tsx` (47 lines)
+- `src/app/staff/review/page.tsx` (29 lines) — An auditor who holds no other staff role here reads the queue but cannot decide.
 - `src/app/student/actions.ts` (101 lines) — "queued": saved on the phone without signal, to be sent later (client only).
 - `src/app/student/check-in/check-in.tsx` (275 lines)
 - `src/app/student/check-in/page.tsx` (12 lines)
@@ -1691,7 +1728,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/lib/app-lock.ts` (143 lines) — App lock: after signing in once with a password, the app can be reopened with
 - `src/lib/assignment-match.ts` (210 lines) — Reads "which lecturer teaches which module" out of rows of cells from any document
 - `src/lib/audit-export.ts` (23 lines) — Write a data download to the audit log (who, what, how many rows) before handing
-- `src/lib/auth.ts` (53 lines)
+- `src/lib/auth.ts` (95 lines) — The faculty or department a scoped role covers (0030).
 - `src/lib/brand-cookie.ts` (3 lines) — Which institution's look the sign-in pages wear on this device (slug or id; not a secret).
 - `src/lib/branding.ts` (28 lines) — The institution branding for the sign-in, registration and password pages,
 - `src/lib/building-match.ts` (44 lines) — Matches timetable building names ("E-BLOCK", "NATURAL SCIENCE") to named
@@ -1762,7 +1799,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `tests/db/harness.ts` (88 lines) — Runs the real migrations against an in-process Postgres (PGlite) with a
 - `tests/db/install-script.test.ts` (30 lines) — The bundled SQL-editor script must install cleanly next to another app's
 - `tests/db/location.test.ts` (90 lines) — Campus boundaries and class navigation (migration 0013). Live location sharing
-- `tests/db/platform.test.ts` (1450 lines) — UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
+- `tests/db/platform.test.ts` (1560 lines) — UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
 - `tests/db/safeupdate.test.ts` (49 lines) — Supabase loads pg_safeupdate for API requests: an UPDATE or DELETE without a
 - `tests/db/security.test.ts` (78 lines) — Regression tests for the 2026-11-10 security review:
 

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Badge, Card, CardTitle, Input, Notice, PageHeader, Stat } from "@/components/ui";
 import { Icon } from "@/components/icons";
-import { requireRole } from "@/lib/auth";
+import { INTEGRATION_ROLES, requireAnyRole } from "@/lib/auth";
 import { isStale, METHODS, PROVIDERS, providerOf, runCounts } from "@/lib/integrations/providers";
 
 export const metadata = { title: "Integration Centre" };
@@ -21,7 +21,7 @@ const num = (n: number) => n.toLocaleString("en-ZA");
 
 export default async function IntegrationCentre({ searchParams }: { searchParams: Promise<{ q?: string; cat?: string }> }) {
   const { q = "", cat = "" } = await searchParams;
-  const { supabase, institutionId } = await requireRole("institution_admin");
+  const { supabase, institutionId } = await requireAnyRole(INTEGRATION_ROLES);
   const since = new Date(Date.now() - 30 * 86400_000).toISOString();
   const [{ data: conns, error }, { data: runs }, { count: pending }, { count: errors }] = await Promise.all([
     supabase.from("integrations").select("*").eq("institution_id", institutionId).order("created_at"),

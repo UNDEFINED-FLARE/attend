@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Badge, Card, CardTitle, Notice, PageHeader, Table, Td } from "@/components/ui";
-import { requireRole } from "@/lib/auth";
+import { INTEGRATION_ROLES, requireAnyRole } from "@/lib/auth";
 import { datasetDef, RUN_STATUS } from "@/lib/integrations/datasets";
 import { deleteMapping } from "./actions";
 import { ImportWizard } from "./import-wizard";
@@ -11,7 +11,7 @@ type Run = { id: string; status: string; label: string | null; summary: Record<s
 const at = (iso: string) => new Date(iso).toLocaleString("en-ZA", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Africa/Johannesburg" });
 
 export default async function ImportCentre() {
-  const { supabase, institutionId } = await requireRole("institution_admin");
+  const { supabase, institutionId } = await requireAnyRole(INTEGRATION_ROLES);
   const [{ data: runs, error }, { data: maps }] = await Promise.all([
     supabase.from("integration_runs").select("id, status, label, summary, started_at, finished_at, error")
       .eq("institution_id", institutionId).eq("trigger", "upload").order("started_at", { ascending: false }).limit(15),

@@ -31,7 +31,7 @@ const DECISIONS = [
 
 /** Check-ins waiting for a person: pick one or many, see the evidence, decide. */
 /** `sessionBase`: where a class's register lives (lecturers), or nothing when the viewer has no register page. */
-export function ReviewQueue({ items, sessionBase }: { items: ReviewItem[]; sessionBase?: string }) {
+export function ReviewQueue({ items, sessionBase, readOnly = false }: { items: ReviewItem[]; sessionBase?: string; readOnly?: boolean }) {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [kind, setKind] = useState<string>("all");
   const [note, setNote] = useState("");
@@ -72,8 +72,8 @@ export function ReviewQueue({ items, sessionBase }: { items: ReviewItem[]; sessi
           return (
             <section key={sid} className="rounded-2xl border border-line">
               <header className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-2.5">
-                <input type="checkbox" className="size-4" checked={all} aria-label={`Choose all from ${s.module_code} ${s.session_title}`}
-                  onChange={(e) => toggle(rows.map((r) => r.record_id), e.target.checked)} />
+                {!readOnly && <input type="checkbox" className="size-4" checked={all} aria-label={`Choose all from ${s.module_code} ${s.session_title}`}
+                  onChange={(e) => toggle(rows.map((r) => r.record_id), e.target.checked)} />}
                 <span className="min-w-0 flex-1 text-sm">
                   <b>{s.module_code}</b> · {s.session_title} · {at(s.opens_at)}
                   {s.session_status === "open" && <span className="ml-2 text-xs text-ok">still open</span>}
@@ -81,14 +81,14 @@ export function ReviewQueue({ items, sessionBase }: { items: ReviewItem[]; sessi
                 {sessionBase && <Link href={`${sessionBase}/${sid}`} className="text-xs text-info hover:underline">Register →</Link>}
               </header>
               <ul className="divide-y divide-line">
-                {rows.map((r) => <Row key={r.record_id} r={r} on={picked.has(r.record_id)} toggle={(on) => toggle([r.record_id], on)} />)}
+                {rows.map((r) => <Row key={r.record_id} r={r} on={picked.has(r.record_id)} toggle={readOnly ? undefined : (on) => toggle([r.record_id], on)} />)}
               </ul>
             </section>
           );
         })}
       </div>
 
-      <div className="sticky bottom-0 z-10 -mx-5 mt-5 border-t border-line bg-surface/95 px-5 py-3 backdrop-blur">
+      {!readOnly && <div className="sticky bottom-0 z-10 -mx-5 mt-5 border-t border-line bg-surface/95 px-5 py-3 backdrop-blur">
         {msg?.error && <div className="mb-2"><Notice tone="bad">{msg.error}</Notice></div>}
         {msg?.ok && <div className="mb-2"><Notice tone="ok">{msg.ok}</Notice></div>}
         <div className="flex flex-wrap items-center gap-2">
@@ -100,12 +100,12 @@ export function ReviewQueue({ items, sessionBase }: { items: ReviewItem[]; sessi
               className={`h-10 rounded-xl px-4 text-sm font-semibold disabled:opacity-40 ${d.tone}`}>{busy ? "…" : d.label}</button>
           ))}
         </div>
-      </div>
+      </div>}
     </div>
   );
 }
 
-function Row({ r, on, toggle }: { r: ReviewItem; on: boolean; toggle: (on: boolean) => void }) {
+function Row({ r, on, toggle }: { r: ReviewItem; on: boolean; toggle?: (on: boolean) => void }) {
   const e = r.evidence;
   const chips: string[] = [];
   if (r.checked_in_at) chips.push(`Checked in ${hm(r.checked_in_at)}`);
@@ -119,7 +119,7 @@ function Row({ r, on, toggle }: { r: ReviewItem; on: boolean; toggle: (on: boole
   chips.push(`${e.attempts} attempt${e.attempts === 1 ? "" : "s"}${e.refused_attempts ? `, ${e.refused_attempts} refused` : ""}`);
   return (
     <li className={`flex gap-3 px-4 py-3 ${on ? "bg-brand/5" : ""}`}>
-      <input type="checkbox" className="mt-1 size-4 shrink-0" checked={on} onChange={(x) => toggle(x.target.checked)} aria-label={`Choose ${r.full_name}`} />
+      {toggle && <input type="checkbox" className="mt-1 size-4 shrink-0" checked={on} onChange={(x) => toggle(x.target.checked)} aria-label={`Choose ${r.full_name}`} />}
       <div className="min-w-0 flex-1 text-sm">
         <div className="flex flex-wrap items-center gap-2">
           <b className="font-mono">{r.student_number}</b> <span>{r.full_name}</span>

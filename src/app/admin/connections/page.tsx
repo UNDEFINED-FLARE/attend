@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ActionForm } from "@/components/form";
 import { Badge, Card, CardTitle, Input, Notice, PageHeader, Stat } from "@/components/ui";
-import { requireRole } from "@/lib/auth";
+import { INTEGRATION_ROLES, requireAnyRole } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { uploadRoster } from "./actions";
 import { ConnectionButtons, ConnectionForm, type ConnectionRow } from "./connection-forms";
@@ -29,7 +29,7 @@ const changed = (s: Record<string, number | string> | null) => !s ? "" : [
 ].filter(Boolean).join(" · ") || "Nothing changed";
 
 export default async function Connections() {
-  const { supabase, institutionId, current } = await requireRole("institution_admin");
+  const { supabase, institutionId, current } = await requireAnyRole(INTEGRATION_ROLES);
   const [{ data: rows, error }, { data: runRows }, students, lecturers, modules, enrolled, taught] = await Promise.all([
     supabase.from("integrations").select("*")
       .eq("institution_id", institutionId).order("created_at"),
