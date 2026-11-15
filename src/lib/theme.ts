@@ -59,8 +59,8 @@ export const ThemeSchema = z.object({
 export type Theme = z.infer<typeof ThemeSchema>;
 
 export const DEFAULT_THEME: Theme = {
-  // Minimal graphite: light grey surfaces, dark grey ink and buttons, muted status colours.
-  colors: { primary: "#2d2f33", accent: "#45484d", background: "#e7e8ea", surface: "#f5f5f6", text: "#1d1e20", muted: "#6b6e74",
+  // Minimal grayscale: white panels on an off-white page, near-black ink and buttons, muted status colours.
+  colors: { primary: "#1f1f1f", accent: "#45484d", background: "#f6f6f7", surface: "#ffffff", text: "#1f1f1f", muted: "#6b6e74",
             success: "#3d7a55", warning: "#9a6a1f", danger: "#a8443d" },
   appearance: {
     mode: "light",
@@ -79,7 +79,8 @@ export const DEFAULT_THEME: Theme = {
   menus: { student: [], lecturer: [], admin: [] },
   student: {
     greeting: "{greeting}", heroTitle: "Your attendance", heroFrom: "#45484d", heroTo: "#2d2f33",
-    cards: STUDENT_CARDS.map((id) => ({ id, show: true, title: CARD_LABEL[id] })),
+    // What to do now first, then shortcuts and today; the weekly chart further down.
+    cards: (["live", "quick", "today", "modules", "hero", "recent"] as const).map((id) => ({ id, show: true, title: CARD_LABEL[id] })),
   },
 };
 

@@ -1,9 +1,9 @@
 import { loadTheme } from "@/lib/shell-data";
 import Link from "next/link";
-import { MODULE_SHADES } from "@/lib/palette";
-import { Bar, StatTile } from "@/components/charts";
+import { AppTitle } from "@/components/app-chrome";
 import { Icon } from "@/components/icons";
-import { Badge, Card, CardTitle, pct } from "@/components/ui";
+import { EmptyNote, Figure, FocusPanel, Glyph, Meter, Panel, Pill, Row, SectionTitle, Tile } from "@/components/minimal";
+import { pct } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { greeting, groupBy, rate, sastMidnight, timeOf } from "@/lib/stats";
 import { ClassList } from "@/components/class-list";
@@ -11,7 +11,6 @@ import { upcomingClasses } from "@/lib/class-events";
 
 export const metadata = { title: "Home" };
 
-const COLORS = MODULE_SHADES;
 
 export default async function LecturerHome() {
   const { supabase, institutionId, user } = await requireRole("lecturer");
@@ -46,103 +45,98 @@ export default async function LecturerHome() {
   const enrolled = groupBy(enrol ?? [], (e) => e.module_id as string);
   const toReview = (recs ?? []).filter((r) => r.status === "pending_verification" || r.status === "disputed" || r.status === "late_pending").length;
 
+  const fullName = me?.full_name ?? "Welcome";
   return (
-    <>
-      <div className="mb-6">
-        <p className="text-sm text-muted">{greeting()} 👋</p>
-        <h1 className="text-2xl font-semibold tracking-tight">{me?.full_name ?? "Welcome"}</h1>
+    <div className="mx-auto max-w-5xl space-y-6">
+      <AppTitle eyebrow={greeting()} title={fullName.split(" ").slice(0, 2).join(" ")} sub={`${modules.length} module${modules.length === 1 ? "" : "s"} · ${(enrol ?? []).length} students`} />
+
+      {open.map((s) => (
+        <FocusPanel key={s.id} eyebrow="Attendance open" live title={`${(s.modules as unknown as { code: string }).code} · ${s.title}`}
+          lines={[`${(s.venues as unknown as { name: string } | null)?.name ?? "No venue"} · closes ${timeOf(s.closes_at)}`]}
+          action={{ href: `/lecturer/sessions/${s.id}`, label: "Show QR and register", icon: "qr" }}
+          aside={<span className="hidden shrink-0 text-right sm:block"><span className="block text-[11px] font-semibold uppercase tracking-[0.14em] opacity-70">Code</span>
+            <span className="font-mono text-3xl font-bold tracking-[0.2em]">{s.join_code}</span></span>} />
+      ))}
+
+      <div className="grid grid-cols-4 gap-2.5">
+        <Tile href="/lecturer/timetable" icon="calendar" label="Timetable" />
+        <Tile href="/lecturer/disputes" icon="flag" label="Reviews" />
+        <Tile href="/lecturer/reports" icon="chart" label="Reports" />
+        <Tile href="/notifications" icon="bell" label="Alerts" />
       </div>
 
-      {open.length > 0 && (
-        <section className="mb-6 overflow-hidden rounded-3xl bg-brand p-6 text-brand-ink shadow-card">
-          <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider"><span className="size-2 animate-pulse rounded-full bg-white" />Live now</p>
-          <ul className="mt-3 space-y-3">
-            {open.map((s) => (
-              <li key={s.id} className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-lg font-semibold">{(s.modules as unknown as { code: string }).code} · {s.title}</p>
-                  <p className="text-sm opacity-85">{(s.venues as unknown as { name: string } | null)?.name ?? "No venue"} · code <span className="font-mono font-semibold tracking-widest">{s.join_code}</span> · closes {timeOf(s.closes_at)}</p>
-                </div>
-                <Link href={`/lecturer/sessions/${s.id}`} className="inline-flex h-11 items-center gap-2 rounded-xl bg-white px-4 text-sm font-semibold text-ink">
-                  <Icon name="qr" size={18} />Show QR & register
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {classes.length > 0 && (
-        <Card className="mb-6">
-          <CardTitle>My classes</CardTitle>
-          <ClassList events={classes} role="lecturer" now={now}
-            venues={(venueRows ?? []).map((v) => ({ id: v.id, label: v.name }))}
-            lecturers={(lectRows ?? []).filter((l) => l.id !== me?.id).map((l) => ({ id: l.id, label: l.full_name }))} />
-        </Card>
-      )}
-
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile icon="book" tone="blue" label="My modules" value={modules.length} />
-        <StatTile icon="users" tone="green" label="Students" value={(enrol ?? []).length} hint="Active enrolments" />
-        <StatTile icon="calendar" tone="violet" label="Sessions this week" value={week} />
-        <StatTile icon="flag" tone="amber" label="To review" value={toReview} hint={<Link href="/lecturer/disputes" className="text-accent">Open reviews →</Link>} />
-      </div>
+      <Panel>
+        <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
+          <Figure label="Modules" value={modules.length} />
+          <Figure label="Students" value={(enrol ?? []).length} hint="Active enrolments" />
+          <Figure label="Classes this week" value={week} />
+          <Figure label="To review" value={toReview} hint={toReview ? <Link href="/lecturer/disputes" className="font-semibold text-ink underline underline-offset-4">Open reviews</Link> : "Nothing waiting"} />
+        </div>
+      </Panel>
 
       {needFollowUp > 0 && (
-        <Link href="/lecturer/early-warning" className="mb-6 flex items-center gap-3 rounded-2xl border border-bad/30 bg-bad/5 p-4 transition hover:bg-bad/10">
-          <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-bad/10 text-bad"><Icon name="alert" /></span>
+        <Link href="/lecturer/early-warning" className="flex items-center gap-3 rounded-[20px] border border-ink bg-surface p-4 transition hover:bg-bg">
+          <Glyph icon="alert" />
           <span className="min-w-0 flex-1">
-            <span className="block font-semibold">{needFollowUp} student{needFollowUp === 1 ? "" : "s"} need{needFollowUp === 1 ? "s" : ""} follow-up</span>
-            <span className="text-sm text-muted">Low attendance or several classes missed in a row.</span>
+            <span className="block text-sm font-semibold">{needFollowUp} student{needFollowUp === 1 ? "" : "s"} need{needFollowUp === 1 ? "s" : ""} follow-up</span>
+            <span className="text-xs text-muted">Low attendance or several classes missed in a row.</span>
           </span>
-          <span className="inline-flex items-center gap-1 text-sm font-medium text-accent">Early warning <Icon name="arrowRight" size={14} /></span>
+          <Icon name="arrowRight" size={16} />
         </Link>
       )}
 
-      <h2 className="mb-3 text-lg font-semibold">My modules</h2>
-      {modules.length === 0 && <Card><p className="text-center text-sm text-muted">No modules are assigned to you yet. Your institution administrator assigns them.</p></Card>}
-      <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {modules.map((m, i) => {
-          const r = rate(byModule.get(m.id) ?? []);
-          const c = COLORS[i % COLORS.length];
-          return (
-            <Link key={m.id} href={`/lecturer/modules/${m.id}`} className="group rounded-2xl bg-surface p-5 shadow-card transition hover:-translate-y-0.5">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-base font-semibold" style={{ color: c }}>{m.title}</p>
-                  <p className="text-sm text-muted">{m.code} · {(enrolled.get(m.id) ?? []).length} students</p>
-                </div>
-                <span className="rounded-lg bg-bg px-2 py-1 text-[11px] font-medium text-muted">{m.role}</span>
-              </div>
-              <div className="mt-4 flex items-center gap-3">
-                <Bar value={r} color={c} />
-                <span className="w-14 text-right text-sm font-semibold tabular-nums">{pct(r)}</span>
-              </div>
-              <p className="mt-1 text-xs text-muted">Attendance, last 30 days</p>
-              <span className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-accent">Start session or view report <Icon name="arrowRight" size={14} className="transition group-hover:translate-x-0.5" /></span>
-            </Link>
-          );
-        })}
-      </div>
+      {classes.length > 0 && (
+        <section>
+          <SectionTitle title="My classes" href="/lecturer/timetable" link="Timetable" />
+          <Panel>
+            <ClassList events={classes} role="lecturer" now={now}
+              venues={(venueRows ?? []).map((v) => ({ id: v.id, label: v.name }))}
+              lecturers={(lectRows ?? []).filter((l) => l.id !== me?.id).map((l) => ({ id: l.id, label: l.full_name }))} />
+          </Panel>
+        </section>
+      )}
 
-      <Card>
-        <CardTitle>Recent sessions</CardTitle>
-        {(sessions ?? []).length === 0 && <p className="py-4 text-center text-sm text-muted">No sessions in the last 30 days.</p>}
-        <ul className="divide-y divide-line">
-          {(sessions ?? []).slice(0, 8).map((s) => (
-            <li key={s.id}>
-              <Link href={`/lecturer/sessions/${s.id}`} className="flex items-center gap-3 py-3 hover:bg-bg/60">
-                <span className="grid size-10 place-items-center rounded-xl bg-bg text-muted"><Icon name="calendar" size={18} /></span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{(s.modules as unknown as { code: string }).code} · {s.title}</p>
-                  <p className="text-xs text-muted">{new Date(s.opens_at).toLocaleDateString("en-ZA", { weekday: "short", day: "numeric", month: "short" })} · {timeOf(s.opens_at)}</p>
-                </div>
-                <Badge status={s.status} />
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </Card>
-    </>
+      <section>
+        <SectionTitle title="My modules" href="/lecturer/reports" link="Reports" />
+        {modules.length === 0 ? <EmptyNote icon="book" text="No modules are assigned to you yet. Your institution administrator assigns them." /> : (
+          <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-3">
+            {modules.map((m) => {
+              const r = rate(byModule.get(m.id) ?? []);
+              return (
+                <Link key={m.id} href={`/lecturer/modules/${m.id}`} className="group rounded-[20px] border border-line bg-surface p-4 transition hover:bg-bg">
+                  <div className="flex items-start gap-3">
+                    <Glyph text={m.code.replace(/[^A-Z]/gi, "").slice(0, 3).toUpperCase() || m.code.slice(0, 2)} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold">{m.title}</p>
+                      <p className="text-xs text-muted">{m.code} · {(enrolled.get(m.id) ?? []).length} students{m.role === "assistant" ? " · assistant" : ""}</p>
+                    </div>
+                    <p className="text-lg font-bold tabular-nums">{pct(r)}</p>
+                  </div>
+                  <div className="mt-3"><Meter value={r} /></div>
+                  <p className="mt-2 flex items-center justify-between text-xs text-muted">Attendance, last 30 days
+                    <span className="inline-flex items-center gap-1 font-semibold text-ink">Open <Icon name="arrowRight" size={13} className="transition group-hover:translate-x-0.5" /></span></p>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <SectionTitle title="Recent sessions" />
+        {(sessions ?? []).length === 0 ? <EmptyNote icon="calendar" text="No sessions in the last 30 days." /> : (
+          <Panel className="py-1">
+            <ul>
+              {(sessions ?? []).slice(0, 8).map((s) => (
+                <Row key={s.id} href={`/lecturer/sessions/${s.id}`} lead={<Glyph icon="calendar" />}
+                  title={`${(s.modules as unknown as { code: string }).code} · ${s.title}`}
+                  sub={`${new Date(s.opens_at).toLocaleDateString("en-ZA", { weekday: "short", day: "numeric", month: "short" })} · ${timeOf(s.opens_at)}`}
+                  end={<Pill strong={s.status === "open"}>{s.status === "open" ? "Open" : s.status === "closed" ? "Closed" : s.status}</Pill>} />
+              ))}
+            </ul>
+          </Panel>
+        )}
+      </section>
+    </div>
   );
 }
