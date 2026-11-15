@@ -37,3 +37,16 @@ describe("the Excel writer", () => {
     expect(sheetName("Faculty  Science Eng  2026", taken)).toBe("Faculty  Science Eng  2026 2");
   });
 });
+
+describe("the Excel writer's title block", () => {
+  it("puts the institution and document above a frozen, bold header row", () => {
+    const z = openZip(toXlsx([{ name: "By module", title: "University of Venda · Attendance report", subtitle: "2026-10-01 to 2026-10-31",
+      header: ["Module", "Rate"], rows: [["CSC101", 82.5]] }]));
+    const s = z.read("xl/worksheets/sheet1.xml")!;
+    expect(s).toContain('<c r="A1" t="inlineStr" s="2"><is><t xml:space="preserve">University of Venda · Attendance report</t>');
+    expect(s).toContain('<c r="A2" t="inlineStr" s="3">');
+    expect(s).toContain('<c r="A4" t="inlineStr" s="1">');          // header after a blank row
+    expect(s).toContain('<c r="B5"><v>82.5</v></c>');
+    expect(s).toContain('ySplit="4"');                                // title and header stay visible while scrolling
+  });
+});

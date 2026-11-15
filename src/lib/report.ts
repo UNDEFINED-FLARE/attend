@@ -64,7 +64,9 @@ const n = (v: number | null | undefined) => (v == null ? null : Number(v));
 /** The report as workbook sheets (Excel) — also the source of the CSV sections. */
 export function reportSheets(r: Report, institution: string): Sheet[] {
   const t = r.totals;
-  return [
+  const title = `${institution} · Attendance report`;
+  const subtitle = `${r.from} to ${r.to} · closed classes only · generated ${new Date(r.generated_at).toISOString().slice(0, 16).replace("T", " ")} UTC · contains personal information`;
+  return ([
     { name: "Summary", header: ["Item", "Value"], rows: [
       ["Institution", institution], ["Period", `${r.from} to ${r.to}`], ["Generated", new Date(r.generated_at).toISOString()],
       ["Modules", n(t.modules)], ["Closed classes", n(t.sessions)], ["Attendance rate (%)", n(t.rate)],
@@ -82,5 +84,5 @@ export function reportSheets(r: Report, institution: string): Sheet[] {
     { name: "Weekly trend", header: ["Week starting", "Classes", "Attendance %"], rows: r.trend.map((x) => [x.week, n(x.sessions), n(x.rate)]) },
     { name: "Students at risk", header: ["Student number", "Name", "Module", "Required %", "Attended", "Absent", "Unresolved", "Absences in a row", "Worst-case %"],
       rows: r.at_risk.map((x) => [x.student_number, x.full_name, x.module_code, n(x.min_pct), n(x.attended), n(x.absent), n(x.unresolved), n(x.consecutive_absences), n(x.worst_case)]) },
-  ];
+  ] as Sheet[]).map((s) => ({ ...s, title, subtitle }));
 }

@@ -28,7 +28,7 @@ export default async function ModulePage({ params }: { params: Promise<{ id: str
   return (
     <>
       <PageHeader title={`${mod.code} · ${mod.title}`} subtitle={`${rows.length} students enrolled`}
-        action={<LinkButton variant="secondary" href={`/lecturer/modules/${id}/export`}>Export CSV</LinkButton>} />
+        action={<span className="flex gap-2"><LinkButton variant="secondary" href={`/reports/module/${id}`}>PDF report</LinkButton><LinkButton variant="secondary" href={`/lecturer/modules/${id}/export`}>Export CSV</LinkButton></span>} />
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-1">
           <CardTitle>Start attendance</CardTitle>

@@ -54,7 +54,7 @@ export function ReportBody({ r, f, exportBase, print = false }: { r: Report; f: 
             <a href={q({ format: "xlsx" })} className="rounded-xl border border-line px-3 py-1.5 font-medium hover:bg-bg">Excel (all tables)</a>
             <a href={q({ format: "csv", section: "modules" })} className="rounded-xl border border-line px-3 py-1.5 font-medium hover:bg-bg">CSV: modules</a>
             <a href={q({ format: "csv", section: "at_risk" })} className="rounded-xl border border-line px-3 py-1.5 font-medium hover:bg-bg">CSV: students at risk</a>
-            <Link href={`/reports/print?${filterQuery(f, { from: r.from, to: r.to })}`} className="rounded-xl border border-line px-3 py-1.5 font-medium hover:bg-bg">Print or save as PDF</Link>
+            <Link href={`/reports/print?${filterQuery(f, { from: r.from, to: r.to })}`} className="rounded-xl border border-line px-3 py-1.5 font-medium hover:bg-bg">PDF (on your letterhead)</Link>
           </div>
         )}
       </div>

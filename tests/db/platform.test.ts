@@ -1784,3 +1784,70 @@ describe("institution API v1: safe retries, status and run results, one institut
     await expect(push(key, body(2), "retry-test-0001")).rejects.toThrow(/paused/);
   });
 });
+
+describe("UniAttend staff see a university's records only while it lets them", () => {
+  const n = async (who: string, sql: string, params: unknown[] = []) => (await db.as(who, sql, params)).length;
+  const personal = async (who: string) => ({
+    students: await n(who, "select 1 from uniattend.students where institution_id = $1", [id.instA]),
+    records: await n(who, "select 1 from uniattend.attendance_records where institution_id = $1", [id.instA]),
+    lecturers: await n(who, "select 1 from uniattend.lecturers where institution_id = $1", [id.instA]),
+    audit: await n(who, "select 1 from uniattend.audit_logs where institution_id = $1", [id.instA]),
+    enrolments: await n(who, "select 1 from uniattend.module_enrolments where institution_id = $1", [id.instA]),
+  });
+  const grant = (who: string, hours = 4, reason = "Help with the timetable import") =>
+    db.as(who, "select uniattend.grant_support_access($1, $2, $3)", [id.instA, hours, reason]);
+
+  it("without a grant, UniAttend staff see no students, attendance, lecturers or institution audit entries", async () => {
+    expect(await personal(u.super)).toEqual({ students: 0, records: 0, lecturers: 0, audit: 0, enrolments: 0 });
+    await expect(db.as(u.super, "select uniattend.institution_report($1)", [id.instA])).rejects.toThrow(/Not allowed/);
+    await expect(db.as(u.super, "select uniattend.review_queue($1)", [id.instA])).rejects.toThrow(/Only lecturers and administrators/);
+    await expect(db.as(u.super, "select * from uniattend.module_report($1)", [id.modA])).rejects.toThrow(/not your module/);
+    // Profiles: only administrators' own contact details.
+    const lectProfile = await n(u.super, "select 1 from uniattend.profiles where id = $1", [u.lectA]);
+    const adminProfile = await n(u.super, "select 1 from uniattend.profiles where id = $1", [u.adminA]);
+    expect([lectProfile, adminProfile]).toEqual([0, 1]);
+  });
+
+  it("platform work still needs no grant: billing, onboarding, setup, the first administrator", async () => {
+    expect(await n(u.super, "select 1 from uniattend.institution_subscriptions where institution_id = $1", [id.instA])).toBeGreaterThan(0);
+    await db.as(u.super, "select uniattend.onboarding_status($1)", [id.instA]);
+    await db.as(u.super, "update uniattend.institution_settings set timetable_source_url = timetable_source_url where institution_id = $1", [id.instA]);
+    const fresh = await db.newUser("second.admin@uniA.ac.za");
+    await db.as(u.super, "select uniattend.grant_role($1, 'second.admin@uniA.ac.za', 'institution_admin')", [id.instA]);
+    await expect(db.as(u.super, "select uniattend.grant_role($1, $2, 'auditor')", [id.instA, "second.admin@uniA.ac.za"])).rejects.toThrow(/institution admin only/);
+    expect(await n(fresh, "select 1 from uniattend.my_roles() where role = 'institution_admin'")).toBe(1);
+  });
+
+  it("only the institution's own administrators give access, for 1 hour to 7 days, with a reason", async () => {
+    await expect(grant(u.super)).rejects.toThrow(/Only your institution's administrators/);
+    await expect(grant(u.adminB)).rejects.toThrow(/Only your institution's administrators/);
+    await expect(grant(u.lectA)).rejects.toThrow(/Only your institution's administrators/);
+    await expect(grant(u.adminA, 0)).rejects.toThrow(/between 1 hour and 7 days/);
+    await expect(grant(u.adminA, 169)).rejects.toThrow(/between 1 hour and 7 days/);
+    await expect(grant(u.adminA, 4, "hi")).rejects.toThrow(/Say what UniAttend should help with/);
+  });
+
+  it("with a grant, UniAttend staff can help; it is audited, staff are told, and it ends when withdrawn", async () => {
+    const before = await personal(u.adminA);
+    await grant(u.adminA, 4);
+    expect(await personal(u.super)).toMatchObject({ students: before.students, records: before.records });
+    expect(await n(u.super, "select 1 from uniattend.notifications where kind = 'support_access'")).toBe(1);
+    expect(await n(u.adminA, "select 1 from uniattend.audit_logs where action = 'support_access_granted'")).toBe(1);
+    const ov = (await db.asOne<{ support_access_overview: { institution_id: string }[] }>(u.super, "select uniattend.support_access_overview()")).support_access_overview;
+    expect(ov.map((x) => x.institution_id)).toContain(id.instA);
+    // Only that institution.
+    expect(await n(u.super, "select 1 from uniattend.students where institution_id = $1", [id.instB])).toBe(0);
+    await db.as(u.adminA, "select uniattend.revoke_support_access($1)", [id.instA]);
+    expect(await personal(u.super)).toMatchObject({ students: 0, records: 0 });
+    expect(await n(u.adminA, "select 1 from uniattend.audit_logs where action = 'support_access_revoked'")).toBe(1);
+  });
+
+  it("an expired grant gives nothing", async () => {
+    await grant(u.adminA, 1);
+    await db.admin("update uniattend.support_access_grants set expires_at = created_at + interval '1 second' where institution_id = $1 and revoked_at is null", [id.instA]);
+    await db.admin("select pg_sleep(1.1)");
+    expect((await personal(u.super)).students).toBe(0);
+    expect(await n(u.adminA, "select 1 from uniattend.support_access_grants where institution_id = $1", [id.instA])).toBeGreaterThanOrEqual(2);
+    expect(await n(u.adminB, "select 1 from uniattend.support_access_grants")).toBe(0);
+  });
+});

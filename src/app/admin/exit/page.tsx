@@ -2,6 +2,7 @@ import { ActionForm } from "@/components/form";
 import { Card, CardTitle, Notice, PageHeader, when } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { requestExit, revokeCredentials, withdrawExit } from "../onboarding/actions";
+import { SupportAccessCard } from "./support-card";
 
 export const metadata = { title: "Your data and leaving" };
 
@@ -18,8 +19,10 @@ export default async function ExitPage() {
   const open = (reqs ?? []).find((r) => r.status === "requested");
   return (
     <>
-      <PageHeader title="Your data and leaving" subtitle="Your institution owns its data. Take it whenever you like; leave whenever you decide to." />
+      <PageHeader title="Your data" subtitle="Your institution owns its data. Decide who at UniAttend may see it, take it whenever you like, and leave whenever you decide to." />
       {error && <div className="mb-6"><Notice tone="warn">Leaving and the full export need the latest database update (migration 0032).</Notice></div>}
+
+      <SupportAccessCard supabase={supabase} institutionId={institutionId} />
 
       <Card className="mb-6">
         <CardTitle>1. Download everything</CardTitle>

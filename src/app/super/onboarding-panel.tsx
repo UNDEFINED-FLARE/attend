@@ -11,13 +11,25 @@ type Exit = { id: string; institution_id: string; institution: string; reason: s
 /** The platform's view: how far each institution is, and requests to leave. */
 export async function OnboardingPanel() {
   const { supabase } = await requireRole("super_admin");
-  const [{ data: ov, error }, { data: ex }] = await Promise.all([supabase.rpc("onboarding_overview"), supabase.rpc("exit_requests")]);
+  const [{ data: ov, error }, { data: ex }, { data: sa }] = await Promise.all([
+    supabase.rpc("onboarding_overview"), supabase.rpc("exit_requests"), supabase.rpc("support_access_overview"),
+  ]);
+  const access = (sa ?? []) as { institution_id: string; institution: string; reason: string; expires_at: string }[];
   if (error) return <Card className="mb-6"><Notice tone="warn">Onboarding and exits need the latest database update (migration 0032).</Notice></Card>;
   const rows = (ov ?? []) as Row[];
   const exits = (ex ?? []) as Exit[];
   const open = exits.filter((e) => e.status === "requested");
   return (
     <>
+      <Card className="mb-6">
+        <CardTitle>Support access</CardTitle>
+        <p className="mb-2 text-sm text-muted">You see an institution&apos;s students and attendance only while its administrators allow it. Everything you do then is in their audit log.</p>
+        {access.length === 0 ? <p className="text-sm text-muted">No institution has given access right now.</p> : (
+          <ul className="divide-y divide-line text-sm">
+            {access.map((a) => <li key={a.institution_id} className="py-2"><b>{a.institution}</b> until {when(a.expires_at)} · {a.reason}</li>)}
+          </ul>
+        )}
+      </Card>
       {open.length > 0 && (
         <Card className="mb-6 border-warn/40">
           <CardTitle>Asked to leave ({open.length})</CardTitle>

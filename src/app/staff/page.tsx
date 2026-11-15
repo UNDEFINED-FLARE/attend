@@ -37,7 +37,7 @@ export default async function StaffHome() {
               <Td className="tabular-nums">{r.sessions}</Td>
               <Td className={`tabular-nums font-medium ${r.rate != null && Number(r.rate) < 75 ? "text-bad" : ""}`}>{pct(r.rate)}</Td>
               <Td className="tabular-nums">{Number(r.unresolved) || "—"}</Td>
-              <Td>{Number(r.sessions) > 0 && <a href={`/lecturer/modules/${r.id}/export`} className="text-xs text-info hover:underline">CSV report</a>}</Td>
+              <Td>{Number(r.sessions) > 0 && <span className="flex gap-3 text-xs"><a href={`/reports/module/${r.id}`} className="text-info hover:underline">PDF</a><a href={`/lecturer/modules/${r.id}/export`} className="text-info hover:underline">CSV</a></span>}</Td>
             </tr>
           ))}
         </Table>

@@ -67,7 +67,7 @@ The one incident-class finding so far — the legacy prototype role escalation (
 - Auditor role (0030): read-only access to records, decisions, the audit log and role assignments.
 - Every data download is logged before it is sent (0028, 0031, 0032).
 - Integration administrators cannot read attendance or student lists (0030).
-- Platform administrators (UniAttend) are not automatically given university attendance data through the app's screens; the platform view shows counts, onboarding and billing. **However, the platform administrator role can read institution data through the database policies today** (`is_inst_admin` includes `is_super_admin`). Narrowing this is open (§8, item 1).
+- UniAttend staff cannot see a university's students, lecturers, attendance, evidence, reviews, reports or institution audit entries unless the university's own administrator grants support access (1 hour to 7 days, withdrawable at any time, audited, staff notified). While a grant is active, staff act as an administrator and every action is in the university's audit log (migration 0034). Without a grant the platform sees only what it needs to run the service: institution details, plans and billing, onboarding progress, campus setup, administrators' contact details, and data-subject requests addressed to UniAttend.
 
 ## 7. Institutional data ownership and exit
 
@@ -77,7 +77,7 @@ The university owns its data. It can download all of it at any time, delete ever
 
 | # | Item | Owner |
 |---|---|---|
-| 1 | Narrow the platform administrator's database access to university records (support access by explicit, logged grant instead of standing access). | Development |
+| 1 | ~~Narrow UniAttend staff's access to university records~~ — done in migration 0034 (support-access grants). | Development |
 | 2 | Fill in `src/lib/legal.ts`: head of company, Information Officer, privacy and support emails, phone. | Owner |
 | 3 | Register the Information Officer with the Information Regulator. | Owner |
 | 4 | Accept and file the Supabase and Vercel DPAs. | Owner |
