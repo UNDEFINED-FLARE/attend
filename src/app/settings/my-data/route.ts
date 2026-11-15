@@ -1,4 +1,5 @@
 import { supabaseServer } from "@/lib/supabase/server";
+import { auditExport } from "@/lib/audit-export";
 
 // "Download my data": everything UniAttend holds about the signed-in person (POPIA s 23).
 export const dynamic = "force-dynamic";
@@ -11,6 +12,8 @@ export async function GET() {
   if (error) {
     return new Response(error.code === "PGRST202" ? "This needs the latest database update (migration 0023)." : "Could not prepare your data. Try again.", { status: 503 });
   }
+  const refused = await auditExport(supabase, { kind: "personal_data", rows: 1 });
+  if (refused) return refused;
   const day = new Date().toISOString().slice(0, 10);
   return new Response(JSON.stringify(data, null, 2), {
     headers: {

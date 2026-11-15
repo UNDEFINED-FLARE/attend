@@ -1,5 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { createDb, type Db } from "./harness";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 
 // UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
 const HALL = { lat: -22.9761, lng: 30.4445 };
@@ -1312,5 +1314,50 @@ describe("classes from the timetable and sessions prepared from them", () => {
     expect(e).toEqual({ status: "cancelled", note: "Cancelled in the timetable system.", local: "09:00" });
     expect(await db.as(u.adminA, "select 1 from uniattend.timetable_events where external_id like 'CEL-%'")).toHaveLength(1);
     expect(await db.as(u.adminB, "select 1 from uniattend.timetable_events where external_id like 'CEL-%'")).toHaveLength(0);
+  });
+});
+
+describe("operations: migration record, health report, audited downloads", () => {
+  const exportsBy = (who: string) => db.admin<{ institution_id: string | null; entity: string; entity_id: string | null; details: Record<string, unknown> }>(
+    "select institution_id, entity, entity_id, details from uniattend.audit_logs where actor_id = $1 and action = 'export' order by id", [who]);
+
+  it("records every migration, newest last, and only the platform administrator can read the list", async () => {
+    const files = readdirSync(join(__dirname, "../../supabase/migrations")).filter((f) => f.endsWith(".sql")).map((f) => f.slice(0, 14)).sort();
+    const rows = await db.admin<{ version: string }>("select version from uniattend.schema_versions order by version");
+    expect(rows.map((r) => r.version)).toEqual(files);
+    expect(await db.as(u.super, "select 1 from uniattend.schema_versions")).toHaveLength(files.length);
+    expect(await db.as(u.adminA, "select 1 from uniattend.schema_versions")).toHaveLength(0);
+  });
+
+  it("the health report works for anyone and shows only the schema and job states", async () => {
+    const r = (await db.asOne<{ health_report: Record<string, unknown> }>(null, "select uniattend.health_report()")).health_report;
+    expect(Object.keys(r).sort()).toEqual(["failing_jobs", "jobs", "schema"]);
+    expect(r.schema).toMatch(/^\d{14}$/);
+    expect(r.failing_jobs).toEqual([]);   // no pg_cron in the test database: nothing to report
+  });
+
+  it("downloads are logged against the right institution, and only by people allowed to make them", async () => {
+    await db.as(u.adminA, "select uniattend.log_export('admin_data', 42, $1, null, $2)", [id.instA, JSON.stringify({ kind: "students", archived: false, secret: "x" })]);
+    await db.as(u.lectA, "select uniattend.log_export('module_report', 3, null, $1)", [id.modA]);
+    await db.as(u.sA1, "select uniattend.log_export('personal_data', 1)");
+
+    const a = await exportsBy(u.adminA);
+    expect(a.at(-1)).toMatchObject({ institution_id: id.instA, entity: "admin_data", details: { rows: 42, kind: "students", archived: "false" } });
+    expect(a.at(-1)!.details).not.toHaveProperty("secret");          // only known detail keys are kept
+    expect((await exportsBy(u.lectA)).at(-1)).toMatchObject({ institution_id: id.instA, entity: "module_report", entity_id: id.modA });
+    expect((await exportsBy(u.sA1)).at(-1)).toMatchObject({ institution_id: id.instA, entity: "personal_data" });
+
+    // The institution's admin sees these in its audit log; the other institution does not.
+    expect((await db.as(u.adminA, "select 1 from uniattend.audit_logs where action = 'export'")).length).toBeGreaterThanOrEqual(3);
+    expect(await db.as(u.adminB, "select 1 from uniattend.audit_logs where action = 'export' and institution_id = $1", [id.instA])).toHaveLength(0);
+
+    // Refused: another institution's data, a module someone does not teach, a student posing as admin, anonymous callers, made-up kinds.
+    await expect(db.as(u.adminB, "select uniattend.log_export('admin_data', 1, $1)", [id.instA])).rejects.toThrow(/Not allowed/);
+    await expect(db.as(u.lectB, "select uniattend.log_export('module_report', 1, null, $1)", [id.modA])).rejects.toThrow(/Not allowed/);
+    await expect(db.as(u.sA1, "select uniattend.log_export('admin_data', 1, $1)", [id.instA])).rejects.toThrow(/Not allowed/);
+    await expect(db.as(null, "select uniattend.log_export('personal_data', 1)")).rejects.toThrow(/permission denied/);
+    await expect(db.as(u.adminA, "select uniattend.log_export('everything', 1, $1)", [id.instA])).rejects.toThrow(/Unknown export/);
+    // Nobody can write the audit log directly.
+    await expect(db.as(u.adminA, "insert into uniattend.audit_logs (institution_id, action, entity) values ($1, 'export', 'x')", [id.instA])).rejects.toThrow();
   });
 });

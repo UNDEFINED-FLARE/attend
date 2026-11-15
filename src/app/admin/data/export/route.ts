@@ -1,5 +1,6 @@
 import { requireRole } from "@/lib/auth";
 import { toCsv } from "@/lib/csv";
+import { auditExport } from "@/lib/audit-export";
 import { DATA, loadData, type DataKind } from "@/lib/data-manager";
 
 // CSV of any Data tab, with the same search and archived filter as the page.
@@ -11,6 +12,8 @@ export async function GET(request: Request) {
   const archived = u.searchParams.get("show") === "archived";
   const { rows } = await loadData(supabase, institutionId, kind, { q: u.searchParams.get("q") ?? "", archived, all: true });
   const cols = DATA[kind].columns.map((c) => c.key);
+  const refused = await auditExport(supabase, { kind: "admin_data", rows: rows.length, institutionId, details: { kind, archived, filter: u.searchParams.get("q") ?? "" } });
+  if (refused) return refused;
   const csv = toCsv(rows.map((r) => r.cells), cols);
   return new Response(csv, { headers: {
     "Content-Type": "text/csv; charset=utf-8",

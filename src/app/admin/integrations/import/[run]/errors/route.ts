@@ -1,5 +1,6 @@
 import { requireRole } from "@/lib/auth";
 import { toCsv } from "@/lib/csv";
+import { auditExport } from "@/lib/audit-export";
 
 // The rejected rows of one import, as a CSV to fix and upload again.
 export const dynamic = "force-dynamic";
@@ -23,6 +24,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ run: strin
     cols = ["row", "record", "problem"];
     rows = (data ?? []).map((x) => ({ row: (x.row_no ?? 0) + 1, record: x.ref, problem: x.message }));
   }
+  const refused = await auditExport(supabase, { kind: "rejected_rows", rows: rows.length, institutionId, details: { run } });
+  if (refused) return refused;
   return new Response(toCsv(rows, cols), {
     headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="rejected-rows-${run.slice(0, 8)}.csv"`, "Cache-Control": "private, no-store" },
   });

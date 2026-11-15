@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { toCsv } from "@/lib/csv";
+import { auditExport } from "@/lib/audit-export";
 import { supabaseServer } from "@/lib/supabase/server";
 
 // The report comes from module_report(), which refuses anyone who does not
@@ -12,6 +13,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     supabase.rpc("module_report", { p_module: id }),
   ]);
   if (error || !mod) return new NextResponse("Not found", { status: 404 });
+  const refused = await auditExport(supabase, { kind: "module_report", rows: (data as unknown[]).length, moduleId: id });
+  if (refused) return refused;
   const csv = toCsv(data as Record<string, unknown>[], [
     "student_number", "full_name", "sessions", "attended", "late", "absent", "excused", "unresolved",
     "percent", "worst_case_percent", "meets_requirement",

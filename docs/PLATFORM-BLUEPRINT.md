@@ -225,23 +225,26 @@ Plans with limits enforced by triggers (`enforce_plan_limits`). New institutions
 
 - Comments explain why, in plain words. No dead code.
 - Server-only modules start with `import "server-only"`.
-- New database behaviour = a new numbered migration `YYYYMMDD0000NN_name.sql` with a header comment explaining it, plus tests, then `npm run bundle:sql`.
+- New database behaviour = a new numbered migration `YYYYMMDD0000NN_name.sql` with a header comment explaining it, plus tests, then `npm run bundle:sql`. From 0028 on, each migration ends with `insert into uniattend.schema_versions (version, name) values ('<its 14-digit prefix>', '<name>') on conflict (version) do nothing;`, and `EXPECTED_SCHEMA` in `src/lib/schema-version.ts` is set to the newest one (a unit test and a database test enforce both).
 - Commits happen only when the owner asks; the owner's working copy of `supabase/push-schedule.sql` is never committed.
 - Temporary preview pages (`src/app/dev-*`) may be added to the public list while checking a screen and must be removed before committing.
 
 ## 13. State at the time of writing
 
-**Live database:** migrations 0001–0023 are applied. **Not yet applied: 0024 (integrations) and 0025 (sync engine).** `INTEGRATION_ENCRYPTION_KEY` is not yet set in Vercel.
+**Live database (checked 15 November 2026):** all 28 migrations, 0001–0028, are applied; from 0028 on, `uniattend.schema_versions` lists them. They were run by hand, so Supabase's migration history does not list them; see `docs/commercial-readiness/01-technical-audit.md` §2 for how this was checked against the live schema.
 
-**Live data:** 3 institutions (UNIVEN, UL, TUT), all on Starter trials ending 8–9 December 2026; 21 students, 5 lecturers, 724 modules (11 with a lecturer, 5 with students).
+**Live data:** 3 institutions (UNIVEN, UL, TUT), all on Starter trials ending 8–9 December 2026; 142 students, 25 lecturers, 724 modules, 4,366 dated classes, 0 integrations configured.
+
+**Current audit, gap register and security review:** `docs/commercial-readiness/`.
 
 **Not done or not verified:**
-- Integration brief phases B–F: Import Centre with column mapping and preview screens; Integration Centre dashboard, provider catalogue and setup wizard; configurable REST connector with OAuth, and a clearly labelled mock ITS connector; dated timetable events with cancellations; platform integrations view. No connector has been tested against a real Moodle, ITS, CELCAT, Banner, PeopleSoft or Blackboard.
+- Integration brief: the Import Centre, the Integration Centre and dated timetable classes are built. Still missing: a configurable REST connector with OAuth, and the platform integrations view. No connector has been tested against a real Moodle, ITS, CELCAT, Banner, PeopleSoft or Blackboard.
 - The extra roles from the multi-university brief (faculty admin, department admin, attendance officer, auditor) do not exist.
 - Hosting is on Supabase's free plan, shared with other apps; no backups; custom SMTP not configured; CAPTCHA and error alerts not switched on.
 - Load tests in `loadtest/` have never been run. Fingerprint unlock and offline check-ins are untested on real phones. Android has only a debug build; no Firebase push for the closed app.
 - Legal: head of company and Information Officer not chosen; attorney review outstanding (`docs/legal/README.md`).
-- The old prototype tables `public.aa_*` in the same Supabase project are not part of UniAttend and have a hole (any signed-in user can make themselves a lecturer there).
+- The old prototype tables `public.aa_*` in the same Supabase project are not part of UniAttend and have a hole (any signed-in user can make themselves a lecturer there). Fixed live on 15 November 2026 with `supabase/legacy/aa-profiles-lockdown.sql`.
+- The same Supabase project also hosts other apps (a marketplace and an `acvosa` app). UniAttend needs its own production project.
 
 ## 14. Other documents in the repository
 
@@ -634,6 +637,22 @@ After each step: type-check, lint, tests, build.
 > A timetable never creates attendance on its own.
 > * Lecture groups: module_enrolments.group_name places a student in a group
 > ("A", "Tut 3"); a class for one group notifies only that group.
+
+### `20261114000028_operations.sql` (110 lines)
+
+> UniAttend 0028 — operations: which migrations ran, background-job health, audited exports.
+>
+> * schema_versions: one row per UniAttend migration. Migrations are run by hand
+> in the SQL editor, so Supabase's own history never listed them; from now on
+> each migration records itself here. This one records 0001–0028 (all of which
+> are applied before it can run, since it is applied in order).
+> * health_report(): what /api/health shows an uptime monitor — the latest
+> migration, and the names of UniAttend background jobs whose last run failed
+> or that have not run for longer than they should. Nothing private: no data,
+> no secrets, no job commands.
+> * log_export(): every download of attendance or personal data is written to the
+> audit log (who, what, how many rows). Admin exports, lecturers' module reports,
+> rejected-row reports and personal-data downloads all call it.
 
 ## B. Tables (schema `uniattend`) and their columns
 
@@ -1128,6 +1147,10 @@ After each step: type-check, lint, tests, build.
   - `prefs` jsonb not null default '{"classes": true, "announcements": true, "attendance": true}'::jsonb
   - `created_at` timestamptz not null default now()
   - `last_sent_at` timestamptz
+- **schema_versions**
+  - `version` text primary key check (version ~ '^[0-9]{14}$')
+  - `name` text not null
+  - `applied_at` timestamptz not null default now()
 - **session_secrets**
   - `session_id` uuid primary key references uniattend.class_sessions(id) on delete cascade
   - `secret` bytea not null
@@ -1326,6 +1349,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `profiles`.`profiles_update` — update to authenticated: `using (id = (select auth.uid())) with check (id = (select auth.uid()))`
 - `push_subscriptions`.`push_subscriptions_delete` — delete to authenticated: `using (user_id = (select auth.uid()))`
 - `push_subscriptions`.`push_subscriptions_own` — select to authenticated: `using (user_id = (select auth.uid()))`
+- `schema_versions`.`schema_versions_select` — select to authenticated: `using (uniattend.is_super_admin())`
 - `student_alert_events`.`student_alert_events_select` — select to authenticated: `using (exists (select 1 from uniattend.student_alerts a where a.id = alert_id and (uniattend.is_inst_admin(a.institution_id) or uniattend.teaches_module(a.module_id))))`
 - `student_alerts`.`student_alerts_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id) or uniattend.teaches_module(module_id))`
 - `students`.`students_admin_write` — all to authenticated: `using (uniattend.is_inst_admin(institution_id)) with check (uniattend.is_inst_admin(institution_id))`
@@ -1385,6 +1409,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `guard_timetable_source()` → trigger — internal
 - `handle_new_user()` → trigger — internal
 - `has_role(p_inst uuid, p_roles text[])` → boolean — internal
+- `health_report()` → jsonb — callable by: anon, authenticated
 - `import_add(p_run uuid, p_dataset text, p_rows jsonb)` → int — callable by: authenticated
 - `import_cancel(p_run uuid)` → void — callable by: authenticated
 - `import_commit(p_run uuid)` → jsonb — callable by: authenticated
@@ -1411,6 +1436,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `link_my_accounts()` → jsonb — internal
 - `list_student_alerts(p_inst uuid, p_live_only boolean default true)` → table (id uuid, kind text, status text, percent numeric, missed_in_a_row int, required_pct int, created_at timestamptz, updated_at timestamptz, student_id uuid, student_number text, student_name text, module_id uuid, module_code text, module_title text, assigned_to uuid, assignee_name text, last_note text) — callable by: authenticated
 - `live_plan(p_inst uuid)` → table (plan uniattend.subscription_plans, sub_status text, period_end timestamptz) — internal
+- `log_export(p_kind text, p_rows integer, p_inst uuid default null, p_module uuid default null, p_details jsonb default '{}')` → void — callable by: authenticated
 - `mark_notifications_read(p_ids uuid[] default null)` → void — internal
 - `module_of_record(p_record uuid)` → uuid — internal
 - `module_report(p_module uuid)` → table (student_id uuid, student_number text, full_name text, sessions int, attended int, late int, absent int, excused int, unresolved int, percent numeric, worst_case_percent numeric, meets_requirement boolean, at_risk boolean) — internal
@@ -1499,7 +1525,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/admin/connections/page.tsx` (176 lines)
 - `src/app/admin/data-actions.ts` (243 lines) — Frees a unique number/code on an archived row so the same one can be added again later.
 - `src/app/admin/data/data-table.tsx` (131 lines) — The Data page table: tick rows for bulk actions, or edit one row inline.
-- `src/app/admin/data/export/route.ts` (20 lines) — CSV of any Data tab, with the same search and archived filter as the page.
+- `src/app/admin/data/export/route.ts` (23 lines) — CSV of any Data tab, with the same search and archived filter as the page.
 - `src/app/admin/data/page.tsx` (66 lines) — Every record the institution keeps, in one place: search, edit, bulk actions, export, restore.
 - `src/app/admin/design/actions.ts` (88 lines) — Publish: everyone at the institution sees it, and it is kept in the version history.
 - `src/app/admin/design/designer.tsx` (471 lines) — Starting points only; every colour stays editable.
@@ -1510,7 +1536,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/admin/integrations/activity/actions.ts` (18 lines) — Queue the connection behind a failed run to run again now. The database checks it is this admin's.
 - `src/app/admin/integrations/activity/page.tsx` (85 lines)
 - `src/app/admin/integrations/connect/page.tsx` (112 lines) — The setup wizard. Steps 1 and 2 are choices in the address (?provider=&method=),
-- `src/app/admin/integrations/import/[run]/errors/route.ts` (29 lines) — The rejected rows of one import, as a CSV to fix and upload again.
+- `src/app/admin/integrations/import/[run]/errors/route.ts` (32 lines) — The rejected rows of one import, as a CSV to fix and upload again.
 - `src/app/admin/integrations/import/[run]/page.tsx` (116 lines)
 - `src/app/admin/integrations/import/actions.ts` (135 lines) — A CSV, Excel or JSON file as a header row and cells. Throws a message fit to show.
 - `src/app/admin/integrations/import/import-wizard.tsx` (145 lines) — Upload → match the file's columns to UniAttend's fields → preview. The file stays in the browser until step 2 is submitted.
@@ -1534,7 +1560,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/admin/timetable/page.tsx` (121 lines) — Fetching a batch from the university timetable site can take ~15 s.
 - `src/app/admin/timetable/pdf-import.tsx` (117 lines)
 - `src/app/admin/timetable/source-import.tsx` (115 lines) — Collect classes from the institution's own timetable source, set up by
-- `src/app/api/health/route.ts` (23 lines) — For an uptime monitor (e.g. UptimeRobot, every 5 minutes): 200 when the app and
+- `src/app/api/health/route.ts` (44 lines) — For an uptime monitor (e.g. UptimeRobot, every 5 minutes): 200 when the app, its
 - `src/app/api/push/dispatch/route.ts` (28 lines) — Called every minute by pg_cron (supabase/push-schedule.sql) to send class
 - `src/app/api/roster/route.ts` (48 lines) — For an institution's own student system: POST the roster here with the API key
 - `src/app/api/route/route.ts` (69 lines) — Walking directions for "Find my class".
@@ -1550,7 +1576,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/lecturer/disputes/page.tsx` (70 lines) — RLS already limits both lists to modules this lecturer teaches.
 - `src/app/lecturer/early-warning/page.tsx` (38 lines)
 - `src/app/lecturer/layout.tsx` (12 lines)
-- `src/app/lecturer/modules/[id]/export/route.ts` (26 lines) — The report comes from module_report(), which refuses anyone who does not
+- `src/app/lecturer/modules/[id]/export/route.ts` (29 lines) — The report comes from module_report(), which refuses anyone who does not
 - `src/app/lecturer/modules/[id]/page.tsx` (98 lines)
 - `src/app/lecturer/page.tsx` (148 lines)
 - `src/app/lecturer/sessions/[id]/controls.tsx` (69 lines) — Pause or resume, regenerate, change the window, allow a printed QR, and the card scanner.
@@ -1574,7 +1600,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/push-actions.ts` (96 lines) — Store this device's push subscription for the signed-in person (moves it from any previous account).
 - `src/app/settings/actions.ts` (15 lines) — Leave an institution: all of your roles there stop. Its administrators can't add you back.
 - `src/app/settings/app-lock-settings.tsx` (111 lines) — Turn the fingerprint / face app lock on or off for this device.
-- `src/app/settings/my-data/route.ts` (22 lines) — "Download my data": everything UniAttend holds about the signed-in person (POPIA s 23).
+- `src/app/settings/my-data/route.ts` (25 lines) — "Download my data": everything UniAttend holds about the signed-in person (POPIA s 23).
 - `src/app/settings/page.tsx` (122 lines)
 - `src/app/student/actions.ts` (101 lines) — "queued": saved on the phone without signal, to be sent later (client only).
 - `src/app/student/check-in/check-in.tsx` (275 lines)
@@ -1638,6 +1664,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 
 - `src/lib/app-lock.ts` (143 lines) — App lock: after signing in once with a password, the app can be reopened with
 - `src/lib/assignment-match.ts` (210 lines) — Reads "which lecturer teaches which module" out of rows of cells from any document
+- `src/lib/audit-export.ts` (21 lines) — Write a data download to the audit log (who, what, how many rows) before handing
 - `src/lib/auth.ts` (53 lines)
 - `src/lib/brand-cookie.ts` (3 lines) — Which institution's look the sign-in pages wear on this device (slug or id; not a secret).
 - `src/lib/branding.ts` (28 lines) — The institution branding for the sign-in, registration and password pages,
@@ -1668,6 +1695,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/lib/push.ts` (88 lines) — Delivers queued notifications to phones and browsers with Web Push.
 - `src/lib/route.ts` (12 lines) — What /api/route returns. `from`/`to` are indexes into `line` (OpenRouteService way_points).
 - `src/lib/safe-redirect.ts` (18 lines) — Where to send someone after sign-in or an email link. Only paths on this
+- `src/lib/schema-version.ts` (5 lines) — The newest database migration this build of the app expects. /api/health reports
 - `src/lib/shell-data.ts` (35 lines) — The institution's theme; the older brand colour setting still applies until a theme is designed.
 - `src/lib/stats.ts` (43 lines) — Small helpers for dashboards. All inputs are real rows; nothing is invented.
 - `src/lib/student-data.ts` (27 lines) — Timetable slots for the modules the signed-in student is enrolled in (RLS-scoped).
@@ -1707,7 +1735,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `tests/db/harness.ts` (88 lines) — Runs the real migrations against an in-process Postgres (PGlite) with a
 - `tests/db/install-script.test.ts` (30 lines) — The bundled SQL-editor script must install cleanly next to another app's
 - `tests/db/location.test.ts` (90 lines) — Campus boundaries and class navigation (migration 0013). Live location sharing
-- `tests/db/platform.test.ts` (1316 lines) — UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
+- `tests/db/platform.test.ts` (1363 lines) — UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
 - `tests/db/safeupdate.test.ts` (49 lines) — Supabase loads pg_safeupdate for API requests: an UPDATE or DELETE without a
 - `tests/db/security.test.ts` (78 lines) — Regression tests for the 2026-11-10 security review:
 
@@ -1727,6 +1755,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `tests/unit/providers.test.ts` (48 lines) — Vendors without a built connector get files, a link or the push API, plus a plain "not yet".
 - `tests/unit/roster.test.ts` (84 lines)
 - `tests/unit/safe-redirect.test.ts` (30 lines) — 2. Open redirect: "next" must always stay on this site.
+- `tests/unit/schema-version.test.ts` (13 lines)
 - `tests/unit/theme.test.ts` (31 lines)
 - `tests/unit/timetable-pdf.test.ts` (98 lines)
 - `tests/unit/url-safety.test.ts` (20 lines)
