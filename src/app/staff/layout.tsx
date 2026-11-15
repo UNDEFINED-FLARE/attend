@@ -11,6 +11,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
   const nav: NavItem[] = [
     { href: "/staff", label: "Overview", icon: "dashboard" },
     { href: "/staff/review", label: "Reviews", icon: "flag" },
+    { href: "/staff/reports", label: "Reports", icon: "chart" },
     ...(s.roles.some((r) => r.role === "auditor") ? [{ href: "/staff/audit", label: "Audit log", icon: "shield" as const }] : []),
     { href: "/notifications", label: "Alerts", icon: "bell" },
   ];

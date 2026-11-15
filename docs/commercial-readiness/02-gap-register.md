@@ -66,9 +66,9 @@ Priority: **P0** blocks any real pilot · **P1** needed before a paid contract �
 | Super admin, institution admin, lecturer, student | Implemented, tested | `user_roles` check constraint | — | P0 | — |
 | Faculty admin, department admin | Implemented, tested; live 15 Nov 2026 (0030) | Scoped by `user_roles.faculty_id` / `department_id`; `may_view_module`, `may_correct_module`; `/staff` area | Pilot use | P1 | Cannot see another faculty in tests (passing) |
 | Attendance officer, integration admin, auditor | Implemented, tested; live 15 Nov 2026 (0030) | Officer: all attendance, reviews, corrections; integration admin: connection, import and sync functions only; auditor: read-only incl. audit log and role list | Pilot use | P1 | Permission test suite covers each (6 tests, passing) |
-| Institution reports | Partial | Admin dashboard, early warning | By faculty, department, period; trends | P1 | Aggregated in the database |
+| Institution reports | Implemented, tested; live 15 Nov 2026 (0031) | `institution_report()`: totals, by faculty, department and module, weekly trend, students at risk (worst case or 3+ absences in a row), missing registers, open disputes; pages for admins, staff and lecturers; 6 database tests | Pilot use; speed up for large universities (about 1 s for 719 modules) | P1 | Aggregated in the database; each person sees only their modules (tested) |
 | CSV export | Implemented; audit trail tested; database live, app change deploys with the next push | Admin data export, module report, rejected rows and personal-data download each call `log_export` (0028) before sending | Run 0028 live | P1 | Every export appears in the institution's audit log with who, what and row count |
-| Excel and PDF export | Missing | — | Add | P2 | — |
+| Excel and PDF export | Implemented, tested; deployed with the next push | Excel built in (`src/lib/xlsx.ts`, no dependency, never writes formulas; 4 unit tests); PDF through a print page and the browser's Save as PDF; every download audited | Open a sample in Excel and LibreOffice during the pilot | P2 | Workbook opens in Excel; downloads appear in the audit log |
 
 ## Commercial, legal and mobile
 

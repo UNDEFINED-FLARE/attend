@@ -3,7 +3,7 @@ import type { getSession } from "@/lib/auth";
 
 type Sb = NonNullable<Awaited<ReturnType<typeof getSession>>>["supabase"];
 
-export type ExportKind = "admin_data" | "module_report" | "rejected_rows" | "personal_data";
+export type ExportKind = "admin_data" | "module_report" | "rejected_rows" | "personal_data" | "institution_report";
 
 /**
  * Write a data download to the audit log (who, what, how many rows) before handing

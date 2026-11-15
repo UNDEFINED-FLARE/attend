@@ -231,7 +231,7 @@ Plans with limits enforced by triggers (`enforce_plan_limits`). New institutions
 
 ## 13. State at the time of writing
 
-**Live database (checked 15 November 2026):** all 30 migrations, 0001–0030, are applied; from 0028 on, `uniattend.schema_versions` lists them. They were run by hand, so Supabase's migration history does not list them; see `docs/commercial-readiness/01-technical-audit.md` §2 for how this was checked against the live schema.
+**Live database (checked 15 November 2026):** all 31 migrations, 0001–0031, are applied; from 0028 on, `uniattend.schema_versions` lists them. They were run by hand, so Supabase's migration history does not list them; see `docs/commercial-readiness/01-technical-audit.md` §2 for how this was checked against the live schema.
 
 **Live data:** 3 institutions (UNIVEN, UL, TUT), all on Starter trials ending 8–9 December 2026; 142 students, 25 lecturers, 724 modules, 4,366 dated classes, 0 integrations configured.
 
@@ -693,6 +693,27 @@ After each step: type-check, lint, tests, build.
 > The existing read policies and functions are widened to use them. Functions
 > are edited in place by exact text replacement, and the migration stops if a
 > piece of text it expects to change is not there, so nothing is altered silently.
+
+### `20261115000031_institution_reports.sql` (162 lines)
+
+> UniAttend 0031 — institutional reports, computed in the database.
+>
+> * institution_report(): attendance for a date range, filtered by faculty,
+> department or module, for everyone who may see those modules: institution
+> admins, attendance officers and auditors (all modules), faculty and department
+> admins (their scope) and lecturers (the modules they teach). One call returns:
+> - totals (classes, records, present, late, absent, excused, unresolved, rate);
+> - attendance by faculty, by department and by module (lowest first);
+> - a weekly trend;
+> - students at risk: below their module's required attendance (counting
+> unresolved records as missed — the worst case) or absent from three or
+> more classes in a row;
+> - classes that needed a register and have none, and open disputes.
+> Only closed classes count. Rates are present + late over present + late +
+> absent; excused classes leave the count; unresolved records are reported
+> separately, never as absences. Everything is aggregated here, so the browser
+> never receives thousands of rows.
+> * log_export(): report downloads (CSV, Excel, printed/PDF) are audited too.
 
 ## B. Tables (schema `uniattend`) and their columns
 
@@ -1466,6 +1487,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `institution_can_operate(p_inst uuid)` → boolean — internal
 - `institution_dashboard(p_inst uuid)` → jsonb — callable by: authenticated
 - `institution_overview(p_inst uuid)` → jsonb — internal
+- `institution_report(p_inst uuid, p_from date default null, p_to date default null, p_faculty uuid default null, p_department uuid default null, p_module uuid default null)` → jsonb — callable by: authenticated
 - `integration_action(p_id uuid, p_action text)` → jsonb — callable by: authenticated
 - `integration_apply(p_secret text, p_run uuid, p_payload jsonb, p_cursor int)` → jsonb — callable by: anon, authenticated
 - `integration_claim(p_secret text)` → jsonb — callable by: anon, authenticated
@@ -1605,6 +1627,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/admin/people/page.tsx` (130 lines)
 - `src/app/admin/people/staff-grant.tsx` (48 lines) — Give a colleague a role; faculty and department administrators also get their faculty or department.
 - `src/app/admin/people/student-adder.tsx` (85 lines)
+- `src/app/admin/reports/page.tsx` (10 lines)
 - `src/app/admin/requests/page.tsx` (18 lines)
 - `src/app/admin/review/page.tsx` (42 lines) — The whole institution's queue: what lecturers have not decided yet, classes that
 - `src/app/admin/settings/page.tsx` (140 lines)
@@ -1636,6 +1659,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/lecturer/modules/[id]/export/route.ts` (29 lines) — The report comes from module_report(), which refuses anyone who does not
 - `src/app/lecturer/modules/[id]/page.tsx` (98 lines)
 - `src/app/lecturer/page.tsx` (148 lines)
+- `src/app/lecturer/reports/page.tsx` (10 lines)
 - `src/app/lecturer/review-actions.ts` (36 lines) — Decide check-ins under review. The database checks the reviewer may decide each one.
 - `src/app/lecturer/sessions/[id]/controls.tsx` (69 lines) — Pause or resume, regenerate, change the window, allow a printed QR, and the card scanner.
 - `src/app/lecturer/sessions/[id]/late-arrivals.tsx` (102 lines)
@@ -1656,13 +1680,17 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/paia/page.tsx` (100 lines) — Manual required of every private body by section 51 of the Promotion of Access to
 - `src/app/privacy/page.tsx` (147 lines) — Written to cover what POPIA section 18 says people must be told. Each
 - `src/app/push-actions.ts` (96 lines) — Store this device's push subscription for the signed-in person (moves it from any previous account).
+- `src/app/reports/export/route.ts` (47 lines) — The institutional report as Excel (every table, one sheet each) or CSV (one table,
+- `src/app/reports/print/page.tsx` (36 lines) — The report on plain pages for printing or "Save as PDF". Opening it is recorded in
+- `src/app/reports/print/print-report.tsx` (11 lines) — Opens the browser's print dialog, where "Save as PDF" is one of the printers.
 - `src/app/settings/actions.ts` (15 lines) — Leave an institution: all of your roles there stop. Its administrators can't add you back.
 - `src/app/settings/app-lock-settings.tsx` (111 lines) — Turn the fingerprint / face app lock on or off for this device.
 - `src/app/settings/my-data/route.ts` (25 lines) — "Download my data": everything UniAttend holds about the signed-in person (POPIA s 23).
 - `src/app/settings/page.tsx` (122 lines)
 - `src/app/staff/audit/page.tsx` (51 lines) — Auditors: the audit log and who holds which role. Read-only by design (no write policies).
-- `src/app/staff/layout.tsx` (18 lines) — Faculty and department administrators, attendance officers and auditors.
+- `src/app/staff/layout.tsx` (19 lines) — Faculty and department administrators, attendance officers and auditors.
 - `src/app/staff/page.tsx` (47 lines)
+- `src/app/staff/reports/page.tsx` (10 lines)
 - `src/app/staff/review/page.tsx` (29 lines) — An auditor who holds no other staff role here reads the queue but cannot decide.
 - `src/app/student/actions.ts` (101 lines) — "queued": saved on the phone without signal, to be sent later (client only).
 - `src/app/student/check-in/check-in.tsx` (275 lines)
@@ -1716,6 +1744,8 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/components/nav.tsx` (55 lines) — The longest matching prefix wins, so /lecturer/modules/x highlights
 - `src/components/offline-sync.tsx` (104 lines) — Shows when the device is offline, how much is waiting to be sent, and sends it
 - `src/components/push-toggle.tsx` (259 lines) — Inside the Android app (Capacitor): Android's own notification permission.
+- `src/components/report-page.tsx` (23 lines) — The reports page, shared by administrators, staff and lecturers; the database decides the scope.
+- `src/components/report-view.tsx` (143 lines) — Date range, faculty, department and module. A plain GET form, so a report has a shareable address.
 - `src/components/review-queue.tsx` (171 lines) — Why a check-in is waiting for a person, in plain words.
 - `src/components/row-actions.tsx` (42 lines) — Small delete button with a confirmation step and an inline result.
 - `src/components/shell.tsx` (149 lines) — eslint-disable-next-line @next/next/no-img-element -- institution logo from an admin-set https URL
@@ -1752,10 +1782,11 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/lib/integrations/secrets.ts` (60 lines) — Credentials for an institution's systems (Moodle tokens, roster-link tokens, OAuth
 - `src/lib/integrations/sources.ts` (99 lines) — Talking to an institution's own systems. Every request: https only, public
 - `src/lib/legal.ts` (40 lines) — The company details every legal page uses: the privacy notice, terms, PAIA manual
-- `src/lib/nav-config.ts` (66 lines) — Every menu in the app, with the defaults an institution starts from. The Design
+- `src/lib/nav-config.ts` (68 lines) — Every menu in the app, with the defaults an institution starts from. The Design
 - `src/lib/offline-queue.ts` (59 lines) — Work done without signal, kept on the phone until it can be sent.
 - `src/lib/palette.ts` (5 lines) — Module colours in the minimal graphite look: dark-to-mid greys that stay readable
 - `src/lib/push.ts` (88 lines) — Delivers queued notifications to phones and browsers with Web Push.
+- `src/lib/report.ts` (86 lines) — Everyone who may open an institutional report (the database narrows it to their modules).
 - `src/lib/review.ts` (41 lines)
 - `src/lib/route.ts` (12 lines) — What /api/route returns. `from`/`to` are indexes into `line` (OpenRouteService way_points).
 - `src/lib/safe-redirect.ts` (18 lines) — Where to send someone after sign-in or an email link. Only paths on this
@@ -1774,6 +1805,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/lib/url-safety.ts` (35 lines) — Checks for any URL the server fetches on an administrator's behalf: https
 - `src/lib/venue-outline.ts` (91 lines) — Gives every venue an outline: the OpenStreetMap building it is in, the building
 - `src/lib/viewer-events.ts` (41 lines) — Converts events from a "timetable viewer" JSON API (one in use in South
+- `src/lib/xlsx.ts` (100 lines) — A small .xlsx writer: one workbook, several sheets, a bold header row, numbers as
 - `src/lib/zip.ts` (54 lines) — A small ZIP reader for .xlsx and .docx uploads. Reads the central directory,
 
 ### `src/`
@@ -1799,7 +1831,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `tests/db/harness.ts` (88 lines) — Runs the real migrations against an in-process Postgres (PGlite) with a
 - `tests/db/install-script.test.ts` (30 lines) — The bundled SQL-editor script must install cleanly next to another app's
 - `tests/db/location.test.ts` (90 lines) — Campus boundaries and class navigation (migration 0013). Live location sharing
-- `tests/db/platform.test.ts` (1560 lines) — UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
+- `tests/db/platform.test.ts` (1642 lines) — UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
 - `tests/db/safeupdate.test.ts` (49 lines) — Supabase loads pg_safeupdate for API requests: an UPDATE or DELETE without a
 - `tests/db/security.test.ts` (78 lines) — Regression tests for the 2026-11-10 security review:
 
@@ -1825,6 +1857,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `tests/unit/url-safety.test.ts` (20 lines)
 - `tests/unit/venue-outline.test.ts` (49 lines) — A ~40 m square building and a second one ~200 m east.
 - `tests/unit/viewer-events.test.ts` (29 lines)
+- `tests/unit/xlsx.test.ts` (39 lines)
 
 ### `supabase/functions/`
 

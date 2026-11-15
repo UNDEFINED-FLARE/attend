@@ -6,7 +6,7 @@ const hrefs = (items: { href: string }[]) => items.map((i) => i.href);
 
 describe("menus an institution designs", () => {
   it("starts from the app's defaults", () => {
-    expect(hrefs(menuFor("lecturer", DEFAULT_THEME))).toEqual(["/lecturer", "/lecturer/timetable", "/lecturer/disputes", "/lecturer/early-warning", "/notifications"]);
+    expect(hrefs(menuFor("lecturer", DEFAULT_THEME))).toEqual(["/lecturer", "/lecturer/timetable", "/lecturer/disputes", "/lecturer/reports", "/lecturer/early-warning", "/notifications"]);
   });
 
   it("applies renames, order and hidden items, but never hides locked ones", () => {

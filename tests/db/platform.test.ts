@@ -1558,3 +1558,85 @@ describe("staff roles: each sees and changes only what the role allows", () => {
     await expect(db.as(s.integ, "select uniattend.import_start($1, 'x', 'x')", [id.instB])).rejects.toThrow(/institution admin only/);
   });
 });
+
+describe("institutional reports: aggregated in the database, limited to what each person may see", () => {
+  type Report = {
+    from: string; to: string;
+    totals: { modules: number; sessions: number; present: number; late: number; absent: number; excused: number; unresolved: number; rate: number | null };
+    by_faculty: { name: string }[]; by_department: { name: string }[];
+    by_module: { code: string; sessions: number; rate: number | null }[];
+    trend: { week: string; rate: number | null }[];
+    at_risk: { student_number: string; module_code: string; consecutive_absences: number; worst_case: number | null }[];
+    missing_registers: number; open_disputes: number;
+  };
+  const staff = async (email: string) => (await db.admin<{ id: string }>("select id from auth.users where email = $1", [email]))[0].id;
+  const report = async (who: string, opts: { from?: string; to?: string; faculty?: string; department?: string; module?: string } = {}, inst = id.instA) =>
+    (await db.asOne<{ institution_report: Report }>(who, "select uniattend.institution_report($1, $2, $3, $4, $5, $6)",
+      [inst, opts.from ?? null, opts.to ?? null, opts.faculty ?? null, opts.department ?? null, opts.module ?? null])).institution_report;
+
+  beforeAll(async () => {
+    // Three classes in a row that A003 misses: open and close them without A003 checking in.
+    for (let i = 0; i < 3; i++) {
+      const S = await openSession("A");
+      await checkIn(u.sA1, S.id, null, S.token, gpsAt(0), hex("a"));
+      await db.as(u.lectA, "select uniattend.close_session($1)", [S.id]);
+    }
+  });
+
+  it("counts every record of the closed classes in the period, once", async () => {
+    const r = await report(u.adminA);
+    const [truth] = await db.admin<{ n: number }>(
+      `select count(*)::int as n from uniattend.attendance_records a join uniattend.class_sessions cs on cs.id = a.session_id
+        where cs.institution_id = $1 and cs.status = 'closed' and (cs.opens_at at time zone 'Africa/Johannesburg')::date between $2 and $3`,
+      [id.instA, r.from, r.to]);
+    const t = r.totals;
+    expect(t.sessions).toBeGreaterThanOrEqual(3);
+    expect(t.present + t.late + t.absent + t.excused + t.unresolved).toBe(truth.n);
+    expect(t.rate).toBeCloseTo(100 * (t.present + t.late) / (t.present + t.late + t.absent), 1);
+    expect(r.by_module.find((m) => m.code === "CSC101")?.sessions).toBeGreaterThanOrEqual(3);
+    expect(r.trend.length).toBeGreaterThan(0);
+  });
+
+  it("flags students absent three classes in a row or below the required attendance", async () => {
+    const r = await report(u.adminA);
+    const a3 = r.at_risk.find((x) => x.student_number === "A003" && x.module_code === "CSC101");
+    expect(a3?.consecutive_absences).toBeGreaterThanOrEqual(3);
+    expect(r.at_risk.find((x) => x.student_number === "A001" && x.module_code === "CSC101" && x.consecutive_absences >= 3)).toBeUndefined();
+  });
+
+  it("each person sees only the modules they may see; filters narrow it further", async () => {
+    const codes = (r: Report) => r.by_module.map((m) => m.code).sort();
+    const depHist = (await db.admin<{ id: string }>("select id from uniattend.departments where name = 'History' and institution_id = $1", [id.instA]))[0].id;
+    expect(codes(await report(u.adminA))).toEqual(expect.arrayContaining(["CSC101", "HIS101"]));
+    expect(codes(await report(u.adminA, { department: depHist }))).toEqual(["HIS101"]);
+    expect(codes(await report(await staff("fac@uniA.ac.za")))).toEqual(["CSC101"]);
+    expect(codes(await report(await staff("dep@uniA.ac.za")))).toEqual(["HIS101"]);
+    expect(codes(await report(u.lectA))).toEqual(["CSC101"]);
+    expect(codes(await report(await staff("auditor@uniA.ac.za")))).toEqual(expect.arrayContaining(["CSC101", "HIS101"]));
+    // A faculty admin asking for another faculty's department gets nothing, not its data.
+    expect(codes(await report(await staff("fac@uniA.ac.za"), { department: depHist }))).toEqual([]);
+  });
+
+  it("refuses people without a reporting role and other institutions", async () => {
+    await expect(report(u.sA1)).rejects.toThrow(/Not allowed/);
+    await expect(report(await staff("integ@uniA.ac.za"))).rejects.toThrow(/Not allowed/);
+    await expect(report(u.adminB)).rejects.toThrow(/Not allowed/);
+    await expect(report(u.lectB)).rejects.toThrow(/Not allowed/);
+    expect((await report(u.adminB, {}, id.instB)).by_module.map((m) => m.code)).not.toContain("HIS101");
+  });
+
+  it("checks the period", async () => {
+    expect((await report(u.adminA, { from: "2030-01-01", to: "2030-01-31" })).totals.sessions).toBe(0);
+    await expect(report(u.adminA, { from: "2026-03-01", to: "2026-02-01" })).rejects.toThrow(/end date is before/);
+    await expect(report(u.adminA, { from: "2024-01-01", to: "2026-01-01" })).rejects.toThrow(/at most 400 days/);
+  });
+
+  it("report downloads are audited, by people who may report", async () => {
+    await db.as(u.lectA, "select uniattend.log_export('institution_report', 12, $1, null, $2)", [id.instA, JSON.stringify({ format: "xlsx", from: "2026-11-01", to: "2026-11-15" })]);
+    const [row] = await db.admin<{ details: Record<string, unknown> }>(
+      "select details from uniattend.audit_logs where actor_id = $1 and entity = 'institution_report' order by id desc limit 1", [u.lectA]);
+    expect(row.details).toMatchObject({ rows: 12, format: "xlsx", from: "2026-11-01" });
+    await expect(db.as(await staff("integ@uniA.ac.za"), "select uniattend.log_export('institution_report', 1, $1)", [id.instA])).rejects.toThrow(/Not allowed/);
+    await expect(db.as(u.sA1, "select uniattend.log_export('institution_report', 1, $1)", [id.instA])).rejects.toThrow(/Not allowed/);
+  });
+});
