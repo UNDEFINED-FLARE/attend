@@ -2,13 +2,15 @@ import type { ReactNode } from "react";
 import { AppTitle } from "@/components/app-chrome";
 import { Icon } from "@/components/icons";
 import { LateChip } from "@/components/late";
+import { LayoutModeProvider, LayoutToggle, Parts } from "@/components/layout-mode";
 import { CalmPanel, EmptyNote, Figure, FocusPanel, Glyph, Meter, Panel, Pill, Row, SectionTitle, Tile, WeekBars } from "@/components/minimal";
 import { PushToggle } from "@/components/push-toggle";
 import { pct } from "@/components/ui";
 import { hhmm, type Slot } from "@/components/week-grid";
+import type { LayoutMode } from "@/lib/layout-mode";
 import { moduleShade } from "@/lib/palette";
 import { timeOf } from "@/lib/stats";
-import type { StudentCard, Theme } from "@/lib/theme";
+import { CARD_LABEL, type StudentCard, type Theme } from "@/lib/theme";
 import { LeaveButton } from "./leave-button";
 import type { TrendSeries } from "./trend-card";
 
@@ -30,7 +32,12 @@ export type DashboardData = {
   todaySlots: DashSlot[]; nextSlot: DashSlot | undefined; now: string; day: number;
   overall: number | null; att: number; tot: number; pending: number; atRisk: DashRow[];
   week: { wd: number; date: number; letter: string; kinds: Set<string> }[];
+  /** Scroll (one page) or Buttons (one card at a time), as chosen on this device. */
+  layout?: LayoutMode;
 };
+
+/** Short button names for Buttons mode; an institution's own card title (Design page) wins. */
+const BUTTON_LABEL: Record<StudentCard, string> = { live: "Now", quick: "Overview", today: "Today", modules: "Modules", hero: "Weekly", recent: "Recent" };
 
 export const colorFor = moduleShade;
 export const badgeOf = (code: string) => code.replace(/[^A-Z]/gi, "").slice(0, 3).toUpperCase() || code.slice(0, 2);
@@ -178,10 +185,15 @@ export function DashboardView({ d }: { d: DashboardData }) {
   // Cards in the institution's order (Design page); on wide screens the first two sit side by side.
   const order = theme.student.cards.filter((c) => c.show).map((c) => c.id);
   const [a, b, ...rest] = order;
+  const buttonLabel = (id: StudentCard) => {
+    const own = theme.student.cards.find((c) => c.id === id)?.title;
+    return own && own !== CARD_LABEL[id] ? own : BUTTON_LABEL[id];
+  };
 
   return (
+    <LayoutModeProvider initial={d.layout ?? "scroll"}>
     <div className="mx-auto max-w-5xl">
-      <AppTitle eyebrow={hello} title={first || "Dashboard"}
+      <AppTitle eyebrow={hello} title={first || "Dashboard"} action={<LayoutToggle />}
         sub={d.studentNumber ? <span className="font-mono text-xs">{d.studentNumber}</span> : undefined} />
       <div className="space-y-6">
         {(d.inClass ?? []).map((c) => (
@@ -195,9 +207,16 @@ export function DashboardView({ d }: { d: DashboardData }) {
           </Panel>
         ))}
         <PushToggle compact logo={theme.header.logoUrl || null} institution={theme.header.title || undefined} />
-        {a && (b ? <div className="grid gap-6 lg:grid-cols-2"><div>{cards[a]}</div><div>{cards[b]}</div></div> : cards[a])}
-        {rest.map((id) => <div key={id}>{cards[id]}</div>)}
+        {/* Scroll: the cards one under the other, exactly as before. Buttons: one card at a time. */}
+        <Parts label="Home" parts={order.map((id) => ({ id, label: buttonLabel(id), content: cards[id] }))}
+          scrollView={
+            <div className="space-y-6">
+              {a && (b ? <div className="grid gap-6 lg:grid-cols-2"><div>{cards[a]}</div><div>{cards[b]}</div></div> : cards[a])}
+              {rest.map((id) => <div key={id}>{cards[id]}</div>)}
+            </div>
+          } />
       </div>
     </div>
+    </LayoutModeProvider>
   );
 }

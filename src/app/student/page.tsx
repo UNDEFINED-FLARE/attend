@@ -1,5 +1,7 @@
+import { cookies } from "next/headers";
 import { hhmm, todayWeekday } from "@/components/week-grid";
 import { requireRole } from "@/lib/auth";
+import { LAYOUT_COOKIE, parseLayoutMode } from "@/lib/layout-mode";
 import { loadTheme } from "@/lib/shell-data";
 import { greeting, sastDay } from "@/lib/stats";
 import { myTimetable, nowHHMM } from "@/lib/student-data";
@@ -78,5 +80,5 @@ export default async function StudentHome() {
     return { wd: k + 1, date: d.getUTCDate(), letter: "MTWTFSS"[k], kinds };
   });
   return <DashboardView d={{ theme, hello, first, studentNumber: me?.student_number ?? null, rows, recs, live, inClass, series, todaySlots, nextSlot, now, day,
-    overall, att, tot, pending, atRisk, week }} />;
+    overall, att, tot, pending, atRisk, week, layout: parseLayoutMode((await cookies()).get(LAYOUT_COOKIE)?.value) }} />;
 }
