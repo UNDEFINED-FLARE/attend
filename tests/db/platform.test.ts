@@ -1202,10 +1202,10 @@ describe("classes from the timetable and sessions prepared from them", () => {
     [id.instA, id.modA, id.venueA, group]))[0].id;
 
   beforeAll(async () => {
-    // Tomorrow (in South Africa) at 10:00, every week.
+    // Tomorrow (in South Africa) at 06:10, every week: an hour no other test books, whatever day tomorrow is.
     const [{ dow }] = await db.admin<{ dow: number }>("select extract(isodow from (now() at time zone 'Africa/Johannesburg')::date + 1)::int dow");
     slot = (await db.asOne<{ id: string }>(u.adminA,
-      "insert into uniattend.timetables (institution_id, module_id, venue_id, weekday, starts_at, ends_at, kind) values ($1, $2, $3, $4, '10:00', '11:00', 'lecture') returning id",
+      "insert into uniattend.timetables (institution_id, module_id, venue_id, weekday, starts_at, ends_at, kind) values ($1, $2, $3, $4, '06:10', '07:10', 'lecture') returning id",
       [id.instA, id.modA, id.venueA, dow])).id;
     venue2 = (await db.asOne<{ id: string }>(u.adminA, "insert into uniattend.venues (institution_id, name) values ($1, 'Hall 2') returning id", [id.instA])).id;
     subUser = await db.newUser("sub@unia.ac.za");
@@ -1220,7 +1220,7 @@ describe("classes from the timetable and sessions prepared from them", () => {
     const list = await events(u.adminA);
     expect(list).toHaveLength(2);
     expect(list.every((e) => e.requires_attendance && e.status === "scheduled")).toBe(true);
-    expect(new Date(list[0].starts_at).toLocaleTimeString("en-ZA", { timeZone: "Africa/Johannesburg", hour: "2-digit", minute: "2-digit" })).toBe("10:00");
+    expect(new Date(list[0].starts_at).toLocaleTimeString("en-ZA", { timeZone: "Africa/Johannesburg", hour: "2-digit", minute: "2-digit" })).toBe("06:10");
     expect(await events(u.sA1)).toHaveLength(2);       // enrolled student
     expect(await events(u.lectA)).toHaveLength(2);     // module lecturer
     expect(await events(u.sB1)).toHaveLength(0);
@@ -1232,13 +1232,13 @@ describe("classes from the timetable and sessions prepared from them", () => {
   it("untouched classes follow the weekly slot; one changed by hand keeps its change", async () => {
     const [first, second] = await events(u.adminA);
     await db.as(u.lectA, "select uniattend.change_event($1, 'cancel', null, null, null, null, 'Public holiday')", [first.id]);
-    await db.as(u.adminA, "update uniattend.timetables set venue_id = $1, starts_at = '11:00', ends_at = '12:00' where id = $2", [venue2, slot]);
+    await db.as(u.adminA, "update uniattend.timetables set venue_id = $1, starts_at = '07:20', ends_at = '08:20' where id = $2", [venue2, slot]);
     const r = await gen();
     expect(r.created).toBe(0);
     const [a, b] = await db.as<Ev>(u.adminA, "select id, starts_at, status, venue_id, edited from uniattend.timetable_events where id in ($1, $2) order by starts_at", [first.id, second.id]);
     expect(a).toMatchObject({ status: "cancelled", venue_id: id.venueA, edited: true });
     expect(b).toMatchObject({ status: "scheduled", venue_id: venue2, edited: false });
-    expect(new Date(b.starts_at).toLocaleTimeString("en-ZA", { timeZone: "Africa/Johannesburg", hour: "2-digit", minute: "2-digit" })).toBe("11:00");
+    expect(new Date(b.starts_at).toLocaleTimeString("en-ZA", { timeZone: "Africa/Johannesburg", hour: "2-digit", minute: "2-digit" })).toBe("07:20");
     expect(await events(u.adminA)).toHaveLength(2);    // moved, not duplicated
   });
 
@@ -1359,5 +1359,92 @@ describe("operations: migration record, health report, audited downloads", () =>
     await expect(db.as(u.adminA, "select uniattend.log_export('everything', 1, $1)", [id.instA])).rejects.toThrow(/Unknown export/);
     // Nobody can write the audit log directly.
     await expect(db.as(u.adminA, "insert into uniattend.audit_logs (institution_id, action, entity) values ($1, 'export', 'x')", [id.instA])).rejects.toThrow();
+  });
+});
+
+describe("attendance exceptions: one review queue, and no absence from weak evidence", () => {
+  let S: Awaited<ReturnType<typeof openSession>>;
+  type Item = { record_id: string; student_number: string; kind: string; status: string; reasons: string[]; evidence: Record<string, unknown> };
+  const queue = async (who: string, state = "open", inst = id.instA) =>
+    (await db.asOne<{ review_queue: Item[] }>(who, "select uniattend.review_queue($1, $2)", [inst, state])).review_queue
+      .filter((x) => (x as unknown as { session_id: string }).session_id === S.id);
+  const rec = async (no: string) => (await db.admin<{ id: string; status: string; method: string; explanation: string[] }>(
+    "select r.id, r.status, r.method, r.explanation from uniattend.attendance_records r join uniattend.students s on s.id = r.student_id where r.session_id = $1 and s.student_number = $2", [S.id, no]))[0];
+  const decide = (who: string, records: string[], status: string, note: string | null = null) =>
+    db.asOne<{ decide_review: number }>(who, "select uniattend.decide_review($1, $2, $3)", [records, status, note]).then((r) => r.decide_review);
+
+  beforeAll(async () => {
+    S = await openSession("A");
+    await checkIn(u.sA1, S.id, null, S.token, gpsAt(0.005), hex("7"));   // 550 m away: review
+    await checkIn(u.sA2, S.id, null, "not-a-token", gpsAt(0), hex("8")); // refused: no record yet
+  });
+
+  it("lists weak check-ins with their evidence, for the module's lecturer and the institution's admin only", async () => {
+    const mine = await queue(u.lectA);
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({ student_number: "A001", kind: "outside_venue", status: "pending_verification" });
+    expect(mine[0].evidence).toMatchObject({ attempts: 1, refused_attempts: 0, location_required: true });
+    expect(Number(mine[0].evidence.outside_by_m)).toBeGreaterThan(400);
+    expect(await queue(u.adminA)).toHaveLength(1);
+    await expect(queue(u.lectB)).rejects.toThrow(/Only lecturers and administrators/);
+    await expect(queue(u.adminB)).rejects.toThrow(/Only lecturers and administrators/);
+    await expect(queue(u.sA1)).rejects.toThrow(/Only lecturers and administrators/);
+    // The other institution's admin sees nothing of A's in its own queue.
+    expect(await queue(u.adminB, "open", id.instB)).toHaveLength(0);
+  });
+
+  it("closing the class sends a refused attempt to review instead of marking it absent", async () => {
+    const res = await db.asOne<{ close_session: Record<string, number> }>(u.lectA, "select uniattend.close_session($1)", [S.id]);
+    expect(res.close_session.sent_to_review).toBe(1);
+    const a2 = await rec("A002");
+    expect(a2).toMatchObject({ status: "pending_verification", method: "system" });
+    expect(a2.explanation.join(" ")).toMatch(/Tried to check in at \d\d:\d\d.*Sent for review instead of being marked absent/);
+    expect((await rec("A003")).status).toBe("absent");                  // never tried: absent as before
+    const kinds = Object.fromEntries((await queue(u.lectA)).map((x) => [x.student_number, x.kind]));
+    expect(kinds).toEqual({ A001: "outside_venue", A002: "refused_attempt" });
+  });
+
+  it("decisions need the right person, and a reason to record absent or excused", async () => {
+    const [a1, a2] = [(await rec("A001")).id, (await rec("A002")).id];
+    await expect(decide(u.lectB, [a1], "present")).rejects.toThrow(/Not allowed/);
+    await expect(decide(u.sA1, [a1], "present")).rejects.toThrow(/Not allowed/);
+    await expect(decide(u.lectA, [a1, (await rec("A003")).id, "00000000-0000-0000-0000-000000000000"], "present")).rejects.toThrow(/Not allowed/);
+    await expect(decide(u.lectA, [a2], "absent")).rejects.toThrow(/Give a reason/);
+    await expect(decide(u.lectA, [a2], "pending_verification")).rejects.toThrow(/Choose present/);
+    expect((await rec("A001")).status).toBe("pending_verification");    // nothing changed
+  });
+
+  it("deciding records the status, the reviewer and the reason, tells the student, and can't be repeated", async () => {
+    const [a1, a2, a3] = [(await rec("A001")).id, (await rec("A002")).id, (await rec("A003")).id];
+    expect(await decide(u.lectA, [a1], "present")).toBe(1);
+    expect(await decide(u.adminA, [a2], "absent", "Was not in the hall when the code was shown")).toBe(1);
+    expect(await decide(u.lectA, [a1, a3], "late")).toBe(0);             // already decided, or never in review
+    expect((await rec("A001")).status).toBe("present");
+    expect((await rec("A002")).status).toBe("absent");
+    expect((await rec("A003")).status).toBe("absent");
+    expect(await queue(u.lectA)).toHaveLength(0);
+
+    const decided = await queue(u.lectA, "decided") as unknown as { student_number: string; decision: string; previous: string; note: string; decided_by: string }[];
+    expect(decided.map((d) => [d.student_number, d.decision, d.previous])).toEqual([["A002", "absent", "pending_verification"], ["A001", "present", "pending_verification"]]);
+    expect(decided[0].note).toBe("Was not in the hall when the code was shown");
+    expect(decided[1].note).toBe("Confirmed present after review.");
+    expect(await db.as(u.sA2, "select 1 from uniattend.notifications where title = 'Check-in reviewed' and body like '%absent. You can dispute%'")).toHaveLength(1);
+    expect(await db.as(u.adminA, "select 1 from uniattend.audit_logs where action = 'review_decide'")).toHaveLength(2);
+  });
+
+  it("lists timetable classes that ended without a register, to the right people only", async () => {
+    const [ev] = await db.admin<{ id: string }>(
+      "insert into uniattend.timetable_events (institution_id, module_id, venue_id, kind, starts_at, ends_at, source, requires_attendance) values ($1, $2, $3, 'lecture', now() - interval '3 hours', now() - interval '2 hours', 'manual', true) returning id",
+      [id.instA, id.modA, id.venueA]);
+    await db.admin("insert into uniattend.timetable_events (institution_id, module_id, venue_id, kind, starts_at, ends_at, source, requires_attendance) values ($1, $2, $3, 'test', now() - interval '6 hours', now() - interval '5 hours', 'manual', false)",
+      [id.instA, id.modA, id.venueA]);
+    const missing = async (who: string, inst = id.instA) =>
+      (await db.asOne<{ missing_registers: { event_id: string; module_code: string }[] }>(who, "select uniattend.missing_registers($1)", [inst])).missing_registers.map((m) => m.event_id);
+    expect(await missing(u.lectA)).toContain(ev.id);
+    expect(await missing(u.adminA)).toContain(ev.id);
+    expect((await missing(u.adminA)).length).toBe((await missing(u.lectA)).length); // the attendance-free test is not listed
+    await expect(missing(u.adminB)).rejects.toThrow(/Only lecturers and administrators/);
+    await expect(missing(u.sA1)).rejects.toThrow(/Only lecturers and administrators/);
+    expect(await missing(u.adminB, id.instB)).not.toContain(ev.id);
   });
 });

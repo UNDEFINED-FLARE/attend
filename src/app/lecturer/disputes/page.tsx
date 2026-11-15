@@ -1,31 +1,36 @@
-import Link from "next/link";
 import { ActionForm } from "@/components/form";
-import { Card, CardTitle, Input, PageHeader, Select, when } from "@/components/ui";
+import { DecisionLog, MissingRegisters, ReviewQueue } from "@/components/review-queue";
+import { Card, CardTitle, Input, Notice, PageHeader, Select, when } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
+import { loadReview } from "@/lib/review";
 import { resolveDispute } from "../actions";
 
-export const metadata = { title: "Disputes & reviews" };
+export const metadata = { title: "Reviews" };
 
-export default async function Disputes() {
+export default async function Reviews() {
   const { supabase, institutionId } = await requireRole("lecturer");
-  // RLS already limits both lists to modules this lecturer teaches.
-  const [{ data: disputes }, { data: pending }] = await Promise.all([
+  // RLS and the review functions limit everything to modules this lecturer teaches.
+  const [{ data: disputes }, review] = await Promise.all([
     supabase.from("attendance_disputes")
       .select("id, reason, previous_status, created_at, students(student_number, full_name), attendance_records(session_id, class_sessions(title, opens_at, modules(code)))")
       .eq("institution_id", institutionId).eq("status", "open").order("created_at"),
-    supabase.from("attendance_records")
-      .select("id, session_id, score, explanation, students(student_number, full_name), class_sessions(title, opens_at, modules(code))")
-      .eq("institution_id", institutionId).eq("status", "pending_verification").order("created_at").limit(100),
+    loadReview(supabase, institutionId),
   ]);
   type D = { id: string; reason: string; previous_status: string; created_at: string;
     students: { student_number: string; full_name: string };
     attendance_records: { session_id: string; class_sessions: { title: string; opens_at: string; modules: { code: string } } } };
-  type P = { id: string; session_id: string; score: number; explanation: string[];
-    students: { student_number: string; full_name: string }; class_sessions: { title: string; opens_at: string; modules: { code: string } } };
 
   return (
     <>
-      <PageHeader title="Disputes & reviews" subtitle="Nothing here counts against a student until you decide." />
+      <PageHeader title="Reviews" subtitle="Nothing here counts against a student until you decide." />
+      {review.needsUpdate && <div className="mb-6"><Notice tone="warn">The review queue needs the latest database update (migration 0029).</Notice></div>}
+      {review.error && <div className="mb-6"><Notice tone="bad">{review.error}</Notice></div>}
+
+      <Card className="mb-6">
+        <CardTitle>Check-ins to review ({review.open.length})</CardTitle>
+        <ReviewQueue items={review.open} sessionBase="/lecturer/sessions" />
+      </Card>
+
       <Card className="mb-6">
         <CardTitle>Open disputes ({(disputes ?? []).length})</CardTitle>
         {(disputes ?? []).length === 0 && <p className="text-sm text-muted">No open disputes.</p>}
@@ -49,22 +54,17 @@ export default async function Disputes() {
           ))}
         </ul>
       </Card>
-      <Card>
-        <CardTitle>Check-ins awaiting review ({(pending ?? []).length})</CardTitle>
-        {(pending ?? []).length === 0 && <p className="text-sm text-muted">Nothing to review.</p>}
-        <ul className="divide-y divide-line text-sm">
-          {((pending ?? []) as unknown as P[]).map((p) => (
-            <li key={p.id} className="flex flex-wrap items-start justify-between gap-3 py-3">
-              <div>
-                <p><b className="font-mono">{p.students.student_number}</b> {p.students.full_name} · score {p.score}</p>
-                <p className="text-muted">{p.class_sessions.modules.code} · {when(p.class_sessions.opens_at)}</p>
-                <p className="text-xs text-muted">{(p.explanation ?? []).join(" ")}</p>
-              </div>
-              <Link href={`/lecturer/sessions/${p.session_id}`} className="text-info hover:underline">Review in register →</Link>
-            </li>
-          ))}
-        </ul>
-      </Card>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardTitle>Classes without a register</CardTitle>
+          <MissingRegisters items={review.missing} />
+        </Card>
+        <Card>
+          <CardTitle>Decided in the last 30 days</CardTitle>
+          <DecisionLog items={review.decided} />
+        </Card>
+      </div>
     </>
   );
 }

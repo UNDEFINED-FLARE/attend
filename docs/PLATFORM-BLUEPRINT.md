@@ -231,7 +231,7 @@ Plans with limits enforced by triggers (`enforce_plan_limits`). New institutions
 
 ## 13. State at the time of writing
 
-**Live database (checked 15 November 2026):** all 28 migrations, 0001–0028, are applied; from 0028 on, `uniattend.schema_versions` lists them. They were run by hand, so Supabase's migration history does not list them; see `docs/commercial-readiness/01-technical-audit.md` §2 for how this was checked against the live schema.
+**Live database (checked 15 November 2026):** all 29 migrations, 0001–0029, are applied; from 0028 on, `uniattend.schema_versions` lists them. They were run by hand, so Supabase's migration history does not list them; see `docs/commercial-readiness/01-technical-audit.md` §2 for how this was checked against the live schema.
 
 **Live data:** 3 institutions (UNIVEN, UL, TUT), all on Starter trials ending 8–9 December 2026; 142 students, 25 lecturers, 724 modules, 4,366 dated classes, 0 integrations configured.
 
@@ -653,6 +653,25 @@ After each step: type-check, lint, tests, build.
 > * log_export(): every download of attendance or personal data is written to the
 > audit log (who, what, how many rows). Admin exports, lecturers' module reports,
 > rejected-row reports and personal-data downloads all call it.
+
+### `20261115000029_attendance_review.sql` (238 lines)
+
+> UniAttend 0029 — attendance exceptions: one review queue, and no absence from weak evidence.
+>
+> * close_session(): a student who tried to check in and was refused (for example
+> the QR had expired, or the typed code was not allowed) is no longer recorded
+> absent when the class closes. Their record becomes "pending review" with what
+> happened, and a person decides. Students who never tried are absent as before.
+> * review_queue(): every check-in waiting for a person — weak or missing location,
+> a device used by another student, a typed code, an offline check-in, a refused
+> attempt, a late arrival — with its evidence and attempts, for the module's
+> lecturers (their modules) and the institution's administrators (all modules).
+> 'decided' lists the decisions of the last 30 days: who decided, what, and why.
+> * decide_review(): decide one or many at once: present, late, absent or excused.
+> A reason is required to record someone absent or excused. Each decision is kept
+> as evidence on the record, the student is told, and it is audited.
+> * missing_registers(): classes from the timetable that should have taken
+> attendance, have ended, and have no attendance session — "not recorded".
 
 ## B. Tables (schema `uniattend`) and their columns
 
@@ -1366,6 +1385,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `_event_local(p_inst uuid, p_at timestamptz)` → text — internal
 - `_generate_events(p_inst uuid, p_days int)` → jsonb — internal
 - `_integration_mark_success()` → trigger — internal
+- `_may_review(p_inst uuid, p_module uuid)` → boolean — internal
 - `_may_run_event(e uniattend.timetable_events)` → boolean — internal
 - `_notify_event(p_event uuid, p_title text, p_body text)` → int — internal
 - `_sync_apply(p_run uuid)` → jsonb — internal
@@ -1395,6 +1415,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `check_out(p_session uuid)` → jsonb — callable by: authenticated
 - `close_session(p_session uuid)` → jsonb — internal
 - `decide_late(p_session uuid, p_students uuid[], p_accept boolean, p_note text default null)` → int — callable by: authenticated
+- `decide_review(p_records uuid[], p_status text, p_note text default null)` → int — callable by: authenticated
 - `discard_theme_draft(p_institution uuid)` → void — callable by: authenticated
 - `enforce_plan_limits()` → trigger — internal
 - `enrolled_in_module(p_module uuid)` → boolean — internal
@@ -1438,6 +1459,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `live_plan(p_inst uuid)` → table (plan uniattend.subscription_plans, sub_status text, period_end timestamptz) — internal
 - `log_export(p_kind text, p_rows integer, p_inst uuid default null, p_module uuid default null, p_details jsonb default '{}')` → void — callable by: authenticated
 - `mark_notifications_read(p_ids uuid[] default null)` → void — internal
+- `missing_registers(p_inst uuid, p_days int default 14)` → jsonb — callable by: authenticated
 - `module_of_record(p_record uuid)` → uuid — internal
 - `module_report(p_module uuid)` → table (student_id uuid, student_number text, full_name text, sessions int, attended int, late int, absent int, excused int, unresolved int, percent numeric, worst_case_percent numeric, meets_requirement boolean, at_risk boolean) — internal
 - `my_attendance()` → table (institution_id uuid, module_id uuid, code text, title text, attended int, absent int, excused int, unresolved int, percent numeric, min_pct int) — internal
@@ -1473,6 +1495,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `retention_delete(p_inst uuid, p_by text)` → jsonb — internal
 - `retention_preview(p_inst uuid)` → jsonb — callable by: authenticated
 - `retry_run(p_run uuid)` → void — callable by: authenticated
+- `review_queue(p_inst uuid, p_state text default 'open', p_limit int default 200)` → jsonb — callable by: authenticated
 - `roster_apply(p_inst uuid, p_integration uuid, p_run uuid, p_payload jsonb)` → jsonb — internal
 - `roster_push(p_key text, p_payload jsonb)` → jsonb — callable by: anon, authenticated
 - `run_retention()` → int — internal
@@ -1550,6 +1573,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/admin/people/page.tsx` (116 lines)
 - `src/app/admin/people/student-adder.tsx` (85 lines)
 - `src/app/admin/requests/page.tsx` (18 lines)
+- `src/app/admin/review/page.tsx` (42 lines) — The whole institution's queue: what lecturers have not decided yet, classes that
 - `src/app/admin/settings/page.tsx` (140 lines)
 - `src/app/admin/structure/map-actions.ts` (37 lines) — Auto-map: place many existing venues at once on the building outlines/points chosen by the admin.
 - `src/app/admin/structure/outline-all.tsx` (131 lines) — Outlines every venue automatically from OpenStreetMap building footprints, with
@@ -1573,12 +1597,13 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/layout.tsx` (27 lines) — System font stack (see globals.css): no font download at build time or on a
 - `src/app/lecturer/actions.ts` (180 lines)
 - `src/app/lecturer/class-actions.ts` (51 lines) — "Open attendance" on a class: the database checks it is this lecturer's class and the right time.
-- `src/app/lecturer/disputes/page.tsx` (70 lines) — RLS already limits both lists to modules this lecturer teaches.
+- `src/app/lecturer/disputes/page.tsx` (70 lines) — RLS and the review functions limit everything to modules this lecturer teaches.
 - `src/app/lecturer/early-warning/page.tsx` (38 lines)
 - `src/app/lecturer/layout.tsx` (12 lines)
 - `src/app/lecturer/modules/[id]/export/route.ts` (29 lines) — The report comes from module_report(), which refuses anyone who does not
 - `src/app/lecturer/modules/[id]/page.tsx` (98 lines)
 - `src/app/lecturer/page.tsx` (148 lines)
+- `src/app/lecturer/review-actions.ts` (36 lines) — Decide check-ins under review. The database checks the reviewer may decide each one.
 - `src/app/lecturer/sessions/[id]/controls.tsx` (69 lines) — Pause or resume, regenerate, change the window, allow a printed QR, and the card scanner.
 - `src/app/lecturer/sessions/[id]/late-arrivals.tsx` (102 lines)
 - `src/app/lecturer/sessions/[id]/live.tsx` (78 lines) — Re-fetches a freshly signed token at each 20-second step boundary. The QR
@@ -1654,6 +1679,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/components/nav.tsx` (55 lines) — The longest matching prefix wins, so /lecturer/modules/x highlights
 - `src/components/offline-sync.tsx` (104 lines) — Shows when the device is offline, how much is waiting to be sent, and sends it
 - `src/components/push-toggle.tsx` (259 lines) — Inside the Android app (Capacitor): Android's own notification permission.
+- `src/components/review-queue.tsx` (171 lines) — Why a check-in is waiting for a person, in plain words.
 - `src/components/row-actions.tsx` (42 lines) — Small delete button with a confirmation step and an inline result.
 - `src/components/shell.tsx` (149 lines) — eslint-disable-next-line @next/next/no-img-element -- institution logo from an admin-set https URL
 - `src/components/timetable-actions.tsx` (17 lines) — "Add to my calendar" (.ics download) and "Print / save as PDF".
@@ -1664,7 +1690,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 
 - `src/lib/app-lock.ts` (143 lines) — App lock: after signing in once with a password, the app can be reopened with
 - `src/lib/assignment-match.ts` (210 lines) — Reads "which lecturer teaches which module" out of rows of cells from any document
-- `src/lib/audit-export.ts` (21 lines) — Write a data download to the audit log (who, what, how many rows) before handing
+- `src/lib/audit-export.ts` (23 lines) — Write a data download to the audit log (who, what, how many rows) before handing
 - `src/lib/auth.ts` (53 lines)
 - `src/lib/brand-cookie.ts` (3 lines) — Which institution's look the sign-in pages wear on this device (slug or id; not a secret).
 - `src/lib/branding.ts` (28 lines) — The institution branding for the sign-in, registration and password pages,
@@ -1689,10 +1715,11 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/lib/integrations/secrets.ts` (60 lines) — Credentials for an institution's systems (Moodle tokens, roster-link tokens, OAuth
 - `src/lib/integrations/sources.ts` (99 lines) — Talking to an institution's own systems. Every request: https only, public
 - `src/lib/legal.ts` (40 lines) — The company details every legal page uses: the privacy notice, terms, PAIA manual
-- `src/lib/nav-config.ts` (65 lines) — Every menu in the app, with the defaults an institution starts from. The Design
+- `src/lib/nav-config.ts` (66 lines) — Every menu in the app, with the defaults an institution starts from. The Design
 - `src/lib/offline-queue.ts` (59 lines) — Work done without signal, kept on the phone until it can be sent.
 - `src/lib/palette.ts` (5 lines) — Module colours in the minimal graphite look: dark-to-mid greys that stay readable
 - `src/lib/push.ts` (88 lines) — Delivers queued notifications to phones and browsers with Web Push.
+- `src/lib/review.ts` (41 lines)
 - `src/lib/route.ts` (12 lines) — What /api/route returns. `from`/`to` are indexes into `line` (OpenRouteService way_points).
 - `src/lib/safe-redirect.ts` (18 lines) — Where to send someone after sign-in or an email link. Only paths on this
 - `src/lib/schema-version.ts` (5 lines) — The newest database migration this build of the app expects. /api/health reports
@@ -1735,7 +1762,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `tests/db/harness.ts` (88 lines) — Runs the real migrations against an in-process Postgres (PGlite) with a
 - `tests/db/install-script.test.ts` (30 lines) — The bundled SQL-editor script must install cleanly next to another app's
 - `tests/db/location.test.ts` (90 lines) — Campus boundaries and class navigation (migration 0013). Live location sharing
-- `tests/db/platform.test.ts` (1363 lines) — UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
+- `tests/db/platform.test.ts` (1450 lines) — UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
 - `tests/db/safeupdate.test.ts` (49 lines) — Supabase loads pg_safeupdate for API requests: an UPDATE or DELETE without a
 - `tests/db/security.test.ts` (78 lines) — Regression tests for the 2026-11-10 security review:
 

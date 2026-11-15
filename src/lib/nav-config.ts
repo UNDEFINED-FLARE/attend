@@ -30,6 +30,7 @@ export const MENUS: Record<MenuRole, Def[]> = {
     { href: "/admin/structure", label: "Venues & map", icon: "map" },
     { href: "/admin/modules", label: "Modules", icon: "book" },
     { href: "/admin/timetable", label: "Timetable", icon: "calendar" },
+    { href: "/admin/review", label: "Reviews", icon: "flag" },
     { href: "/admin/people", label: "People", icon: "users" },
     { href: "/admin/integrations", label: "Integrations", icon: "history", mobile: false },
     { href: "/admin/early-warning", label: "Early warning", icon: "alert", feature: "earlyWarning" },

@@ -28,8 +28,8 @@ Priority: **P0** blocks any real pilot · **P1** needed before a paid contract �
 | Enrolment, duplicate, device checks | Implemented, tested | `check_in` function and tests | — | P0 | Zero accepted duplicates in tests and pilot |
 | Venue geofence | Implemented, tested | `location.test.ts` | Report GPS accuracy as evidence, not a verdict | P1 | Low-accuracy fixes go to review, not absent |
 | Late arrivals with lecturer decision | Implemented, tested | migration 0010, tests | — | P1 | — |
-| Exception review queue (all failure reasons) | Partial | Disputes and late decisions exist; failed attempts recorded in `attendance_verification_events` but no review queue | Lecturer/officer queue for expired token, weak location, device reuse, offline pending | P1 | Each failed attempt is reviewable with its evidence and decision trail |
-| States "pending review" and "not recorded" | Missing | Statuses: present, late, absent, excused + custom | Add both states end to end | P1 | Uncertain check-ins never become absent automatically |
+| Exception review queue (all failure reasons) | Implemented, tested; live 15 Nov 2026 (0029) | `review_queue`, `decide_review`; lecturer Reviews page and admin `/admin/review`; 5 database tests | Attendance-officer role later; pilot use | P1 | Each case shows its reason and evidence; every decision keeps who, what and why |
+| States "pending review" and "not recorded" | Implemented, tested; live 15 Nov 2026 (0029) | Pending review existed; a refused attempt now becomes pending review at close, not absent; `missing_registers` lists classes with no register | Pilot use | P1 | Uncertain check-ins never become absent automatically |
 | Offline check-in queue | Implemented, tested (unit) / untested on phones | migration 0020 | Real Android test | P1 | Queued check-in validated on reconnect; duplicates refused |
 | Open attendance from a dated class | Implemented, tested | 0027, 7 database tests | Pilot use | P0 | One session per class however many times opened |
 | Register, corrections with reasons | Implemented, tested | migration 0014 | — | P1 | — |
