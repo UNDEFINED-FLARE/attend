@@ -231,7 +231,7 @@ Plans with limits enforced by triggers (`enforce_plan_limits`). New institutions
 
 ## 13. State at the time of writing
 
-**Live database (checked 15 November 2026):** all 31 migrations, 0001–0031, are applied; from 0028 on, `uniattend.schema_versions` lists them. They were run by hand, so Supabase's migration history does not list them; see `docs/commercial-readiness/01-technical-audit.md` §2 for how this was checked against the live schema.
+**Live database (checked 15 November 2026):** all 32 migrations, 0001–0032, are applied; from 0028 on, `uniattend.schema_versions` lists them. They were run by hand, so Supabase's migration history does not list them; see `docs/commercial-readiness/01-technical-audit.md` §2 for how this was checked against the live schema.
 
 **Live data:** 3 institutions (UNIVEN, UL, TUT), all on Starter trials ending 8–9 December 2026; 142 students, 25 lecturers, 724 modules, 4,366 dated classes, 0 integrations configured.
 
@@ -715,6 +715,30 @@ After each step: type-check, lint, tests, build.
 > never receives thousands of rows.
 > * log_export(): report downloads (CSV, Excel, printed/PDF) are audited too.
 
+### `20261115000032_onboarding_exit.sql` (279 lines)
+
+> UniAttend 0032 — onboarding a university to go-live, and letting it leave.
+>
+> Onboarding (the same twelve steps for every institution, no code changes):
+> 1 registration, 2 verification (platform), 3 approval (platform),
+> 4 administrator, 5 academic structure, 6 data connection or import,
+> 7 students and lecturers, 8 timetable, 9 attendance policy (institution),
+> 10 pilot, 11 training, 12 go-live approval (platform).
+> Steps the data can show (structure, people, timetable, pilot…) are worked out
+> from the institution's own records, so they cannot be ticked without being
+> true. The rest are signed off by a named person and audited. Go-live is
+> refused until every earlier step is done.
+> Exit (a university must never feel trapped):
+> * request_exit(): an institution admin asks to leave; the platform is told.
+> * revoke_integration_credentials(): every stored token and API key is
+> deleted and every connection paused, at once.
+> * The full data export (all tables, CSV in a ZIP) is a download in the app,
+> audited as 'institution_export'.
+> * close_institution(): the platform administrator closes the account. The
+> institution is archived: no sign-ins to it, no check-ins, data kept. Nothing
+> is deleted here — deleting records is a separate, deliberate step under the
+> retention schedule and the operator agreement.
+
 ## B. Tables (schema `uniattend`) and their columns
 
 - **academic_periods**
@@ -952,6 +976,22 @@ After each step: type-check, lint, tests, build.
   - `domain` text not null unique check (domain ~ '^[a-z0-9.-]+\.[a-z]{2,}$')
   - `verified_at` timestamptz
   - `created_at` timestamptz not null default now()
+- **institution_exit_requests**
+  - `id` uuid primary key default gen_random_uuid()
+  - `institution_id` uuid not null references uniattend.institutions(id) on delete cascade
+  - `requested_by` uuid references auth.users(id) on delete set null
+  - `reason` text not null check (length(trim(reason)) between 5 and 2000)
+  - `status` text not null default 'requested' check (status in ('requested', 'closed', 'withdrawn'))
+  - `credentials_revoked_at` timestamptz
+  - `closed_at` timestamptz, closed_by uuid references auth.users(id) on delete set null, closing_note text
+  - `created_at` timestamptz not null default now()
+- **institution_onboarding**
+  - `institution_id` uuid primary key references uniattend.institutions(id) on delete cascade
+  - `verified_at` timestamptz, verified_by uuid references auth.users(id) on delete set null, verification_note text
+  - `policy_confirmed_at` timestamptz, policy_confirmed_by uuid references auth.users(id) on delete set null
+  - `training_done_at` timestamptz, training_done_by uuid references auth.users(id) on delete set null, training_note text
+  - `go_live_at` timestamptz, go_live_by uuid references auth.users(id) on delete set null
+  - `updated_at` timestamptz not null default now()
 - **institution_settings**
   - `institution_id` uuid primary key references uniattend.institutions(id) on delete cascade
   - `min_attendance_pct` int not null default 75 check (min_attendance_pct between 0 and 100)
@@ -1383,6 +1423,8 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `institution_directory`.`institution_directory_super` — all to authenticated: `using (uniattend.is_super_admin()) with check (uniattend.is_super_admin())`
 - `institution_domains`.`institution_domains_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id))`
 - `institution_domains`.`institution_domains_write` — all to authenticated: `using (uniattend.is_super_admin()) with check (uniattend.is_super_admin())`
+- `institution_exit_requests`.`institution_exit_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id))`
+- `institution_onboarding`.`institution_onboarding_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id))`
 - `institution_settings`.`institution_settings_select` — select to authenticated: `using (uniattend.is_super_admin() or uniattend.is_member(institution_id))`
 - `institution_settings`.`institution_settings_update` — update to authenticated: `using (uniattend.is_inst_admin(institution_id)) with check (uniattend.is_inst_admin(institution_id))`
 - `institution_subscriptions`.`institution_subscriptions_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id))`
@@ -1459,6 +1501,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `check_in(p_session uuid, p_code text, p_token text, p_gps jsonb, p_device_hash text)` → jsonb — internal
 - `check_in_offline(p_session uuid, p_code text, p_token text, p_gps jsonb, p_device_hash text, p_captured_at timestamptz)` → jsonb — callable by: authenticated
 - `check_out(p_session uuid)` → jsonb — callable by: authenticated
+- `close_institution(p_inst uuid, p_note text)` → void — internal
 - `close_session(p_session uuid)` → jsonb — internal
 - `decide_late(p_session uuid, p_students uuid[], p_accept boolean, p_note text default null)` → int — callable by: authenticated
 - `decide_review(p_records uuid[], p_status text, p_note text default null)` → int — callable by: authenticated
@@ -1467,6 +1510,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `enrolled_in_module(p_module uuid)` → boolean — internal
 - `ensure_profile()` → void — internal
 - `evaluate_module_alerts(p_module uuid)` → int — internal
+- `exit_requests()` → jsonb — internal
 - `fan_out_announcement()` → trigger — internal
 - `generate_join_code(p_inst uuid)` → text — internal
 - `generate_timetable_events(p_inst uuid, p_days int default 14)` → jsonb — callable by: authenticated
@@ -1517,6 +1561,9 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `my_personal_data()` → jsonb — callable by: authenticated
 - `my_roles()` → table (institution_id uuid, institution_name text, institution_slug text, institution_status text, brand_primary text, role text) — callable by: authenticated
 - `notify_joined(p_user uuid, p_inst uuid, p_role text)` → void — internal
+- `onboarding_overview()` → jsonb — internal
+- `onboarding_sign_off(p_inst uuid, p_step text, p_note text default null, p_undo boolean default false)` → void — internal
+- `onboarding_status(p_inst uuid)` → jsonb — callable by: authenticated
 - `open_event_session(p_event uuid, p_late_minutes int default null)` → uniattend.class_sessions — callable by: authenticated
 - `open_session(p_module uuid, p_venue uuid, p_title text, p_minutes int default 90, p_late_minutes int default null)` → uniattend.class_sessions — internal
 - `override_attendance(p_session uuid, p_student uuid, p_status text, p_note text)` → uniattend.attendance_records — internal
@@ -1539,6 +1586,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `record_history(p_record uuid)` → table (at timestamptz, kind text, summary text, by_name text, note text) — callable by: authenticated
 - `record_manual_payment(p_inst uuid, p_amount_cents bigint, p_reference text, p_months int, p_plan_code text default null)` → jsonb — callable by: authenticated
 - `request_data_action(p_kind text, p_details text)` → uuid — callable by: authenticated
+- `request_exit(p_inst uuid, p_reason text)` → uuid — internal
 - `request_institution(p_name text, p_slug text, p_contact_email text default null)` → uuid — internal
 - `resolve_dispute(p_dispute uuid, p_upheld boolean, p_new_status text, p_note text)` → void — internal
 - `retention_counts(p_inst uuid)` → jsonb — internal
@@ -1546,6 +1594,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `retention_preview(p_inst uuid)` → jsonb — callable by: authenticated
 - `retry_run(p_run uuid)` → void — callable by: authenticated
 - `review_queue(p_inst uuid, p_state text default 'open', p_limit int default 200)` → jsonb — callable by: authenticated
+- `revoke_integration_credentials(p_inst uuid)` → int — internal
 - `roster_apply(p_inst uuid, p_integration uuid, p_run uuid, p_payload jsonb)` → jsonb — internal
 - `roster_push(p_key text, p_payload jsonb)` → jsonb — callable by: anon, authenticated
 - `run_retention()` → int — internal
@@ -1580,6 +1629,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `timetable_no_clash()` → trigger — internal
 - `touch_updated_at()` → trigger — internal
 - `update_student_alert(p_alert uuid, p_action text, p_note text default null)` → uniattend.student_alerts — callable by: authenticated
+- `withdraw_exit(p_inst uuid)` → void — internal
 - `write_audit(p_inst uuid, p_action text, p_entity text, p_entity_id text, p_details jsonb default '{}')` → void — internal
 
 ## E. Every source file, with its purpose
@@ -1602,6 +1652,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/admin/connections/page.tsx` (176 lines)
 - `src/app/admin/data-actions.ts` (243 lines) — Frees a unique number/code on an archived row so the same one can be added again later.
 - `src/app/admin/data/data-table.tsx` (131 lines) — The Data page table: tick rows for bulk actions, or edit one row inline.
+- `src/app/admin/data/export-all/route.ts` (73 lines) — Everything the institution keeps in UniAttend, one CSV per table, in a ZIP: for
 - `src/app/admin/data/export/route.ts` (23 lines) — CSV of any Data tab, with the same search and archived filter as the page.
 - `src/app/admin/data/page.tsx` (66 lines) — Every record the institution keeps, in one place: search, edit, bulk actions, export, restore.
 - `src/app/admin/design/actions.ts` (88 lines) — Publish: everyone at the institution sees it, and it is kept in the version history.
@@ -1609,6 +1660,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/admin/design/menus-features.tsx` (82 lines) — Features: switch optional parts of UniAttend on or off for the whole institution.
 - `src/app/admin/design/page.tsx` (33 lines)
 - `src/app/admin/early-warning/page.tsx` (82 lines)
+- `src/app/admin/exit/page.tsx` (68 lines) — A university must never feel trapped: take everything, cut off connections, ask to leave.
 - `src/app/admin/integrations/activity/[run]/page.tsx` (97 lines) — One connection's sync: counts per kind of data, rejected rows with reasons, checkpoints, and a retry. No source data or credentials are shown.
 - `src/app/admin/integrations/activity/actions.ts` (18 lines) — Queue the connection behind a failed run to run again now. The database checks it is this admin's.
 - `src/app/admin/integrations/activity/page.tsx` (85 lines)
@@ -1623,6 +1675,8 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/admin/modules/assign-actions.ts` (111 lines) — The institution always comes from the admin's own role, never from the form.
 - `src/app/admin/modules/assign-import.tsx` (105 lines) — Upload a PDF, Word, Excel or CSV list; review the matches; assign lecturers to modules.
 - `src/app/admin/modules/page.tsx` (121 lines)
+- `src/app/admin/onboarding/actions.ts` (66 lines) — Sign an onboarding step off, or undo it. The database decides who may sign which step.
+- `src/app/admin/onboarding/page.tsx` (28 lines)
 - `src/app/admin/page.tsx` (141 lines)
 - `src/app/admin/people/page.tsx` (130 lines)
 - `src/app/admin/people/staff-grant.tsx` (48 lines) — Give a colleague a role; faculty and department administrators also get their faculty or department.
@@ -1711,9 +1765,10 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/super/actions.ts` (79 lines) — requireRole("super_admin") is the page gate; the RPCs re-check is_super_admin()
 - `src/app/super/directory/[id]/page.tsx` (74 lines)
 - `src/app/super/directory/page.tsx` (50 lines)
-- `src/app/super/institutions/[id]/page.tsx` (86 lines) — Word overlap, to suggest the directory entry that matches a registration.
+- `src/app/super/institutions/[id]/page.tsx` (95 lines) — Word overlap, to suggest the directory entry that matches a registration.
 - `src/app/super/layout.tsx` (16 lines)
-- `src/app/super/page.tsx` (108 lines)
+- `src/app/super/onboarding-panel.tsx` (58 lines) — The platform's view: how far each institution is, and requests to leave.
+- `src/app/super/page.tsx` (111 lines)
 - `src/app/super/plans/page.tsx` (38 lines)
 - `src/app/super/requests/page.tsx` (18 lines)
 - `src/app/super/setup-actions.ts` (162 lines)
@@ -1743,6 +1798,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/components/native-reminders.tsx` (57 lines) — In the UniAttend Android app (Capacitor), class reminders are scheduled on the
 - `src/components/nav.tsx` (55 lines) — The longest matching prefix wins, so /lecturer/modules/x highlights
 - `src/components/offline-sync.tsx` (104 lines) — Shows when the device is offline, how much is waiting to be sent, and sends it
+- `src/components/onboarding-checklist.tsx` (41 lines) — The twelve onboarding steps. `viewer` decides which steps get sign-off buttons.
 - `src/components/push-toggle.tsx` (259 lines) — Inside the Android app (Capacitor): Android's own notification permission.
 - `src/components/report-page.tsx` (23 lines) — The reports page, shared by administrators, staff and lecturers; the database decides the scope.
 - `src/components/report-view.tsx` (143 lines) — Date range, faculty, department and module. A plain GET form, so a report has a shareable address.
@@ -1782,7 +1838,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/lib/integrations/secrets.ts` (60 lines) — Credentials for an institution's systems (Moodle tokens, roster-link tokens, OAuth
 - `src/lib/integrations/sources.ts` (99 lines) — Talking to an institution's own systems. Every request: https only, public
 - `src/lib/legal.ts` (40 lines) — The company details every legal page uses: the privacy notice, terms, PAIA manual
-- `src/lib/nav-config.ts` (68 lines) — Every menu in the app, with the defaults an institution starts from. The Design
+- `src/lib/nav-config.ts` (70 lines) — Every menu in the app, with the defaults an institution starts from. The Design
 - `src/lib/offline-queue.ts` (59 lines) — Work done without signal, kept on the phone until it can be sent.
 - `src/lib/palette.ts` (5 lines) — Module colours in the minimal graphite look: dark-to-mid greys that stay readable
 - `src/lib/push.ts` (88 lines) — Delivers queued notifications to phones and browsers with Web Push.
@@ -1831,7 +1887,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `tests/db/harness.ts` (88 lines) — Runs the real migrations against an in-process Postgres (PGlite) with a
 - `tests/db/install-script.test.ts` (30 lines) — The bundled SQL-editor script must install cleanly next to another app's
 - `tests/db/location.test.ts` (90 lines) — Campus boundaries and class navigation (migration 0013). Live location sharing
-- `tests/db/platform.test.ts` (1642 lines) — UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
+- `tests/db/platform.test.ts` (1727 lines) — UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
 - `tests/db/safeupdate.test.ts` (49 lines) — Supabase loads pg_safeupdate for API requests: an UPDATE or DELETE without a
 - `tests/db/security.test.ts` (78 lines) — Regression tests for the 2026-11-10 security review:
 

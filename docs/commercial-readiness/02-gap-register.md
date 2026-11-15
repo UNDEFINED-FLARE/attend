@@ -76,9 +76,9 @@ Priority: **P0** blocks any real pilot · **P1** needed before a paid contract �
 |---|---|---|---|---|---|
 | Plans, trials, manual billing | Implemented | 0022 | — | P1 | — |
 | Paystack payments | **Not deployed** | Webhook function absent; 0 payments | Deploy and verify webhook in test mode | P2 | Payment only recorded after server verification |
-| Institution onboarding | Partial | Request → approval → setup | Checklist through go-live | P1 | New university onboarded without code changes |
+| Institution onboarding | Implemented, tested; live 15 Nov 2026 (0032) | Twelve-step go-live checklist: data-driven steps tick themselves; policy and training signed off by the institution; verification and go-live by UniAttend; go-live refused until every step is done; 3 database tests | First real onboarding | P1 | New university onboarded without code changes |
 | Support desk | Missing | — | Tickets, priority, assignment | P2 | — |
-| Data export and institution exit | Partial | Personal export, admin CSV export | Full institutional export and closure workflow | P1 | Export of every table the institution owns |
+| Data export and institution exit | Implemented, tested; live 15 Nov 2026 (0032) | Full export (31 tables as CSV in a ZIP, credentials never included, audited); revoke all integration credentials; exit request → UniAttend closes (archived, nothing deleted); 4 database tests | Try a full export of a large institution (60 s limit) | P1 | Export of every table the institution owns |
 | Legal documents | Partial, **blocked** | `docs/legal/*`, public pages | Information Officer named; attorney review | P0 | Signed operator agreement with the pilot university |
 | Android release build | Missing | Debug APK only | Signed release, Play internal testing | P1 | Installable release build |
 | Real-device testing | Missing | — | Test matrix incl. budget phones | P0 | Report in `08-mobile-test-report.md` |

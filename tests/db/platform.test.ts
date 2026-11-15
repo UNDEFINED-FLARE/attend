@@ -1640,3 +1640,88 @@ describe("institutional reports: aggregated in the database, limited to what eac
     await expect(db.as(u.sA1, "select uniattend.log_export('institution_report', 1, $1)", [id.instA])).rejects.toThrow(/Not allowed/);
   });
 });
+
+describe("onboarding to go-live, and leaving UniAttend", () => {
+  type Step = { key: string; done: boolean; by: string; detail: string };
+  const status = async (who: string, inst = id.instA) =>
+    (await db.asOne<{ onboarding_status: { steps: Step[]; ready_for_go_live: boolean; live: boolean } }>(who, "select uniattend.onboarding_status($1)", [inst])).onboarding_status;
+  const done = async (who: string, inst = id.instA) => Object.fromEntries((await status(who, inst)).steps.map((s) => [s.key, s.done]));
+  const signOff = (who: string, step: string, note: string | null = null, undo = false, inst = id.instA) =>
+    db.as(who, "select uniattend.onboarding_sign_off($1, $2, $3, $4)", [inst, step, note, undo]);
+
+  it("has the same twelve steps for everyone; the data decides the automatic ones", async () => {
+    const s = await status(u.adminA);
+    expect(s.steps.map((x) => x.key)).toEqual(["registered", "verified", "approved", "admin", "structure", "integration", "people", "timetable", "policy", "pilot", "training", "go_live"]);
+    expect(await done(u.adminA)).toMatchObject({ registered: true, approved: true, admin: true, structure: true, people: true, timetable: true, pilot: true,
+      verified: false, policy: false, training: false, go_live: false });
+    expect(s.ready_for_go_live).toBe(false);
+    await expect(status(u.lectA)).rejects.toThrow(/Not allowed/);
+    await expect(status(u.adminB)).rejects.toThrow(/Not allowed/);
+  });
+
+  it("only the right person signs each step off, and steps shown by the data cannot be ticked", async () => {
+    await expect(signOff(u.adminA, "verified")).rejects.toThrow(/Only UniAttend/);
+    await expect(signOff(u.adminA, "go_live")).rejects.toThrow(/Only UniAttend/);
+    await expect(signOff(u.adminA, "structure")).rejects.toThrow(/worked out from your data/);
+    await expect(signOff(u.lectA, "policy")).rejects.toThrow(/Not allowed/);
+    await expect(signOff(u.adminB, "policy")).rejects.toThrow(/Not allowed/);
+    await signOff(u.adminA, "policy");
+    await signOff(u.adminA, "training", "Two sessions, 14 Nov");
+    expect(await done(u.adminA)).toMatchObject({ policy: true, training: true });
+    expect(await db.as(u.adminA, "select 1 from uniattend.audit_logs where action = 'onboarding_sign_off'")).toHaveLength(2);
+  });
+
+  it("go-live waits for every earlier step", async () => {
+    // A brand-new connection or import counts for the data step; make sure there is one.
+    const d = await done(u.adminA);
+    if (!d.integration) await db.admin("insert into uniattend.integrations (institution_id, kind, name) values ($1, 'api', 'Test push')", [id.instA]);
+    await expect(signOff(u.super, "go_live")).rejects.toThrow(/Not ready to go live. Still to do: Verification/);
+    await signOff(u.super, "verified", "Registration letter and domain checked");
+    await signOff(u.super, "go_live");
+    expect((await status(u.adminA)).live).toBe(true);
+    await signOff(u.super, "go_live", null, true);                    // can be undone, and is audited
+    expect((await status(u.adminA)).live).toBe(false);
+    const overview = (await db.asOne<{ onboarding_overview: { name: string; done: number; total: number }[] }>(u.super, "select uniattend.onboarding_overview()")).onboarding_overview;
+    expect(overview.length).toBeGreaterThanOrEqual(2);
+    await expect(db.as(u.adminA, "select uniattend.onboarding_overview()")).rejects.toThrow(/Not allowed/);
+  });
+
+  it("an institution asks to leave; the platform is told", async () => {
+    await expect(db.as(u.adminB, "select uniattend.request_exit($1, 'no')", [id.instB])).rejects.toThrow(/Say briefly why/);
+    await expect(db.as(u.lectB, "select uniattend.request_exit($1, 'We are leaving')", [id.instB])).rejects.toThrow(/own administrators/);
+    await expect(db.as(u.adminA, "select uniattend.request_exit($1, 'We are leaving')", [id.instB])).rejects.toThrow(/own administrators/);
+    await db.as(u.adminB, "select uniattend.request_exit($1, 'Moving to a system the university already licenses')", [id.instB]);
+    await expect(db.as(u.adminB, "select uniattend.request_exit($1, 'Again please')", [id.instB])).rejects.toThrow(/already asked/);
+    expect(await db.as(u.super, "select 1 from uniattend.notifications where kind = 'exit_requested'")).toHaveLength(1);
+    const reqs = (await db.asOne<{ exit_requests: { institution_id: string; status: string }[] }>(u.super, "select uniattend.exit_requests()")).exit_requests;
+    expect(reqs.find((r) => r.institution_id === id.instB)?.status).toBe("requested");
+    expect(await db.as(u.adminA, "select 1 from uniattend.institution_exit_requests")).toHaveLength(0);   // not another institution's business
+  });
+
+  it("revoking credentials deletes every stored token and key and pauses the connections", async () => {
+    const [g] = await db.admin<{ id: string }>("insert into uniattend.integrations (institution_id, kind, name, base_url) values ($1, 'feed', 'Roster link', 'https://sis.unib.ac.za/roster.csv') returning id", [id.instB]);
+    await db.admin("insert into uniattend.integration_secrets (integration_id, token) values ($1, 'secret-token')", [g.id]);
+    await expect(db.as(u.adminA, "select uniattend.revoke_integration_credentials($1)", [id.instB])).rejects.toThrow(/Not allowed/);
+    expect((await db.asOne<{ revoke_integration_credentials: number }>(u.adminB, "select uniattend.revoke_integration_credentials($1)", [id.instB])).revoke_integration_credentials).toBeGreaterThanOrEqual(1);
+    expect(await db.admin("select 1 from uniattend.integration_secrets s join uniattend.integrations g on g.id = s.integration_id where g.institution_id = $1", [id.instB])).toHaveLength(0);
+    expect(await db.admin("select 1 from uniattend.integrations where institution_id = $1 and status <> 'paused'", [id.instB])).toHaveLength(0);
+  });
+
+  it("the full export is audited for admins only", async () => {
+    await db.as(u.adminA, "select uniattend.log_export('institution_export', 5000, $1, null, $2)", [id.instA, JSON.stringify({ format: "zip" })]);
+    await expect(db.as(u.lectA, "select uniattend.log_export('institution_export', 1, $1)", [id.instA])).rejects.toThrow(/Not allowed/);
+    await expect(db.as(await (async () => (await db.admin<{ id: string }>("select id from auth.users where email = 'auditor@uniA.ac.za'"))[0].id)(),
+      "select uniattend.log_export('institution_export', 1, $1)", [id.instA])).rejects.toThrow(/Not allowed/);
+  });
+
+  it("only the platform closes the account: archived, credentials gone, nothing deleted", async () => {
+    const before = (await db.admin<{ n: number }>("select count(*)::int as n from uniattend.attendance_records where institution_id = $1", [id.instB]))[0].n;
+    await expect(db.as(u.adminB, "select uniattend.close_institution($1, 'Agreed by email')", [id.instB])).rejects.toThrow(/Only UniAttend/);
+    await expect(db.as(u.super, "select uniattend.close_institution($1, 'ok')", [id.instB])).rejects.toThrow(/Record how the closure was agreed/);
+    await expect(db.as(u.super, "select uniattend.close_institution($1, 'Agreed by email')", [id.instA])).rejects.toThrow(/has not asked to leave/);
+    await db.as(u.super, "select uniattend.close_institution($1, 'Agreed by email on 15 Nov; export downloaded')", [id.instB]);
+    expect((await db.admin<{ status: string }>("select status from uniattend.institutions where id = $1", [id.instB]))[0].status).toBe("archived");
+    expect((await db.admin<{ status: string }>("select status from uniattend.institution_exit_requests where institution_id = $1", [id.instB]))[0].status).toBe("closed");
+    expect((await db.admin<{ n: number }>("select count(*)::int as n from uniattend.attendance_records where institution_id = $1", [id.instB]))[0].n).toBe(before);
+  });
+});

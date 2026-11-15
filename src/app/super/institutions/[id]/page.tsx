@@ -6,6 +6,7 @@ import { Badge, Card, CardTitle, Notice, PageHeader, Select } from "@/components
 import { requireRole } from "@/lib/auth";
 import type { CampusInput } from "@/lib/campus-schema";
 import { setStatus } from "../../actions";
+import { OnboardingChecklist, type Onboarding } from "@/components/onboarding-checklist";
 import { SourceFields } from "../../source-fields";
 import { applyDirectoryEntry, saveInstitutionCampuses, saveInstitutionSource, testSource } from "../../setup-actions";
 
@@ -21,11 +22,12 @@ function similarity(a: string, b: string) {
 export default async function SetUpInstitution({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { supabase } = await requireRole("super_admin");
-  const [{ data: inst }, { data: settings }, { data: campusRows }, { data: dir }] = await Promise.all([
+  const [{ data: inst }, { data: settings }, { data: campusRows }, { data: dir }, { data: onboarding }] = await Promise.all([
     supabase.from("institutions").select("*").eq("id", id).maybeSingle(),
     supabase.from("institution_settings").select("*").eq("institution_id", id).maybeSingle(),
     supabase.from("campuses").select("*").eq("institution_id", id).is("deleted_at", null).order("name"),
     supabase.from("institution_directory").select("id, name, short_name").order("name"),
+    supabase.rpc("onboarding_status", { p_inst: id }),
   ]);
   if (!inst) notFound();
   const s = (settings ?? {}) as { timetable_source_type?: string; timetable_source_url?: string | null };
@@ -43,6 +45,13 @@ export default async function SetUpInstitution({ params }: { params: Promise<{ i
         action={inst.status === "pending" && (
           <form action={setStatus}><input type="hidden" name="id" value={inst.id} /><input type="hidden" name="status" value="active" /><Submit label="Approve institution" /></form>
         )} />
+
+      {onboarding && (
+        <Card className="mb-6">
+          <CardTitle>Onboarding checklist</CardTitle>
+          <OnboardingChecklist data={onboarding as Onboarding} institutionId={inst.id} viewer="super" />
+        </Card>
+      )}
 
       <Card className="mb-6">
         <CardTitle>1. Start from the directory</CardTitle>

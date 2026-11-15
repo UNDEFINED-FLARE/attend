@@ -3,6 +3,7 @@ import { ActionForm, Submit } from "@/components/form";
 import { Badge, Card, CardTitle, Input, PageHeader, Select, Stat, Table, Td, Textarea, when } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { announce, changePlan, recordPayment, setStatus } from "./actions";
+import { OnboardingPanel } from "./onboarding-panel";
 
 export const metadata = { title: "Platform" };
 
@@ -33,6 +34,8 @@ export default async function SuperHome() {
         <Stat label="Sessions (30 d)" value={ov?.sessions_30d ?? 0} />
         <Stat label="Check-in attempts (30 d)" value={ov?.checkins_30d ?? 0} hint={`${ov?.rejected_30d ?? 0} rejected`} />
       </div>
+
+      <OnboardingPanel />
 
       {pending.length > 0 && (
         <Card className="mb-6 border-warn/40">
