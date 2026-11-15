@@ -4,9 +4,9 @@ import { BRAND_COOKIE, BRAND_COOKIE_OPTIONS } from "@/lib/brand-cookie";
 import { authCookieOptions, SESSION_ONLY_COOKIE } from "@/lib/supabase/cookies";
 import { getUserWithRetry } from "@/lib/supabase/resilient";
 
-const PUBLIC = ["/", "/login", "/signup", "/forgot-password", "/auth/callback", "/privacy", "/terms", "/paia"];
+const PUBLIC = ["/", "/developers", "/login", "/signup", "/forgot-password", "/auth/callback", "/privacy", "/terms", "/paia"];
 // Machine endpoints that check their own secret.
-const PUBLIC_PREFIX = ["/api/push/", "/api/health", "/api/roster"];
+const PUBLIC_PREFIX = ["/api/push/", "/api/health", "/api/roster", "/api/v1/"];
 
 // Refreshes the Supabase session cookie on every request and sends signed-out
 // users to /login. This is navigation only; authorization is enforced by RLS

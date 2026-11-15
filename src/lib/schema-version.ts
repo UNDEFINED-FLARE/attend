@@ -2,4 +2,4 @@
 // "degraded" when the database is behind it, so a deploy that needs a migration that
 // was never run shows up on the uptime monitor. A unit test keeps it equal to the
 // newest file in supabase/migrations.
-export const EXPECTED_SCHEMA = "20261115000032";
+export const EXPECTED_SCHEMA = "20261115000033";

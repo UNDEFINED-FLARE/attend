@@ -231,7 +231,7 @@ Plans with limits enforced by triggers (`enforce_plan_limits`). New institutions
 
 ## 13. State at the time of writing
 
-**Live database (checked 15 November 2026):** all 32 migrations, 0001–0032, are applied; from 0028 on, `uniattend.schema_versions` lists them. They were run by hand, so Supabase's migration history does not list them; see `docs/commercial-readiness/01-technical-audit.md` §2 for how this was checked against the live schema.
+**Live database (checked 15 November 2026):** all 33 migrations, 0001–0033, are applied; from 0028 on, `uniattend.schema_versions` lists them. They were run by hand, so Supabase's migration history does not list them; see `docs/commercial-readiness/01-technical-audit.md` §2 for how this was checked against the live schema.
 
 **Live data:** 3 institutions (UNIVEN, UL, TUT), all on Starter trials ending 8–9 December 2026; 142 students, 25 lecturers, 724 modules, 4,366 dated classes, 0 integrations configured.
 
@@ -739,6 +739,22 @@ After each step: type-check, lint, tests, build.
 > is deleted here — deleting records is a separate, deliberate step under the
 > retention schedule and the operator agreement.
 
+### `20261115000033_api_v1.sql` (121 lines)
+
+> UniAttend 0033 — the institution API, version 1.
+>
+> The same roster push as /api/roster, made safe to retry and easier to operate:
+> * api_roster_push(): an Idempotency-Key header makes a retried request return
+> the first answer instead of applying the roster twice. The same key with a
+> different body is refused, so a key cannot silently mean two things. Keys are
+> kept for 7 days per connection.
+> * api_status(): what the key belongs to and its last runs — for checking a new
+> key and for monitoring from the institution's side.
+> * api_run(): one run's result and its rejected rows (first 200), for that
+> connection only.
+> Every function takes the API key, finds the connection by the key's SHA-256 and
+> derives the institution from it; nothing in a request can name another one.
+
 ## B. Tables (schema `uniattend`) and their columns
 
 - **academic_periods**
@@ -1078,6 +1094,14 @@ After each step: type-check, lint, tests, build.
   - `updated_by` uuid references auth.users(id) on delete set null
   - `updated_at` timestamptz not null default now()
   - _unique (institution_id, dataset, name)_
+- **integration_requests**
+  - `integration_id` uuid not null references uniattend.integrations(id) on delete cascade
+  - `idempotency_key` text not null check (idempotency_key ~ '^[A-Za-z0-9._:-]{8,100}$')
+  - `body_sha256` text not null check (body_sha256 ~ '^[0-9a-f]{64}$')
+  - `run_id` uuid
+  - `response` jsonb
+  - `created_at` timestamptz not null default now()
+  - _primary key (integration_id, idempotency_key)_
 - **integration_runs**
   - `id` uuid primary key default gen_random_uuid()
   - `integration_id` uuid references uniattend.integrations(id) on delete cascade
@@ -1468,6 +1492,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 
 ## D. Database functions (last definition wins)
 
+- `_api_connection(p_key text)` → uniattend.integrations — internal
 - `_event_local(p_inst uuid, p_at timestamptz)` → text — internal
 - `_generate_events(p_inst uuid, p_days int)` → jsonb — internal
 - `_integration_mark_success()` → trigger — internal
@@ -1489,6 +1514,9 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `alerts_on_session_closed()` → trigger — internal
 - `announcement_recipients(a uniattend.announcements)` → table (user_id uuid, institution_id uuid) — internal
 - `answer_data_request(p_id uuid, p_status text, p_response text)` → void — callable by: authenticated
+- `api_roster_push(p_key text, p_payload jsonb, p_idempotency_key text default null, p_body_sha256 text default null)` → jsonb — internal
+- `api_run(p_key text, p_run uuid)` → jsonb — internal
+- `api_status(p_key text)` → jsonb — internal
 - `apply_checkout(p_record uuid)` → jsonb — internal
 - `apply_paystack_payment( p_institution uuid, p_plan_code text, p_reference text, p_amount bigint, p_currency text)` → text — callable by: service_role
 - `apply_retention(p_inst uuid)` → jsonb — callable by: authenticated
@@ -1698,9 +1726,13 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/api/push/dispatch/route.ts` (28 lines) — Called every minute by pg_cron (supabase/push-schedule.sql) to send class
 - `src/app/api/roster/route.ts` (48 lines) — For an institution's own student system: POST the roster here with the API key
 - `src/app/api/route/route.ts` (69 lines) — Walking directions for "Find my class".
+- `src/app/api/v1/roster/route.ts` (43 lines) — POST /api/v1/roster — an institution's own system sends its roster.
+- `src/app/api/v1/runs/[id]/route.ts` (16 lines) — GET /api/v1/runs/{id} — one run's result and its rejected rows, for the key's own connection.
+- `src/app/api/v1/status/route.ts` (14 lines) — GET /api/v1/status — which connection a key belongs to, its rate-limit use and last runs.
 - `src/app/auth/callback/route.ts` (19 lines) — Email confirmation and password-reset links land here with a one-time code.
 - `src/app/dashboard/page.tsx` (15 lines) — Sends each user to their highest-privilege area. With no role yet, onboarding.
 - `src/app/data-actions.ts` (58 lines) — A person asks about their own information (deletion, correction, objection).
+- `src/app/developers/page.tsx` (130 lines) — Public, so an institution's ICT team can read it before signing anything.
 - `src/app/early-warning-actions.ts` (63 lines) — Early warning (migration 0015). Permissions are enforced in the database:
 - `src/app/error.tsx` (23 lines) — Shown when a page fails on the server, e.g. Supabase is unreachable.
 - `src/app/globals.css` (85 lines) — UniAttend: navy and white, with a bright accent blue for highlights and charts.
@@ -1811,6 +1843,8 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 
 ### `src/lib/`
 
+- `src/lib/api-errors.ts` (41 lines) — The public API's error contract (v1): every error is
+- `src/lib/api-v1.ts` (13 lines) — The database as the public API sees it: the public (anon) key only. The
 - `src/lib/app-lock.ts` (143 lines) — App lock: after signing in once with a password, the app can be reopened with
 - `src/lib/assignment-match.ts` (210 lines) — Reads "which lecturer teaches which module" out of rows of cells from any document
 - `src/lib/audit-export.ts` (23 lines) — Write a data download to the audit log (who, what, how many rows) before handing
@@ -1887,12 +1921,13 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `tests/db/harness.ts` (88 lines) — Runs the real migrations against an in-process Postgres (PGlite) with a
 - `tests/db/install-script.test.ts` (30 lines) — The bundled SQL-editor script must install cleanly next to another app's
 - `tests/db/location.test.ts` (90 lines) — Campus boundaries and class navigation (migration 0013). Live location sharing
-- `tests/db/platform.test.ts` (1727 lines) — UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
+- `tests/db/platform.test.ts` (1786 lines) — UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
 - `tests/db/safeupdate.test.ts` (49 lines) — Supabase loads pg_safeupdate for API requests: an UPDATE or DELETE without a
 - `tests/db/security.test.ts` (78 lines) — Regression tests for the 2026-11-10 security review:
 
 ### `tests/unit/`
 
+- `tests/unit/api-errors.test.ts` (37 lines)
 - `tests/unit/assignment-match.test.ts` (70 lines)
 - `tests/unit/auth-cookies.test.ts` (14 lines)
 - `tests/unit/building-match.test.ts` (35 lines) — Real building names from OpenStreetMap on a South African campus (2026-11-09).

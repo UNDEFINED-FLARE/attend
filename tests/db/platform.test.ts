@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { createDb, type Db } from "./harness";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 
 // UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
 const HALL = { lat: -22.9761, lng: 30.4445 };
@@ -1723,5 +1724,63 @@ describe("onboarding to go-live, and leaving UniAttend", () => {
     expect((await db.admin<{ status: string }>("select status from uniattend.institutions where id = $1", [id.instB]))[0].status).toBe("archived");
     expect((await db.admin<{ status: string }>("select status from uniattend.institution_exit_requests where institution_id = $1", [id.instB]))[0].status).toBe("closed");
     expect((await db.admin<{ n: number }>("select count(*)::int as n from uniattend.attendance_records where institution_id = $1", [id.instB]))[0].n).toBe(before);
+  });
+});
+
+describe("institution API v1: safe retries, status and run results, one institution per key", () => {
+  let key: string, otherKey: string;
+  const body = (n: number) => ({ complete: false, modules: [{ code: "CSC101", title: "Intro to CS" }],
+    people: [{ role: "student", number: `V1${String(n).padStart(3, "0")}`, full_name: `Api Student ${n}`, module_codes: ["CSC101"] }] });
+  const sha = (s: string) => createHash("sha256").update(s).digest("hex");
+  const push = async (k: string, payload: object, idem: string | null = null, hash: string | null = null) =>
+    (await db.asOne<{ api_roster_push: Record<string, unknown> }>(null, "select uniattend.api_roster_push($1, $2, $3, $4)",
+      [k, JSON.stringify(payload), idem, idem ? hash ?? sha(JSON.stringify(payload)) : null])).api_roster_push;
+
+  beforeAll(async () => {
+    key = (await db.asOne<{ save_integration: { api_key: string } }>(u.adminA,
+      "select uniattend.save_integration($1, null, 'api', 'SIS push v1', null, null, '{}', null)", [id.instA])).save_integration.api_key;
+    await db.as(u.super, "select uniattend.set_institution_status($1, 'active')", [id.instB]);   // B was archived by the exit test
+    otherKey = (await db.asOne<{ save_integration: { api_key: string } }>(u.adminB,
+      "select uniattend.save_integration($1, null, 'api', 'B push', null, null, '{}', null)", [id.instB])).save_integration.api_key;
+  });
+
+  it("applies a roster and says which run did it", async () => {
+    const r = await push(key, body(1));
+    expect(r).toMatchObject({ students_added: 1, replayed: false, complete: false });
+    expect(r.run_id).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("a retried request with the same Idempotency-Key returns the first answer and changes nothing", async () => {
+    const first = await push(key, body(2), "retry-test-0001");
+    const again = await push(key, body(2), "retry-test-0001");
+    expect(again).toMatchObject({ ...first, replayed: true });
+    const runs = await db.admin<{ n: number }>("select count(*)::int as n from uniattend.integration_runs where id = $1", [first.run_id]);
+    expect(runs[0].n).toBe(1);
+    await expect(push(key, body(3), "retry-test-0001")).rejects.toThrow(/already used with a different body/);
+    await expect(push(key, body(3), "bad key!")).rejects.toThrow(/Idempotency-Key must be/);
+    // The same key string under another connection is unrelated.
+    expect((await push(otherKey, body(2), "retry-test-0001")).replayed).toBe(false);
+  });
+
+  it("status and run results show only this key's connection", async () => {
+    const s = (await db.asOne<{ api_status: { institution: string; connection: string; recent_runs: { id: string }[] } }>(null,
+      "select uniattend.api_status($1)", [key])).api_status;
+    expect(s).toMatchObject({ connection: "SIS push v1", status: "active" });
+    expect(s.recent_runs.length).toBeGreaterThanOrEqual(2);
+    const runId = s.recent_runs[0].id;
+    const run = (await db.asOne<{ api_run: { id: string; status: string } }>(null, "select uniattend.api_run($1, $2)", [key, runId])).api_run;
+    expect(run).toMatchObject({ id: runId, status: "ok" });
+    await expect(db.as(null, "select uniattend.api_run($1, $2)", [otherKey, runId])).rejects.toThrow(/No such run for this key/);
+    await expect(db.as(null, "select uniattend.api_status('ua_wrong')")).rejects.toThrow(/not valid/);
+    // Nothing else is reachable: the shared lookup is not callable, the request table is not readable.
+    await expect(db.as(null, "select uniattend._api_connection($1)", [key])).rejects.toThrow(/permission denied/);
+    await expect(db.as(u.adminA, "select * from uniattend.integration_requests")).rejects.toThrow(/permission denied/);
+  });
+
+  it("a paused connection is refused, with or without a retry key", async () => {
+    const conn = (await db.admin<{ id: string }>("select id from uniattend.integrations where name = 'SIS push v1'"))[0].id;
+    await db.as(u.adminA, "select uniattend.integration_action($1, 'pause')", [conn]);
+    await expect(push(key, body(4))).rejects.toThrow(/paused/);
+    await expect(push(key, body(2), "retry-test-0001")).rejects.toThrow(/paused/);
   });
 });

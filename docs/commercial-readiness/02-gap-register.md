@@ -43,7 +43,7 @@ Priority: **P0** blocks any real pilot · **P1** needed before a paid contract �
 | Integration Centre dashboard, catalogue, wizard, log | Implemented, untested in pilot | `/admin/integrations` | — | P1 | Status only "connected" after a server-side test passes |
 | Moodle connector | Implemented, **blocked** | `src/lib/integrations/sources.ts` | Needs a real Moodle and token | P1 | Courses and enrolments synced from a real Moodle |
 | Scheduled CSV/JSON link | Implemented, tested | `fetchRosterFeed`, SSRF tests | — | P1 | — |
-| Institution-pushed API | Implemented, tested | `/api/roster`, hashed keys, 120 req/h | Versioned path `/api/v1/…`, idempotency key, developer docs | P1 | Documented, versioned, idempotent |
+| Institution-pushed API | Implemented, tested; live 15 Nov 2026 (0033) | `/api/v1/roster` with Idempotency-Key, `/api/v1/status`, `/api/v1/runs/{id}`, one error format with request ids; public docs at `/developers`; 4 database and 4 unit tests | First real caller | P1 | Documented, versioned, idempotent |
 | Configurable REST connector (paths, pagination, OAuth) | Missing | Only single-URL bearer feed | Build with strict URL controls | P2 | Paged JSON source synced with mapping |
 | ITS, Banner, PeopleSoft, Blackboard, CELCAT | **Blocked** | Listed as "not available yet" in the catalogue | Authorised test environment from a university | P2 | Tested against a real system before being shown as available |
 | Complete-dataset reconciliation rules | Partial | `complete` flag on roster pushes | Per-dataset rule and admin review before removals | P1 | Nothing removed from an incomplete import |
