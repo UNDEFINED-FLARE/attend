@@ -6,7 +6,8 @@ import { AppLock } from "@/components/app-lock";
 import { OfflineSync } from "@/components/offline-sync";
 import { Icon } from "@/components/icons";
 import { SideNav, TabBar, type NavItem } from "@/components/nav";
-import type { RoleRow } from "@/lib/auth";
+import { RoleSwitch } from "@/components/role-switch";
+import type { Role, RoleRow } from "@/lib/auth";
 import { DEFAULT_THEME, themeStyle, type Theme } from "@/lib/theme";
 
 export type { NavItem };
@@ -29,7 +30,7 @@ function Logo({ name, theme, onDark }: { name: string; theme: Theme; onDark: boo
 
 const TONE = { info: "bg-info/10 text-info", ok: "bg-ok/10 text-ok", warn: "bg-warn/10 text-warn", bad: "bg-bad/10 text-bad" } as const;
 
-export function Shell({ nav, children, current, choices, area, user, unread = 0, theme = DEFAULT_THEME, app }: {
+export function Shell({ nav, children, current, choices, area, user, unread = 0, theme = DEFAULT_THEME, app, roles = [] }: {
   nav: NavItem[];
   children: ReactNode;
   current: RoleRow;
@@ -38,6 +39,8 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
   user: { id?: string; email?: string | null; name?: string | null };
   unread?: number;
   theme?: Theme;
+  /** Every role the user holds, for the role switcher (shown when there are two or more). */
+  roles?: Role[];
   /** Phone-app layout (students): page titles carry the avatar, and a floating tab bar raises this item. */
   app?: { center: string };
 }) {
@@ -93,6 +96,7 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
               </span>
             )}
             <div className="ml-auto flex items-center gap-2">
+              <RoleSwitch roles={roles} active={current.role} className="hidden lg:block" />
               {choices.length > 1 && (
                 <form action={switchInstitution} className="hidden items-center gap-1 md:flex">
                   <select name="institution" defaultValue={current.institution_id ?? ""} aria-label="Institution"
@@ -125,6 +129,8 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
         )}
 
         <main className={`mx-auto w-full max-w-7xl flex-1 px-4 lg:px-8 lg:pb-10 ${app ? "pt-[max(20px,env(safe-area-inset-top))] pb-36 lg:pt-6" : "pt-6 pb-28"}`}>
+          {/* Phones: the top bar is hidden in the student app layout, so the switcher sits above the page. */}
+          <RoleSwitch roles={roles} active={current.role} className="mb-4 lg:hidden" />
           {app ? <AppProvider me={{ name: who || "Student", initials, unread, institution: instName }}>{children}</AppProvider> : children}
         </main>
 
