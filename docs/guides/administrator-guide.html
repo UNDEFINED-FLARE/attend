@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<title>UniAttend — Administrator Guide</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm;
+    @bottom-left { content: "UniAttend · Administrator Guide"; font: 8pt "Segoe UI", system-ui, sans-serif; color: #8a8d93; }
+    @bottom-right { content: counter(page) " / " counter(pages); font: 8pt "Segoe UI", system-ui, sans-serif; color: #8a8d93; } }
+  @page :first { margin: 0; @bottom-left { content: none; } @bottom-right { content: none; } }
+  :root { --ink: #1f1f1f; --muted: #6b6e74; --line: #e4e5e7; --soft: #f6f6f7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 10.5pt/1.55 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; color: var(--ink); }
+  h1, h2, h3 { letter-spacing: -0.01em; line-height: 1.2; }
+  h2 { font-size: 20pt; margin: 0 0 4mm; break-after: avoid; }
+  h2 .n { display: inline-block; min-width: 11mm; color: var(--muted); font-weight: 600; }
+  h3 { font-size: 12.5pt; margin: 7mm 0 2mm; break-after: avoid; }
+  p { margin: 0 0 3mm; }
+  .lead { font-size: 11.5pt; color: #45484d; margin-bottom: 6mm; }
+  section.chapter { break-before: page; }
+  ol.steps { counter-reset: s; list-style: none; padding: 0; margin: 0 0 4mm; }
+  ol.steps > li { counter-increment: s; position: relative; padding: 0 0 3mm 11mm; break-inside: avoid; }
+  ol.steps > li::before { content: counter(s); position: absolute; left: 0; top: 0.2mm; width: 7mm; height: 7mm; border-radius: 50%;
+    background: var(--ink); color: #fff; font-size: 8.5pt; font-weight: 700; display: grid; place-items: center; }
+  ul { margin: 0 0 3mm; padding-left: 5mm; } ul li { margin-bottom: 1mm; }
+  table { width: 100%; border-collapse: collapse; margin: 2mm 0 5mm; font-size: 9.5pt; break-inside: auto; }
+  thead { display: table-header-group; } tr { break-inside: avoid; }
+  th { text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); border-bottom: 1.5px solid var(--ink); padding: 2mm 2.5mm; }
+  td { border-bottom: 1px solid var(--line); padding: 2mm 2.5mm; vertical-align: top; }
+  td:first-child { font-weight: 600; white-space: nowrap; }
+  .box { border: 1px solid var(--line); border-radius: 4mm; padding: 3.5mm 4.5mm; margin: 3mm 0 5mm; background: var(--soft); break-inside: avoid; }
+  .box.dark { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .box b.t { display: block; font-size: 8pt; text-transform: uppercase; letter-spacing: .1em; margin-bottom: 1mm; opacity: .7; }
+  .path { display: inline-block; font-size: 9pt; font-weight: 600; border: 1px solid var(--line); border-radius: 99px; padding: 0 2.5mm; background: #fff; white-space: nowrap; }
+  code { font: 9pt Consolas, "SFMono-Regular", monospace; background: var(--soft); border: 1px solid var(--line); border-radius: 1.5mm; padding: 0 1mm; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; }
+  .card { border: 1px solid var(--line); border-radius: 4mm; padding: 3.5mm 4mm; break-inside: avoid; }
+  .card b { display: block; margin-bottom: 1mm; }
+  .muted { color: var(--muted); }
+
+  /* cover */
+  .cover { height: 297mm; padding: 26mm 22mm; display: flex; flex-direction: column; background: var(--soft); }
+  .cover .mark { width: 16mm; height: 16mm; border-radius: 4mm; background: var(--ink); color: #fff; font-weight: 800; font-size: 13pt; display: grid; place-items: center; }
+  .cover h1 { font-size: 40pt; margin: 30mm 0 4mm; letter-spacing: -0.03em; }
+  .cover .sub { font-size: 14pt; color: #45484d; max-width: 140mm; }
+  .cover .bottom { margin-top: auto; display: flex; justify-content: space-between; align-items: flex-end; font-size: 9pt; color: var(--muted); }
+  .cover .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4mm; margin-top: 22mm; }
+  .cover .tile { background: #fff; border: 1px solid var(--line); border-radius: 5mm; padding: 5mm 4mm; font-size: 9pt; }
+  .cover .tile b { display: block; font-size: 22pt; line-height: 1; margin-bottom: 2mm; }
+  .cover .tile.dark { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+  /* contents */
+  .toc { columns: 2; column-gap: 10mm; padding: 0; list-style: none; margin: 0; }
+  .toc li { break-inside: avoid; padding: 2mm 0; border-bottom: 1px solid var(--line); display: flex; gap: 3mm; }
+  .toc li span { color: var(--muted); min-width: 7mm; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<!-- ============================================================ cover -->
+<div class="cover">
+  <div class="mark">UA</div>
+  <h1>Administrator Guide</h1>
+  <p class="sub">Setting up UniAttend for your institution and running it day to day: from registration to go-live, people, timetables, attendance policy, reviews, reports and your data.</p>
+  <div class="tiles">
+    <div class="tile dark"><b>1</b>Register and get approved</div>
+    <div class="tile"><b>2</b>Build structure, people and timetable</div>
+    <div class="tile"><b>3</b>Set policy, roles and design</div>
+    <div class="tile"><b>4</b>Run, review and report</div>
+  </div>
+  <div class="bottom">
+    <span>UniAttend · Webbex Solutions (Pty) Ltd<br>For institution administrators</span>
+    <span>Edition: November 2026</span>
+  </div>
+</div>
+
+<!-- ============================================================ contents -->
+<section style="break-before: page;">
+  <h2>Contents</h2>
+  <ol class="toc">
+    <li><span>1</span>How UniAttend works</li>
+    <li><span>2</span>Register your institution</li>
+    <li><span>3</span>The go-live checklist</li>
+    <li><span>4</span>Faculties, departments and venues</li>
+    <li><span>5</span>Modules, lecturers and students</li>
+    <li><span>6</span>Bringing data in: imports and connections</li>
+    <li><span>7</span>The timetable and dated classes</li>
+    <li><span>8</span>Attendance policy</li>
+    <li><span>9</span>Staff roles</li>
+    <li><span>10</span>Design your platform</li>
+    <li><span>11</span>Day to day: dashboard, reviews, early warning</li>
+    <li><span>12</span>Reports and exports</li>
+    <li><span>13</span>Privacy, POPIA and your data</li>
+    <li><span>14</span>Troubleshooting</li>
+    <li><span>15</span>Quick reference</li>
+  </ol>
+  <div class="box" style="margin-top: 10mm;">
+    <b class="t">How to read this guide</b>
+    Menu names appear like <span class="path">Policy</span>. Steps are numbered in the order to do them. Grey boxes are tips; dark boxes are things that matter for students' records or your legal duties.
+  </div>
+</section>
+
+<!-- ============================================================ 1 -->
+<section class="chapter">
+  <h2><span class="n">1</span>How UniAttend works</h2>
+  <p class="lead">Lecturers open attendance for a class; students check in on their phones by scanning a live QR code in the venue; the system checks the evidence and records the result. You set it up and keep it running.</p>
+
+  <h3>A check-in, from start to finish</h3>
+  <ol class="steps">
+    <li><b>The lecturer opens attendance</b> for a class, from the timetable or from the module page. A QR code that changes every few seconds appears on the projector, with a short join code.</li>
+    <li><b>Students scan it</b> in the UniAttend app or website. Their phone sends the scan, its location and a device check.</li>
+    <li><b>UniAttend weighs the evidence:</b> the live QR, whether the phone is inside the venue (and how accurate the location is), and whether the same phone already checked in someone else.</li>
+    <li><b>Strong evidence is accepted</b> as present (or late, after the grace period). <b>Weak evidence goes to review</b> — it is never turned into an absence automatically.</li>
+    <li><b>When the lecturer closes the class,</b> students who never tried are recorded absent; students who tried and were refused go to review.</li>
+  </ol>
+
+  <h3>Who does what</h3>
+  <table>
+    <thead><tr><th>Who</th><th>What they do in UniAttend</th></tr></thead>
+    <tbody>
+      <tr><td>You (institution administrator)</td><td>Set up structure, people, timetable and policy; give staff roles; review attendance; run reports; handle privacy requests.</td></tr>
+      <tr><td>Lecturers</td><td>Open and close attendance, keep the register, decide late arrivals and reviews, handle disputes, see their modules' reports.</td></tr>
+      <tr><td>Students</td><td>Check in, see their timetable and attendance, dispute a record, download their data.</td></tr>
+      <tr><td>Staff roles</td><td>Faculty and department administrators, attendance officers, integration administrators and auditors (chapter 9).</td></tr>
+      <tr><td>UniAttend</td><td>Approves your institution, runs the service, supports you. UniAttend staff cannot see your students or attendance unless you give support access (chapter 13).</td></tr>
+    </tbody>
+  </table>
+
+  <div class="box dark"><b class="t">Your role under POPIA</b>
+    Your institution is the <b>responsible party</b> for the personal information in UniAttend; Webbex Solutions (UniAttend) is your <b>operator</b>. You decide why attendance is recorded and for how long, and you answer your students' and staff's privacy requests.</div>
+</section>
+
+<!-- ============================================================ 2 -->
+<section class="chapter">
+  <h2><span class="n">2</span>Register your institution</h2>
+  <p class="lead">One person registers the institution and becomes its first administrator. You can set everything up while you wait for approval.</p>
+  <ol class="steps">
+    <li><b>Create an account</b> on UniAttend with your work email and confirm the email UniAttend sends you.</li>
+    <li>On the <span class="path">Get set up</span> screen choose <b>Register an institution</b>. Enter the institution's name, a short name (used in its web address) and a contact email.</li>
+    <li><b>Wait for approval.</b> UniAttend checks the registration and approves it. Until then you can build structure, people and the timetable; only attendance sessions wait for approval.</li>
+    <li>Your institution starts on a <b>30-day trial</b>. The dashboard tells you when a trial or subscription is ending.</li>
+  </ol>
+  <div class="box"><b class="t">Tip</b>Add a second administrator early (chapter 9), so the institution is never locked out if one person leaves.</div>
+  <h3>Lecturers and students join by email</h3>
+  <p>You never create passwords for anyone. You add lecturers and students to UniAttend's register with their email or student number (chapter 5). When they sign up with that email and confirm it, UniAttend links their account to their record automatically and they see their modules.</p>
+</section>
+
+<!-- ============================================================ 3 -->
+<section class="chapter">
+  <h2><span class="n">3</span>The go-live checklist</h2>
+  <p class="lead">Open <span class="path">Go-live checklist</span> to see how far you are. It has the same twelve steps for every institution.</p>
+  <table>
+    <thead><tr><th>Step</th><th>Done when</th><th>Who</th></tr></thead>
+    <tbody>
+      <tr><td>1 Registration</td><td>The institution is registered.</td><td>Automatic</td></tr>
+      <tr><td>2 Verification</td><td>UniAttend has confirmed the institution and the person who registered it.</td><td>UniAttend</td></tr>
+      <tr><td>3 Approval</td><td>UniAttend has approved the institution.</td><td>UniAttend</td></tr>
+      <tr><td>4 Administrators</td><td>At least one active administrator (two recommended).</td><td>From your data</td></tr>
+      <tr><td>5 Academic structure</td><td>Faculties, departments, modules and at least one mapped venue exist.</td><td>From your data</td></tr>
+      <tr><td>6 Data connection or import</td><td>A connection exists or an import has completed.</td><td>From your data</td></tr>
+      <tr><td>7 Students and lecturers</td><td>Students, lecturers, enrolments and lecturer assignments exist.</td><td>From your data</td></tr>
+      <tr><td>8 Timetable</td><td>Weekly slots and dated classes exist.</td><td>From your data</td></tr>
+      <tr><td>9 Attendance policy</td><td>You have reviewed the policy and signed it off.</td><td>You</td></tr>
+      <tr><td>10 Pilot</td><td>Classes have been closed with real student check-ins.</td><td>From your data</td></tr>
+      <tr><td>11 Training</td><td>You have signed off that administrators, lecturers and students were shown UniAttend.</td><td>You</td></tr>
+      <tr><td>12 Go-live approval</td><td>UniAttend approves go-live; refused until every step above is done.</td><td>UniAttend</td></tr>
+    </tbody>
+  </table>
+  <p>Steps marked "from your data" tick themselves when the records are there; they cannot be ticked by hand. Each sign-off is recorded in the audit log and can be undone.</p>
+</section>
+
+<!-- ============================================================ 4 -->
+<section class="chapter">
+  <h2><span class="n">4</span>Faculties, departments and venues</h2>
+  <p class="lead">Open <span class="path">Venues &amp; map</span> (the Faculties &amp; venues page). Structure decides who sees what; venues decide where a check-in counts.</p>
+  <h3>Faculties and departments</h3>
+  <ol class="steps">
+    <li>Under <b>Faculties</b>, add each faculty with a name and short code.</li>
+    <li>Under <b>Departments</b>, add each department, choosing its faculty.</li>
+  </ol>
+  <h3>Lecture venues</h3>
+  <p>A check-in's location is compared with the venue. A venue can be a point with a radius, or an outline of the building.</p>
+  <ol class="steps">
+    <li>Use <b>Campus map &amp; lecture venues</b> to add a venue and place it on the map.</li>
+    <li>For a point, use a radius of about half the building's width plus 15 m.</li>
+    <li>For large or irregular halls, draw the outline instead — or use <b>Outline every venue automatically</b>, which proposes outlines from the map for you to check and apply.</li>
+  </ol>
+  <div class="box"><b class="t">Tip</b>Indoors, phone location is often accurate to only 20–60 m. A check-in slightly outside a venue goes to review, not to absent, so a generous outline is better than a tight one.</div>
+</section>
+
+<!-- ============================================================ 5 -->
+<section class="chapter">
+  <h2><span class="n">5</span>Modules, lecturers and students</h2>
+  <p class="lead">You can add records by hand, or bring them in from files and your own systems (chapter 6). Both lead to the same register.</p>
+  <h3>Modules</h3>
+  <ol class="steps">
+    <li>Open <span class="path">Modules</span> and use <b>Add a module</b>: code, title, department, and <b>Required attendance (%)</b> (leave it blank to use the institution default).</li>
+    <li>Use <b>Assign a lecturer</b>: choose the module, the lecturer and the role (<b>Primary</b> or <b>Assistant</b>).</li>
+    <li>Use <b>Enrol or remove a student</b> for single changes; bulk enrolment is easier by import.</li>
+  </ol>
+  <p>You can also upload a list of lecturer assignments (PDF, Word, Excel or CSV); UniAttend shows the matches for you to confirm.</p>
+  <h3>Lecturers</h3>
+  <p>Open <span class="path">People</span>. Under <b>Add a lecturer</b> enter the staff number, full name, the email they will sign up with, and the department. They get lecturer access as soon as they sign up and confirm that email.</p>
+  <h3>Students</h3>
+  <p>Under <b>Add students</b>, add one at a time, paste a list, or upload a CSV with these columns:</p>
+  <p><code>student_number, full_name, email, module_code</code></p>
+  <ul>
+    <li>Use one row per student per module to enrol a student in several modules.</li>
+    <li>Importing the same file again is safe: nothing is duplicated.</li>
+    <li>Rows with problems are skipped and listed by row number.</li>
+  </ul>
+  <h3>Groups</h3>
+  <p>Students can be placed in groups within a module (for example tutorial groups). A class for one group notifies only that group.</p>
+  <div class="box dark"><b class="t">Records are archived, not erased</b>
+    Removing a student or lecturer who has attendance history archives the record; their history is kept. Records are deleted only under your retention period (chapter 13).</div>
+</section>
+
+<!-- ============================================================ 6 -->
+<section class="chapter">
+  <h2><span class="n">6</span>Bringing data in: imports and connections</h2>
+  <p class="lead">Open <span class="path">Integrations</span>. You can upload files whenever you like, or connect UniAttend to your systems so data stays up to date without typing it twice.</p>
+
+  <h3>Import a file (Import Centre)</h3>
+  <ol class="steps">
+    <li>Choose <b>Import data → New import</b> and upload a CSV or Excel file.</li>
+    <li><b>Match the columns</b> once: tell UniAttend which column is the student number, the name, the module code, and so on. Save the matching to reuse it next time.</li>
+    <li><b>Preview.</b> UniAttend shows exactly what will be added, updated, left unchanged or rejected, and why — before anything changes.</li>
+    <li><b>Confirm.</b> The import is applied in one step: all of it or none of it.</li>
+    <li>Download the <b>rejected rows</b> as CSV, fix them, and import them again.</li>
+  </ol>
+  <p>You can import faculties, departments, programmes, academic periods, venues, modules, lecturers, students, enrolments, lecturer assignments and dated timetable classes.</p>
+
+  <h3>Connect a system (Integration Centre)</h3>
+  <table>
+    <thead><tr><th>Method</th><th>How it works</th><th>You need</th></tr></thead>
+    <tbody>
+      <tr><td>Moodle</td><td>UniAttend reads courses and participants with a read-only token, on a schedule.</td><td>Your Moodle address and a web-services token</td></tr>
+      <tr><td>Scheduled file link</td><td>Your system publishes a CSV or JSON export at an https address; UniAttend reads it daily or hourly.</td><td>The address, and a token if it is protected</td></tr>
+      <tr><td>Your system sends it (API)</td><td>Your student system or middleware sends the roster to UniAttend whenever it changes.</td><td>An API key, created here; developer documentation at <code>/developers</code></td></tr>
+    </tbody>
+  </table>
+  <p>Start with <b>Connect</b>, choose your system (ITS, Banner, PeopleSoft, Moodle, CELCAT…) and follow the wizard. Systems without a direct connector use one of the three methods above with their own exports.</p>
+  <h3>Keeping an eye on it</h3>
+  <p><span class="path">Sync activity</span> lists every sync and import: what came in, what changed, what was rejected and why. You can try a failed run again.</p>
+  <div class="box dark"><b class="t">How UniAttend protects your register</b>
+    <ul style="margin:0;">
+      <li>Nothing is deleted because it is missing from an incomplete import.</li>
+      <li>Enrolments are dropped only when a source says its roster is complete and the connection allows it — and only enrolments that connection created. Attendance history is always kept.</li>
+      <li>If a "complete" roster would suddenly drop most students, nothing is dropped and the count is held back for you to check.</li>
+      <li>Students are matched by student number, so a changed email updates the same student.</li>
+    </ul></div>
+
+  <h3>Preparing your first import</h3>
+  <ol class="steps">
+    <li><b>Import in this order:</b> faculties and departments, then modules, then lecturers, then students with their enrolments, then lecturer assignments, then the timetable. Each step can then find what it refers to.</li>
+    <li><b>Use the same module codes everywhere</b> (for example <code>CSC1541</code>). A row naming a module UniAttend doesn't know is listed, not guessed.</li>
+    <li><b>Check student numbers</b> against your student number format (chapter 8) before you upload.</li>
+    <li><b>Start small:</b> import one department first, check it in <span class="path">Data</span>, then import the rest.</li>
+  </ol>
+  <p>A student and enrolment file can look like this (one row per student per module):</p>
+  <table>
+    <thead><tr><th>student_number</th><th>full_name</th><th>email</th><th>module_code</th></tr></thead>
+    <tbody>
+      <tr><td>22001234</td><td>Thandi Mokoena</td><td>22001234@myuniversity.ac.za</td><td>CSC1541</td></tr>
+      <tr><td>22001234</td><td>Thandi Mokoena</td><td>22001234@myuniversity.ac.za</td><td>MAT1541</td></tr>
+      <tr><td>22004567</td><td>Sipho Ndlovu</td><td>22004567@myuniversity.ac.za</td><td>CSC1541</td></tr>
+    </tbody>
+  </table>
+  <div class="box"><b class="t">Tip</b>Column names do not have to match exactly: you match them once in the Import Centre and can save the matching for next time.</div>
+</section>
+
+<!-- ============================================================ 7 -->
+<section class="chapter">
+  <h2><span class="n">7</span>The timetable and dated classes</h2>
+  <p class="lead">Open <span class="path">Timetable</span>. Classes added here appear on every enrolled student's timetable and campus map, and become the classes lecturers open attendance for.</p>
+  <h3>Adding the weekly timetable</h3>
+  <ul>
+    <li><b>Import from your timetable source</b> — a timetable link set up for your institution.</li>
+    <li><b>Import a timetable PDF</b> — UniAttend reads the PDF and shows the classes it found for you to confirm.</li>
+    <li><b>Add a class</b> by hand: module, day, start and end time, venue, type (lecture, tutorial, practical, test…), and an optional group.</li>
+  </ul>
+  <h3>Dated classes</h3>
+  <p>Every night UniAttend turns the weekly timetable into <b>dated classes for the next two weeks</b>. To do it now, press <b>Prepare the next two weeks now</b> under <b>Classes and attendance</b>.</p>
+  <ul>
+    <li>Choose <b>which kinds of class take attendance</b> (lectures, tutorials, practicals by default; tests and other events not). A lecturer can still take attendance at any class.</li>
+    <li>Lecturers can <b>cancel</b>, <b>move</b>, <b>change the venue</b> of, or <b>hand a class to a substitute</b>; the students in that class (or group) are told. A change made by hand is never overwritten by the nightly refresh.</li>
+    <li>A lecturer presses <b>Open attendance</b> on a class from 30 minutes before it starts. Pressing it twice returns the same session — never a duplicate.</li>
+  </ul>
+  <div class="box"><b class="t">Tip</b>The timetable never opens attendance on its own and never marks anyone present. A person always opens it.</div>
+</section>
+
+<!-- ============================================================ 8 -->
+<section class="chapter">
+  <h2><span class="n">8</span>Attendance policy</h2>
+  <p class="lead">Open <span class="path">Policy</span> (Policy &amp; branding). These settings apply to every class in the institution.</p>
+  <table>
+    <thead><tr><th>Setting</th><th>What it does</th><th>Suggested start</th></tr></thead>
+    <tbody>
+      <tr><td>Required attendance (%)</td><td>The attendance a student needs. A module can set its own.</td><td>75%</td></tr>
+      <tr><td>Late after (minutes)</td><td>The grace period. After it, a check-in is a late arrival that the lecturer accepts or denies; undecided ones count as attended (late) when the class closes.</td><td>10–15</td></tr>
+      <tr><td>Require the live QR</td><td>Only the changing QR on the projector proves the student was in the room.</td><td>On</td></tr>
+      <tr><td>Allow typed codes</td><td>For students whose camera fails. Typed codes score lower and may go to review.</td><td>On</td></tr>
+      <tr><td>Check location</td><td>Compare the phone's location with the venue.</td><td>On</td></tr>
+      <tr><td>Default venue radius (m)</td><td>Used for venues without their own radius or outline.</td><td>40–60</td></tr>
+      <tr><td>Worst usable GPS accuracy (m)</td><td>Readings less precise than this cannot confirm presence; they go to review.</td><td>150</td></tr>
+      <tr><td>Accept at score ≥</td><td>Check-ins scoring at least this are accepted; below it they go to review.</td><td>70</td></tr>
+      <tr><td>Keep records for (days)</td><td>Your retention period (chapter 13).</td><td>Your records policy</td></tr>
+    </tbody>
+  </table>
+  <h3>Attendance statuses</h3>
+  <p>Besides present, late, absent and excused you can add your own statuses (for example "Left early"), each counting as present, late, absent or excused.</p>
+  <h3>Student number format</h3>
+  <p>Set the pattern your student numbers follow (for example eight digits: <code>^[0-9]{8}$</code>) so imports catch typing mistakes.</p>
+  <div class="box dark"><b class="t">Before go-live</b>Review these settings with your faculty or academic office, then sign off <b>Attendance policy</b> on the go-live checklist.</div>
+</section>
+
+<!-- ============================================================ 9 -->
+<section class="chapter">
+  <h2><span class="n">9</span>Staff roles</h2>
+  <p class="lead">Open <span class="path">People</span> → <b>Administrators and staff roles</b>. Only institution administrators give roles; nobody can choose a role when they sign up.</p>
+  <table>
+    <thead><tr><th>Role</th><th>Sees</th><th>Can change</th></tr></thead>
+    <tbody>
+      <tr><td>Institution administrator</td><td>Everything in the institution</td><td>Everything in the institution</td></tr>
+      <tr><td>Faculty administrator</td><td>One faculty's modules: attendance, students, reviews, reports</td><td>Review decisions and corrections in that faculty</td></tr>
+      <tr><td>Department administrator</td><td>One department's modules</td><td>Review decisions and corrections in that department</td></tr>
+      <tr><td>Attendance officer</td><td>All attendance in the institution</td><td>Reviews, disputes, corrections and exports — not structure, people or settings</td></tr>
+      <tr><td>Integration administrator</td><td>Connections, imports and sync runs</td><td>Integration settings and imports — never attendance records</td></tr>
+      <tr><td>Auditor</td><td>All attendance, decisions, the audit log and who holds which role</td><td>Nothing (read-only)</td></tr>
+    </tbody>
+  </table>
+  <ol class="steps">
+    <li>The person creates a UniAttend account and confirms their email.</li>
+    <li>Under <b>Give role</b>, enter their email and choose the role. For a faculty or department administrator, also choose the faculty or department.</li>
+    <li>They see the role the next time they open UniAttend. Staff roles work in the <b>Attendance oversight</b> area; integration administrators see only the integration pages.</li>
+    <li>Use <b>Suspend</b> to remove a role at once, and <b>Restore</b> to give it back. Every change is in the audit log.</li>
+  </ol>
+</section>
+
+<!-- ============================================================ 10 -->
+<section class="chapter">
+  <h2><span class="n">10</span>Design your platform</h2>
+  <p class="lead">Open <span class="path">Design</span>. Make UniAttend look and feel like your institution. Save a draft while you work; publish when it is ready. Earlier versions are kept so you can go back.</p>
+  <div class="grid2">
+    <div class="card"><b>Look</b>Colours, light or dark mode (or follow each person's phone), shape, font, and your logo. Your logo also appears on printed reports.</div>
+    <div class="card"><b>Sign-in screen</b>The headline and message people see before they sign in.</div>
+    <div class="card"><b>Menus</b>Rename, reorder or hide menu items for students, lecturers and administrators. Essential items cannot be hidden.</div>
+    <div class="card"><b>Student home</b>The greeting and which cards students see on their home screen, in which order.</div>
+    <div class="card"><b>Features</b>Switch on or off: early warning, student card scanning, printed QR codes, walking directions, timetable download, the live class screen and more.</div>
+    <div class="card"><b>Announcement bar</b>A message across the top of every page, for example during exams.</div>
+  </div>
+  <div class="box" style="margin-top:5mm;"><b class="t">Tip</b>The default design is a calm grayscale. Keep strong colour for your logo and one primary colour; it keeps screens easy to read, including for colour-blind users.</div>
+</section>
+
+<!-- ============================================================ 11 -->
+<section class="chapter">
+  <h2><span class="n">11</span>Day to day: dashboard, reviews, early warning</h2>
+  <h3>Dashboard</h3>
+  <p>Today's present, absent and late figures, the attendance rate, attendance by department, recent check-ins and the number of check-ins waiting for review. Use <b>Send an announcement</b> to message everyone, a faculty, a department, a module, or one person.</p>
+  <h3>Reviews</h3>
+  <p>Open <span class="path">Reviews</span>. Check-ins with weak evidence wait here for a person; they never become absences on their own. Each case says why it is there and shows its evidence:</p>
+  <table>
+    <thead><tr><th>Reason</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td>Outside the venue</td><td>The phone appeared to be outside the venue, with its distance and accuracy.</td></tr>
+      <tr><td>Imprecise or no location</td><td>Location was too vague, or the student did not share it.</td></tr>
+      <tr><td>Device used by another student</td><td>The same phone checked in someone else in this class.</td></tr>
+      <tr><td>Typed code</td><td>The student typed the code instead of scanning the live QR.</td></tr>
+      <tr><td>Checked in without signal</td><td>The phone was offline; the check-in was sent later with its original time.</td></tr>
+      <tr><td>Tried, but was refused</td><td>For example the QR had expired; the student is in review instead of absent.</td></tr>
+      <tr><td>Late arrival</td><td>Arrived after the grace period, awaiting the lecturer.</td></tr>
+    </tbody>
+  </table>
+  <ol class="steps">
+    <li>Filter by reason if you like, and tick one student, a whole class, or many.</li>
+    <li>Choose <b>Present</b>, <b>Late</b>, <b>Absent</b> or <b>Excused</b>. A reason is required for absent or excused.</li>
+    <li>The student is told; the decision, who made it and why are kept and listed under <b>Decided in the last 30 days</b>.</li>
+  </ol>
+  <p><b>Classes without a register</b> lists timetabled classes that ended without anyone taking attendance — useful to follow up with lecturers.</p>
+  <h3>Disputes</h3>
+  <p>Students can dispute an absent, late or pending record. The module's lecturers (or an attendance officer) uphold or reject it; the student is told the outcome.</p>
+  <h3>Early warning</h3>
+  <p>Open <span class="path">Early warning</span>. Alerts open by themselves when a student's attendance falls below the requirement or they miss several classes in a row. Set <b>Judge attendance after (classes)</b> and <b>Missed in a row (classes)</b>, then record contact and close alerts as students are followed up.</p>
+</section>
+
+<!-- ============================================================ 12 -->
+<section class="chapter">
+  <h2><span class="n">12</span>Reports and exports</h2>
+  <p class="lead">Open <span class="path">Reports</span>. Choose a period and, if you like, a faculty, department or module, then press <b>Show</b>.</p>
+  <ul>
+    <li><b>Headline figures:</b> attendance rate, classes, late arrivals, unresolved records, classes without a register, open disputes.</li>
+    <li><b>Attendance by faculty, by department and by module</b>, lowest first; a weekly trend.</li>
+    <li><b>Students at risk:</b> below their module's requirement (counting records still in review as missed) or absent three or more classes in a row.</li>
+  </ul>
+  <p>Only closed classes count. Excused classes are left out, and records in review or disputed are shown separately, never as absences.</p>
+  <h3>Downloads</h3>
+  <table>
+    <thead><tr><th>Download</th><th>What you get</th></tr></thead>
+    <tbody>
+      <tr><td>Excel</td><td>Every table on its own sheet, with your institution's name and the period at the top.</td></tr>
+      <tr><td>CSV</td><td>The module table or the students-at-risk list, for other systems.</td></tr>
+      <tr><td>PDF</td><td>The report on your letterhead (logo, title, period, page numbers). Use <b>Save as PDF</b> in the print window.</td></tr>
+      <tr><td>Module PDF</td><td>One module's class list with each student's attendance and a lecturer signature line — from the module page or the staff overview.</td></tr>
+      <tr><td>Data</td><td><span class="path">Data</span> exports any record type (students, lecturers, modules…) as CSV, with the same search as the page.</td></tr>
+    </tbody>
+  </table>
+  <div class="box dark"><b class="t">Downloads contain personal information</b>Every download is recorded in the audit log (who, what, how many rows). Store and share them under your institution's POPIA policy.</div>
+</section>
+
+<!-- ============================================================ 13 -->
+<section class="chapter">
+  <h2><span class="n">13</span>Privacy, POPIA and your data</h2>
+  <h3>Personal information requests</h3>
+  <p>Students and staff can ask to see, correct or delete their information, or object to how it is used. Requests arrive under <span class="path">Policy</span> → <b>Personal information requests</b> with a 30-day clock. Your institution decides; record the outcome so it is kept. Students can also download all their own data themselves.</p>
+  <h3>Keeping records</h3>
+  <p>Set <b>Keep records for (days)</b> (the default is three years). Under <b>Keeping records (POPIA)</b> you can preview what is older than that and delete it, or switch on automatic nightly clean-up. It is off by default: your institution decides when records are deleted. Lecturers removed earlier are anonymised rather than deleted, so past classes still show who ran them.</p>
+  <h3>The audit log</h3>
+  <p><span class="path">Audit log</span> records role changes, corrections, review decisions, imports, downloads, sign-offs and session events. Nobody can edit it.</p>
+  <h3>Your data</h3>
+  <p>Open <span class="path">Your data</span>:</p>
+  <table>
+    <thead><tr><th>Action</th><th>What happens</th></tr></thead>
+    <tbody>
+      <tr><td>UniAttend support access</td><td>UniAttend staff cannot see your students or attendance. To let them help with your data, give access for 1 hour to 7 days with a reason; withdraw it at any time. Everything they do is in your audit log.</td></tr>
+      <tr><td>Download everything</td><td>Every table, as CSV files in one ZIP. Stored passwords and tokens are never included.</td></tr>
+      <tr><td>Cut off your systems</td><td>Deletes every stored Moodle token, link token and API key at once and pauses every connection.</td></tr>
+      <tr><td>Ask to leave UniAttend</td><td>UniAttend agrees a closing date with you. The account is then archived: nobody can sign in to it or check in, and nothing is deleted until you instruct it under your retention schedule.</td></tr>
+    </tbody>
+  </table>
+  <div class="box dark"><b class="t">Biometric data</b>The optional fingerprint or face lock on the phone app is checked only on the phone. UniAttend never receives or stores biometric data. Check-ins keep only the distance from the venue and its accuracy, not the student's coordinates.</div>
+</section>
+
+<!-- ============================================================ 14 -->
+<section class="chapter">
+  <h2><span class="n">14</span>Troubleshooting</h2>
+  <table>
+    <thead><tr><th>Problem</th><th>What to check</th></tr></thead>
+    <tbody>
+      <tr><td>A student can't see their modules</td><td>Their email or student number in UniAttend must match the one they signed up with, and they must have confirmed their email. Check them in <span class="path">People</span> and their enrolments in <span class="path">Modules</span>.</td></tr>
+      <tr><td>A lecturer can't open attendance</td><td>They must be assigned to the module, have confirmed their email, and the institution must be approved with an active trial or subscription.</td></tr>
+      <tr><td>Many check-ins go to review for one venue</td><td>The venue's point or outline may be off, or too tight. Fix it in <span class="path">Venues &amp; map</span>; then decide the waiting check-ins in <span class="path">Reviews</span>.</td></tr>
+      <tr><td>"Students cannot confirm their email"</td><td>Ask UniAttend to confirm your institution's email delivery; check spam folders.</td></tr>
+      <tr><td>An import rejected rows</td><td>Open the import, read each reason, download the rejected rows, fix and import them again.</td></tr>
+      <tr><td>A sync failed</td><td>Open <span class="path">Sync activity</span>; check the address and token; press <b>Try again</b>.</td></tr>
+      <tr><td>Attendance is paused</td><td>Your trial or subscription has ended. Your data is kept; contact UniAttend to continue.</td></tr>
+      <tr><td>You need UniAttend to look at your data</td><td>Give support access under <span class="path">Your data</span>, with a short reason, for as few hours as needed.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============================================================ 15 -->
+<section class="chapter">
+  <h2><span class="n">15</span>Quick reference</h2>
+  <table>
+    <thead><tr><th>Menu</th><th>Use it to</th></tr></thead>
+    <tbody>
+      <tr><td>Dashboard</td><td>See today's figures and send announcements.</td></tr>
+      <tr><td>Data</td><td>Search, edit, archive, restore and export any record.</td></tr>
+      <tr><td>Venues &amp; map</td><td>Faculties, departments, campuses and venues.</td></tr>
+      <tr><td>Modules</td><td>Modules, lecturer assignments, enrolments.</td></tr>
+      <tr><td>Timetable</td><td>Weekly classes, dated classes, which classes take attendance.</td></tr>
+      <tr><td>Reviews</td><td>Decide check-ins with weak evidence; see classes without a register.</td></tr>
+      <tr><td>Reports</td><td>Attendance by faculty, department and module; Excel, CSV and PDF.</td></tr>
+      <tr><td>People</td><td>Students, lecturers, administrators and staff roles.</td></tr>
+      <tr><td>Integrations</td><td>Imports, connections and sync activity.</td></tr>
+      <tr><td>Early warning</td><td>Students who need follow-up.</td></tr>
+      <tr><td>Design</td><td>Look, menus, features and the student home.</td></tr>
+      <tr><td>Policy</td><td>Attendance rules, branding, statuses, retention, privacy requests.</td></tr>
+      <tr><td>Go-live checklist</td><td>Track the twelve onboarding steps.</td></tr>
+      <tr><td>Your data</td><td>Support access, full download, cut off systems, leave.</td></tr>
+      <tr><td>Audit log</td><td>Who did what, when.</td></tr>
+    </tbody>
+  </table>
+  <div class="box" style="margin-top:8mm;"><b class="t">More help</b>Lecturer and student guides are available from UniAttend. Technical teams connecting a student system can read the API documentation at <code>/developers</code> on your UniAttend address.</div>
+</section>
+
+</body>
+</html>
