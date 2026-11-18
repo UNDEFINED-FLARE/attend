@@ -779,6 +779,18 @@ After each step: type-check, lint, tests, build.
 > log (institution entries), role assignments and profiles (except
 > administrators' own contact details), and integration errors.
 
+### `20261117000035_rest_connector.sql` (35 lines)
+
+> UniAttend 0035 — a connection that reads the university's own JSON API.
+>
+> A new kind of connection, 'rest': UniAttend calls an https address on the
+> institution's system (with a bearer token, an API-key header or OAuth client
+> credentials), follows its paging, and maps each record's fields to students,
+> lecturers and their modules. The settings (address, paging, field mapping) live
+> in the connection's options; the credential is encrypted by the app like every
+> other token. Everything else — scheduling, the worker, runs, errors and the
+> safety rules for removing enrolments — is shared with Moodle and roster links.
+
 ## B. Tables (schema `uniattend`) and their columns
 
 - **academic_periods**
@@ -1717,9 +1729,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/admin/actions.ts` (359 lines) — "" must be tested first: z.coerce.number() would turn it into 0.
 - `src/app/admin/announce-form.tsx` (56 lines) — Send an announcement to everyone, a faculty, a department, a module, one student or one lecturer.
 - `src/app/admin/audit/page.tsx` (27 lines)
-- `src/app/admin/connections/actions.ts` (162 lines) — Server-to-database client for the steps that need the dispatch secret (never the user's session).
-- `src/app/admin/connections/connection-forms.tsx` (144 lines)
-- `src/app/admin/connections/page.tsx` (176 lines)
+- `src/app/admin/connections/page.tsx` (6 lines) — Connections now live in the Integration Centre, one page per connection.
 - `src/app/admin/data-actions.ts` (243 lines) — Frees a unique number/code on an archived row so the same one can be added again later.
 - `src/app/admin/data/data-table.tsx` (131 lines) — The Data page table: tick rows for bulk actions, or edit one row inline.
 - `src/app/admin/data/export-all/route.ts` (73 lines) — Everything the institution keeps in UniAttend, one CSV per table, in a ZIP: for
@@ -1736,13 +1746,17 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/admin/integrations/activity/[run]/page.tsx` (97 lines) — One connection's sync: counts per kind of data, rejected rows with reasons, checkpoints, and a retry. No source data or credentials are shown.
 - `src/app/admin/integrations/activity/actions.ts` (18 lines) — Queue the connection behind a failed run to run again now. The database checks it is this admin's.
 - `src/app/admin/integrations/activity/page.tsx` (85 lines)
-- `src/app/admin/integrations/connect/page.tsx` (112 lines) — The setup wizard. Steps 1 and 2 are choices in the address (?provider=&method=),
+- `src/app/admin/integrations/connect/page.tsx` (117 lines) — The setup wizard. Steps 1 and 2 are choices in the address (?provider=&method=),
+- `src/app/admin/integrations/connections/[id]/page.tsx` (141 lines)
+- `src/app/admin/integrations/connections/actions.ts` (220 lines) — Server-to-database client for the steps that need the dispatch secret (never the user's session).
+- `src/app/admin/integrations/connections/connection-forms.tsx` (151 lines)
+- `src/app/admin/integrations/connections/rest-fields.tsx` (108 lines) — Settings for "UniAttend reads your system's API": address, sign-in, paging and which field holds what.
 - `src/app/admin/integrations/import/[run]/errors/route.ts` (32 lines) — The rejected rows of one import, as a CSV to fix and upload again.
 - `src/app/admin/integrations/import/[run]/page.tsx` (116 lines)
 - `src/app/admin/integrations/import/actions.ts` (135 lines) — A CSV, Excel or JSON file as a header row and cells. Throws a message fit to show.
 - `src/app/admin/integrations/import/import-wizard.tsx` (145 lines) — Upload → match the file's columns to UniAttend's fields → preview. The file stays in the browser until step 2 is submitted.
-- `src/app/admin/integrations/import/page.tsx` (80 lines)
-- `src/app/admin/integrations/page.tsx` (149 lines)
+- `src/app/admin/integrations/import/page.tsx` (98 lines)
+- `src/app/admin/integrations/page.tsx` (164 lines)
 - `src/app/admin/layout.tsx` (43 lines) — Integration administrators share this area but only see the integration pages;
 - `src/app/admin/modules/assign-actions.ts` (111 lines) — The institution always comes from the admin's own role, never from the form.
 - `src/app/admin/modules/assign-import.tsx` (105 lines) — Upload a PDF, Word, Excel or CSV list; review the matches; assign lecturers to modules.
@@ -1788,7 +1802,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/lecturer/layout.tsx` (12 lines)
 - `src/app/lecturer/modules/[id]/export/route.ts` (29 lines) — The report comes from module_report(), which refuses anyone who does not
 - `src/app/lecturer/modules/[id]/page.tsx` (98 lines)
-- `src/app/lecturer/page.tsx` (148 lines)
+- `src/app/lecturer/page.tsx` (142 lines)
 - `src/app/lecturer/reports/page.tsx` (10 lines)
 - `src/app/lecturer/review-actions.ts` (36 lines) — Decide check-ins under review. The database checks the reviewer may decide each one.
 - `src/app/lecturer/sessions/[id]/controls.tsx` (69 lines) — Pause or resume, regenerate, change the window, allow a printed QR, and the card scanner.
@@ -1827,7 +1841,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/student/check-in/page.tsx` (12 lines)
 - `src/app/student/class/[id]/live-class.tsx` (143 lines) — Always South African time, so the server and the phone show the same clock.
 - `src/app/student/class/[id]/page.tsx` (45 lines) — The student's live view of one class, from check-in until the class ends or the lecturer closes it.
-- `src/app/student/dashboard-view.tsx` (277 lines) — The student dashboard's display, separate from its data loading (page.tsx).
+- `src/app/student/dashboard-view.tsx` (203 lines) — The student dashboard's display, separate from its data loading (page.tsx).
 - `src/app/student/history/page.tsx` (145 lines)
 - `src/app/student/layout.tsx` (18 lines)
 - `src/app/student/leave-button.tsx` (22 lines) — "I'm leaving": records the student's check-out time.
@@ -1871,6 +1885,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/components/map/use-leaflet.ts` (65 lines) — Creates a Leaflet map in `ref` once the library has loaded (it touches
 - `src/components/map/venue-editor.tsx` (275 lines)
 - `src/components/map/venue-map.tsx` (52 lines) — Read-only map of one venue, optionally with the viewer's own position.
+- `src/components/minimal.tsx` (160 lines) — The minimal dashboard kit: grayscale first, structure from size, weight and space,
 - `src/components/native-reminders.tsx` (57 lines) — In the UniAttend Android app (Capacitor), class reminders are scheduled on the
 - `src/components/nav.tsx` (55 lines) — The longest matching prefix wins, so /lecturer/modules/x highlights
 - `src/components/offline-sync.tsx` (104 lines) — Shows when the device is offline, how much is waiting to be sent, and sends it
@@ -1913,11 +1928,12 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/lib/geo.ts` (60 lines) — Small geometry helpers for the live map and walking navigation.
 - `src/lib/ics.ts` (73 lines) — A weekly timetable as an iCalendar (.ics) file: each class becomes a weekly
 - `src/lib/integrations/datasets.ts` (228 lines) — What each kind of academic data looks like to UniAttend, whatever the source calls
-- `src/lib/integrations/providers.ts` (104 lines) — The systems a university might connect, and how. Honest by design: a method is
+- `src/lib/integrations/providers.ts` (105 lines) — The systems a university might connect, and how. Honest by design: a method is
+- `src/lib/integrations/rest.ts` (131 lines) — Reading a university's own JSON API: where the records are, how pages follow
 - `src/lib/integrations/roster.ts` (128 lines) — The one shape every source is turned into before it reaches the database
-- `src/lib/integrations/runner.ts` (79 lines) — The sync worker. The database decides what is due and hands over one connection
+- `src/lib/integrations/runner.ts` (106 lines) — The sync worker. The database decides what is due and hands over one connection
 - `src/lib/integrations/secrets.ts` (60 lines) — Credentials for an institution's systems (Moodle tokens, roster-link tokens, OAuth
-- `src/lib/integrations/sources.ts` (99 lines) — Talking to an institution's own systems. Every request: https only, public
+- `src/lib/integrations/sources.ts` (150 lines) — Talking to an institution's own systems. Every request: https only, public
 - `src/lib/legal.ts` (40 lines) — The company details every legal page uses: the privacy notice, terms, PAIA manual
 - `src/lib/nav-config.ts` (70 lines) — Every menu in the app, with the defaults an institution starts from. The Design
 - `src/lib/offline-queue.ts` (59 lines) — Work done without signal, kept on the phone until it can be sent.
@@ -1935,7 +1951,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/lib/supabase/cookies.ts` (19 lines) — How long the sign-in is remembered. "Keep me signed in" (the default) keeps the
 - `src/lib/supabase/resilient.ts` (26 lines) — auth.getUser() with one retry on network failure. A network failure is
 - `src/lib/supabase/server.ts` (27 lines) — Supabase client bound to the signed-in user's session. RLS always applies.
-- `src/lib/theme.ts` (148 lines) — An institution's look: colours, shape, header, sidebar, footer, an
+- `src/lib/theme.ts` (149 lines) — An institution's look: colours, shape, header, sidebar, footer, an
 - `src/lib/timetable-export.ts` (61 lines) — Today as a SAST calendar date (UTC midnight of that date).
 - `src/lib/timetable-pdf.ts` (261 lines) — Parser for timetable PDFs exported by university "Timetable
 - `src/lib/timetable-sources.ts` (182 lines) — Where an institution's timetable is collected from. Set per institution by
@@ -1968,7 +1984,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `tests/db/harness.ts` (88 lines) — Runs the real migrations against an in-process Postgres (PGlite) with a
 - `tests/db/install-script.test.ts` (30 lines) — The bundled SQL-editor script must install cleanly next to another app's
 - `tests/db/location.test.ts` (90 lines) — Campus boundaries and class navigation (migration 0013). Live location sharing
-- `tests/db/platform.test.ts` (1853 lines) — UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
+- `tests/db/platform.test.ts` (1870 lines) — UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
 - `tests/db/safeupdate.test.ts` (49 lines) — Supabase loads pg_safeupdate for API requests: an UPDATE or DELETE without a
 - `tests/db/security.test.ts` (78 lines) — Regression tests for the 2026-11-10 security review:
 
@@ -1987,6 +2003,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `tests/unit/integration-secrets.test.ts` (58 lines) — A new random IV each time: the same secret never looks the same twice.
 - `tests/unit/nav-config.test.ts` (35 lines)
 - `tests/unit/providers.test.ts` (48 lines) — Vendors without a built connector get files, a link or the push API, plus a plain "not yet".
+- `tests/unit/rest-connector.test.ts` (235 lines) — The network side runs against a simulated server: fetch is replaced, and the
 - `tests/unit/roster.test.ts` (84 lines)
 - `tests/unit/safe-redirect.test.ts` (30 lines) — 2. Open redirect: "next" must always stay on this site.
 - `tests/unit/schema-version.test.ts` (13 lines)

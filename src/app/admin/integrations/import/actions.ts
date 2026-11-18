@@ -112,7 +112,7 @@ export async function confirmImport(_: S, f: FormData): Promise<S> {
   const { supabase } = await requireAnyRole(INTEGRATION_ROLES);
   const { error } = await supabase.rpc("import_commit", { p_run: run.data });
   if (error) return { error: error.message };
-  for (const p of ["/admin/integrations/import", "/admin/people", "/admin/modules", "/admin/structure", "/admin/connections"]) revalidatePath(p);
+  for (const p of ["/admin/integrations/import", "/admin/people", "/admin/modules", "/admin/structure", "/admin/integrations"]) revalidatePath(p);
   revalidatePath(`/admin/integrations/import/${run.data}`);
   return { ok: "Imported." };
 }

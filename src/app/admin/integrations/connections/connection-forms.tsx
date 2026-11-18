@@ -3,9 +3,10 @@ import { useActionState, useState } from "react";
 import { Submit } from "@/components/form";
 import { Field, Input, Notice, Select } from "@/components/ui";
 import { connectionAction, saveConnection, testConnection } from "./actions";
+import { RestFields } from "./rest-fields";
 
 type S = { error?: string; ok?: string; key?: string } | undefined;
-type Kind = "moodle" | "feed" | "api";
+type Kind = "moodle" | "feed" | "api" | "rest";
 export type ConnectionRow = { id: string; kind: Kind; name: string; base_url: string | null; schedule: string; options: Record<string, unknown> };
 
 function Result({ s }: { s: S }) {
@@ -34,6 +35,10 @@ function Check({ name, label, hint, on }: { name: string; label: string; hint: s
   );
 }
 
+export const KIND_LABEL: Record<Kind, string> = {
+  moodle: "Moodle", feed: "Roster link", api: "Your system sends it (API)", rest: "UniAttend reads your system's API",
+};
+
 /** Add a connection, or edit one (the token is never shown again; leave it empty to keep it). */
 /** `preset` comes from the setup wizard: the method is already chosen, and the provider labels the connection. */
 export function ConnectionForm({ existing, preset }: { existing?: ConnectionRow; preset?: { kind: Kind; provider?: string; name?: string } }) {
@@ -48,15 +53,16 @@ export function ConnectionForm({ existing, preset }: { existing?: ConnectionRow;
       {provider && <input type="hidden" name="provider" value={provider} />}
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Where does the data come from?">
-          {existing || preset ? <><input type="hidden" name="kind" value={kind} /><Input value={{ moodle: "Moodle", feed: "Roster link", api: "Our system sends it (API)" }[kind]} readOnly /></> : (
+          {existing || preset ? <><input type="hidden" name="kind" value={kind} /><Input value={KIND_LABEL[kind]} readOnly /></> : (
             <Select name="kind" value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
               <option value="moodle">Moodle</option>
               <option value="feed">A roster link (CSV or JSON)</option>
               <option value="api">Our system sends it (API)</option>
+              <option value="rest">UniAttend reads our system&apos;s API</option>
             </Select>
           )}
         </Field>
-        <Field label="Name"><Input name="name" required maxLength={80} defaultValue={existing?.name ?? preset?.name} placeholder={{ moodle: "Campus Moodle", feed: "ITS nightly export", api: "Student system" }[kind]} /></Field>
+        <Field label="Name"><Input name="name" required maxLength={80} defaultValue={existing?.name ?? preset?.name} placeholder={{ moodle: "Campus Moodle", feed: "ITS nightly export", api: "Student system", rest: "Student system API" }[kind]} /></Field>
       </div>
 
       {kind === "moodle" && (
@@ -88,8 +94,9 @@ export function ConnectionForm({ existing, preset }: { existing?: ConnectionRow;
           </Field>
         </div>
       )}
+      {kind === "rest" && <RestFields saved={existing?.options?.rest as Record<string, unknown> | undefined} baseUrl={existing?.base_url} editing={!!existing} />}
       {kind === "api" && !existing && (
-        <p className="text-sm text-muted">You get an API key. Your student system sends the roster to UniAttend whenever it changes; see “Sending a roster” below.</p>
+        <p className="text-sm text-muted">You get an API key. Your student system sends the roster to UniAttend whenever it changes, as described at <a href="/developers" className="text-accent underline">/developers</a>.</p>
       )}
 
       {kind !== "api" && (

@@ -3,13 +3,14 @@
 // API that needs the institution's documentation, licence and approval is shown as
 // such, never as connected or ready. Pure data; no network.
 
-export type MethodKey = "moodle" | "feed" | "api" | "upload";
+export type MethodKey = "moodle" | "feed" | "api" | "rest" | "upload";
 
 /** How data can come in. Each available method maps to a working part of UniAttend. */
-export const METHODS: Record<MethodKey, { label: string; about: string; kind?: "moodle" | "feed" | "api" }> = {
+export const METHODS: Record<MethodKey, { label: string; about: string; kind?: "moodle" | "feed" | "api" | "rest" }> = {
   moodle: { label: "Moodle web services", about: "UniAttend signs in to your Moodle with a read-only token and reads courses and participants on a schedule.", kind: "moodle" },
   feed: { label: "Scheduled file link", about: "Your system publishes a CSV or JSON export at an https address; UniAttend reads it every day or hour.", kind: "feed" },
   api: { label: "Your system sends it (API)", about: "Your system or middleware posts the roster to UniAttend whenever it changes, with a key you create here.", kind: "api" },
+  rest: { label: "UniAttend reads your system's API", about: "UniAttend calls your system's JSON API on a schedule (token, API key or OAuth), follows its pages and maps its fields to people and modules.", kind: "rest" },
   upload: { label: "File upload", about: "An administrator uploads a CSV, Excel or JSON export, matches the columns and confirms after a preview." },
 };
 
@@ -40,23 +41,23 @@ export const PROVIDERS: Provider[] = [
     docs: "https://docs.moodle.org/en/Using_web_services" },
   { key: "its", name: "ITS Integrator", vendor: "Adapt IT", category: "Student information system",
     about: "Keep UniAttend in step with student registrations, modules and enrolments from your ITS environment.",
-    data: ["Students", "Registration status", "Modules", "Enrolments", "Academic structure", "Academic periods"], methods: ["feed", "api", "upload"],
+    data: ["Students", "Registration status", "Modules", "Enrolments", "Academic structure", "Academic periods"], methods: ["feed", "api", "rest", "upload"],
     notYet: "A direct ITS Integrator API connection is not built: ITS installations differ, and it needs your institution's documentation.",
     needs: "Your ICT department's approval, and either a scheduled export from ITS or Adapt IT's integration documentation for your version." },
   { key: "celcat", name: "CELCAT", category: "Timetabling",
-    about: "Bring in venues now; scheduled lectures, groups, changes and cancellations once timetable sync is built.",
-    data: ["Venues", "Lecturers"], methods: ["upload", "feed"],
-    notYet: "Timetable events (dated lectures, changes, cancellations) can't be synchronised yet. That is the next stage of work.",
+    about: "Dated classes with their venues and lecturers, including changes and cancellations, from a CELCAT export.",
+    data: ["Dated classes", "Changes and cancellations", "Venues", "Lecturers"], methods: ["upload"],
+    notYet: "A direct CELCAT API connection is not built. Export the timetable and import it as timetable events; each class keeps its CELCAT event ID, so importing again updates instead of duplicating.",
     needs: "An export or API access approved by your timetabling office." },
   { key: "banner", name: "Ellucian Banner", category: "Student information system",
     about: "Students, programmes, courses, enrolments and terms from your Banner environment.",
-    data: ["Students", "Programmes", "Modules", "Enrolments", "Academic periods"], methods: ["feed", "api", "upload"],
-    notYet: "A direct Banner API connection is not built; it depends on your licensed Banner APIs.",
+    data: ["Students", "Programmes", "Modules", "Enrolments", "Academic periods"], methods: ["feed", "api", "rest", "upload"],
+    notYet: "A Banner-specific connector is not built. Banner's REST APIs can be read with \"UniAttend reads your system's API\" once you map their fields.",
     needs: "Your institution's Banner API documentation and credentials, or a scheduled export." },
   { key: "peoplesoft", name: "PeopleSoft Campus Solutions", vendor: "Oracle", category: "Student information system",
     about: "Student records, programmes, course catalogue, enrolments and terms.",
-    data: ["Students", "Programmes", "Modules", "Enrolments", "Academic periods"], methods: ["feed", "api", "upload"],
-    notYet: "A direct PeopleSoft connection is not built; it depends on your integration broker setup.",
+    data: ["Students", "Programmes", "Modules", "Enrolments", "Academic periods"], methods: ["feed", "api", "rest", "upload"],
+    notYet: "A PeopleSoft-specific connector is not built. A REST service from your integration broker can be read with \"UniAttend reads your system's API\".",
     needs: "A scheduled export, or your institution's integration documentation." },
   { key: "blackboard", name: "Blackboard", category: "Learning management system",
     about: "Courses and course memberships.",
@@ -69,9 +70,9 @@ export const PROVIDERS: Provider[] = [
     notYet: "Not available yet. It is set up in the sign-in service (Supabase Auth), not as a data sync, and it never enrols anyone in modules.",
     needs: "An app registration in your Entra ID tenant, approved by your ICT department." },
   { key: "custom", name: "Your own system", category: "Your own system",
-    about: "An in-house student system or middleware: push the roster to UniAttend, or publish an export it reads.",
-    data: ["Students", "Lecturers", "Modules", "Enrolments", "Who teaches what"], methods: ["api", "feed", "upload"],
-    docs: "/admin/connections" },
+    about: "An in-house student system or middleware: push the roster to UniAttend, let UniAttend read your API, or publish an export.",
+    data: ["Students", "Lecturers", "Modules", "Enrolments", "Who teaches what"], methods: ["api", "rest", "feed", "upload"],
+    docs: "/developers" },
   { key: "files", name: "CSV, Excel and JSON files", category: "Files",
     about: "Any export from any system. Match the columns once, preview every change, then confirm.",
     data: ["Students", "Lecturers", "Modules", "Enrolments", "Who teaches what", "Faculties", "Departments", "Programmes", "Academic periods", "Venues"],

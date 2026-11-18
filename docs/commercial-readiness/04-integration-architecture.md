@@ -14,7 +14,7 @@ UniAttend does not replace a university's student system (SIS), learning system 
 | **Legacy push** | `POST /api/roster` — same as v1 without retries or the error shape. Kept for compatibility. | Implemented, tested. |
 | **Import Centre** | An administrator uploads CSV/Excel, maps columns (mappings can be saved), previews, confirms. 11 datasets, from faculties to dated timetable events. | Implemented, tested. |
 | **ITS, Banner, PeopleSoft, Blackboard, CELCAT** | Listed in the catalogue as "not available yet". They can send data today through the API, a scheduled link or the Import Centre, using their own exports. | **Blocked:** a direct connector needs an authorised test environment. |
-| Configurable REST connector (paths, paging, OAuth) | — | Missing (P2). |
+| **University API (REST connector)** | UniAttend reads the university's own JSON API on a schedule: bearer token, API key header or OAuth client credentials; page-number, offset or next-link paging; a field mapping from each record to a person with modules. A test reads the first page and reports what it found. Page and offset paging resume across runs. Migration 0035. | Implemented; mapping, paging, OAuth, error and redirect handling unit-tested against a simulated server; claim and apply database-tested. **Blocked:** never run against a real university API. |
 
 ## 2. The path every record takes
 
@@ -68,5 +68,6 @@ The roster push and the scheduled sources use `roster_apply()` for the same rule
 |---|---|
 | Moodle | Web services and REST enabled, a service with the three functions above, a user with read access to courses and participants, a token. |
 | Scheduled link | An https address of a CSV or JSON export, optionally a bearer token. |
+| University API | The https address of a JSON endpoint listing people with their modules, a read-only credential (token, API key or OAuth client), and which fields hold the number and module codes. |
 | API | Someone to call `/api/v1/roster` from their SIS or middleware; an API key from an administrator. |
 | Any SIS (ITS, Banner, PeopleSoft) or CELCAT directly | An authorised test environment and documentation; until then, their own exports through one of the methods above. |

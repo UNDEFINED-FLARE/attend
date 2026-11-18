@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ConnectionForm } from "@/app/admin/connections/connection-forms";
+import { ConnectionForm } from "@/app/admin/integrations/connections/connection-forms";
 import { Card, CardTitle, Notice, PageHeader } from "@/components/ui";
 import { INTEGRATION_ROLES, requireAnyRole } from "@/lib/auth";
 import { METHODS, PROVIDERS, providerDef, type MethodKey } from "@/lib/integrations/providers";
@@ -93,8 +93,13 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
               <ol className="list-decimal space-y-1 pl-5 text-sm text-muted">
                 {kind === "api" ? <>
                   <li>You get an API key, shown once.</li>
-                  <li>Your system posts rosters to UniAttend with it (example on the Connections page).</li>
+                  <li>Your system posts rosters to UniAttend with it (example on the connection&apos;s page, full reference at <a href="/developers" className="text-accent underline">/developers</a>).</li>
                   <li>Each roster is applied and recorded in the activity log.</li>
+                </> : kind === "rest" ? <>
+                  <li>UniAttend signs in to your API and reads the first page to test the address, sign-in and field mapping.</li>
+                  <li>The test says how many people and modules it found on that page, so a wrong mapping shows before anything is saved.</li>
+                  <li>The first sync starts right away and follows every page; then on your schedule.</li>
+                  <li>Results, rejected rows and failures appear in the activity log; failures notify you.</li>
                 </> : <>
                   <li>UniAttend signs in to the source and reads it once to test.</li>
                   <li>Only a successful test marks the connection as connected.</li>

@@ -3,6 +3,7 @@ import { Badge, Card, CardTitle, Input, Notice, PageHeader, Stat } from "@/compo
 import { Icon } from "@/components/icons";
 import { INTEGRATION_ROLES, requireAnyRole } from "@/lib/auth";
 import { isStale, METHODS, PROVIDERS, providerOf, runCounts } from "@/lib/integrations/providers";
+import { KIND_LABEL } from "./connections/connection-forms";
 
 export const metadata = { title: "Integration Centre" };
 
@@ -23,12 +24,19 @@ export default async function IntegrationCentre({ searchParams }: { searchParams
   const { q = "", cat = "" } = await searchParams;
   const { supabase, institutionId } = await requireAnyRole(INTEGRATION_ROLES);
   const since = new Date(Date.now() - 30 * 86400_000).toISOString();
-  const [{ data: conns, error }, { data: runs }, { count: pending }, { count: errors }] = await Promise.all([
+  const [{ data: conns, error }, { data: runs }, { count: pending }, { count: errors }, modules, enrolled, taught] = await Promise.all([
     supabase.from("integrations").select("*").eq("institution_id", institutionId).order("created_at"),
     supabase.from("integration_runs").select("integration_id, trigger, status, summary, started_at").eq("institution_id", institutionId).gte("started_at", since).order("started_at", { ascending: false }).limit(1000),
     supabase.from("integration_runs").select("id", { count: "exact", head: true }).eq("institution_id", institutionId).eq("status", "staging"),
     supabase.from("integration_errors").select("id", { count: "exact", head: true }).eq("institution_id", institutionId).gte("created_at", since),
+    supabase.from("modules").select("id", { count: "exact", head: true }).eq("institution_id", institutionId).is("deleted_at", null),
+    supabase.from("module_enrolments").select("module_id").eq("institution_id", institutionId).eq("status", "active").limit(50000),
+    supabase.from("lecturer_assignments").select("module_id").eq("institution_id", institutionId).limit(50000),
   ]);
+  // How much of the register the data covers: a module without students or a lecturer can't take attendance.
+  const totalModules = modules.count ?? 0;
+  const withStudents = new Set((enrolled.data ?? []).map((e) => e.module_id)).size;
+  const withLecturer = new Set((taught.data ?? []).map((e) => e.module_id)).size;
   const list = (conns ?? []) as Conn[];
   const recent = (runs ?? []) as Run[];
 
@@ -67,15 +75,22 @@ export default async function IntegrationCentre({ searchParams }: { searchParams
               <b>{c.name}</b>: {c.last_status === "failed" ? `the last sync failed${typeof c.last_summary?.error === "string" ? ` (${c.last_summary.error})` : ""}.`
                 : ["auth_failed", "connection_failed", "permission_denied"].includes(c.connection_status ?? "") ? `${CONN[c.connection_status!][0].toLowerCase()}${c.last_test_message ? `: ${c.last_test_message}` : "."}`
                 : `no successful sync since ${at(c.last_success_at ?? c.created_at)}.`}{" "}
-              <Link href="/admin/connections" className="font-semibold underline">Check it</Link>
+              <Link href={`/admin/integrations/connections/${c.id}`} className="font-semibold underline">Check it</Link>
             </Notice>
           ))}
         </div>
       )}
 
+      {totalModules > 0 && (withStudents < totalModules || withLecturer < totalModules) && (
+        <div className="mb-6"><Notice>
+          <b>{withStudents} of {totalModules}</b> modules have students and <b>{withLecturer} of {totalModules}</b> have a lecturer.
+          A module needs both before attendance can be taken; bring the rest in with a connection or an import.
+        </Notice></div>
+      )}
+
       <div className="mb-8 grid gap-6 lg:grid-cols-[1fr_auto]">
         <Card>
-          <CardTitle action={<span className="flex gap-3 text-sm font-medium"><Link href="/admin/integrations/activity" className="text-accent">Activity</Link><Link href="/admin/connections" className="text-accent">Manage</Link></span>}>
+          <CardTitle action={<span className="flex gap-3 text-sm font-medium"><Link href="/admin/integrations/activity" className="text-accent">Activity</Link><Link href="/admin/integrations/connect" className="text-accent">Add</Link></span>}>
             Your connections
           </CardTitle>
           {list.length === 0 ? (
@@ -87,14 +102,14 @@ export default async function IntegrationCentre({ searchParams }: { searchParams
                 const [label, tone] = c.kind === "api" ? (c.last_run_at ? ["Receiving", "active"] : ["Waiting for first roster", "pending"]) : CONN[c.connection_status ?? "not_configured"] ?? [c.connection_status, "pending"];
                 const counts = runCounts(c.last_summary);
                 return (
-                  <li key={c.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-3 text-sm">
+                  <li key={c.id}><Link href={`/admin/integrations/connections/${c.id}`} className="-mx-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl px-2 py-3 text-sm hover:bg-bg">
                     <span className="min-w-0 flex-1"><span className="block font-semibold">{c.name}</span>
-                      <span className="text-xs text-muted">{p?.name ?? "Connection"} · {c.kind === "api" ? METHODS.api.label : c.kind === "feed" ? METHODS.feed.label : METHODS.moodle.label}</span></span>
+                      <span className="text-xs text-muted">{p?.name ?? "Connection"} · {KIND_LABEL[c.kind as keyof typeof KIND_LABEL] ?? c.kind}</span></span>
                     <span className="text-xs text-muted">Last success: {at(c.last_success_at)}</span>
                     <span className="text-xs text-muted">{c.status === "paused" ? "Paused" : c.kind === "api" || c.schedule === "manual" ? "Runs on demand" : `Next: ${at(c.next_run_at)}`}</span>
                     {c.last_run_at && <span className="text-xs text-muted">{num(counts.inserted)} added · {num(counts.updated)} updated · {num(counts.rejected)} rejected</span>}
                     <Badge status={c.status === "paused" ? "closed" : tone}>{c.status === "paused" ? "Paused" : label}</Badge>
-                  </li>
+                  </Link></li>
                 );
               })}
             </ul>
@@ -105,7 +120,7 @@ export default async function IntegrationCentre({ searchParams }: { searchParams
           <div className="space-y-2 text-sm">
             <Link href="/admin/integrations/import" className="flex items-center gap-2 rounded-xl border border-line p-3 font-medium hover:bg-bg"><Icon name="file" size={18} />Import a file</Link>
             <Link href="/admin/integrations/activity" className="flex items-center gap-2 rounded-xl border border-line p-3 font-medium hover:bg-bg"><Icon name="history" size={18} />See all sync activity</Link>
-            <Link href="/admin/connections" className="flex items-center gap-2 rounded-xl border border-line p-3 font-medium hover:bg-bg"><Icon name="settings" size={18} />Manage connections</Link>
+            <Link href="/admin/integrations/connect" className="flex items-center gap-2 rounded-xl border border-line p-3 font-medium hover:bg-bg"><Icon name="plus" size={18} />Add a connection</Link>
           </div>
         </Card>
       </div>

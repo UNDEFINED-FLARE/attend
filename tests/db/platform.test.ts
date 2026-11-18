@@ -979,6 +979,23 @@ describe("automatic roster sync: Moodle/feed worker, API key and uploads", () =>
     expect(n.body).toMatch(/refused the token/);
   });
 
+  it("a connection that reads the university's API is saved, claimed with its settings and secret, and finishes", async () => {
+    const rest = { records: "data", auth: "bearer", paging: "page", map: { number: "student_number", module_codes: "modules" } };
+    const restId = (await db.asOne<{ save_integration: { id: string } }>(u.adminA,
+      "select uniattend.save_integration($1, null, 'rest', 'Student API', 'https://sis.unia.ac.za/api/people', 'rest-token-9876', $2, 'daily')",
+      [id.instA, JSON.stringify({ provider: "custom", rest })])).save_integration.id;
+    await db.as(u.adminA, "select uniattend.integration_action($1, 'sync')", [restId]);
+    const job = (await db.asOne<{ integration_claim: { id: string; kind: string; token: string; run_id: string; options: { rest: unknown } } }>(null,
+      "select uniattend.integration_claim($1)", [SECRET])).integration_claim;
+    expect(job).toMatchObject({ id: restId, kind: "rest", token: "rest-token-9876", options: { rest } });
+    await db.as(null, "select uniattend.integration_apply($1, $2, $3, 1)", [SECRET, job.run_id, roster([stu(30)])]);
+    await db.as(null, "select uniattend.integration_done($1, $2, 'ok', null, true)", [SECRET, job.run_id]);
+    expect(await activeFrom(restId)).toBe(1);
+    // Only the four known kinds are accepted.
+    await expect(db.as(u.adminA, "select uniattend.save_integration($1, null, 'soap', 'x', 'https://x.unia.ac.za', null, '{}', 'daily')", [id.instA]))
+      .rejects.toThrow();
+  });
+
   it("a trial can import a full class list", async () => {
     const many = Array.from({ length: 60 }, (_, i) => ({ student_number: `B5${String(i).padStart(2, "0")}`, full_name: `Bulk ${i}`, module_code: "CSC101" }));
     const r = (await db.asOne<{ import_students: { inserted: number } }>(u.adminB, "select uniattend.import_students($1, $2)", [id.instB, JSON.stringify(many)])).import_students;

@@ -1,6 +1,7 @@
 import "server-only";
 import { assertPublicHttps } from "@/lib/url-safety";
 import { rosterFromText, type MoodleCourse, type MoodleUser, type Roster } from "./roster";
+import { pageUrl, recordsOf, type RestConfig } from "./rest";
 
 // Talking to an institution's own systems. Every request: https only, public
 // addresses only (checked after DNS resolution and on each redirect), a timeout
@@ -10,7 +11,7 @@ import { rosterFromText, type MoodleCourse, type MoodleUser, type Roster } from 
 const UA = "UniAttend roster sync";
 const MAX_BYTES = 25 * 1024 * 1024;
 
-async function request(url: string, init: { method: "GET" | "POST"; headers?: Record<string, string>; body?: string }, what: string): Promise<{ text: string; type: string }> {
+async function request(url: string, init: { method: "GET" | "POST"; headers?: Record<string, string>; body?: string }, what: string): Promise<{ text: string; type: string; link: string | null }> {
   let current = url;
   for (let hop = 0; hop < 4; hop++) {
     await assertPublicHttps(current, what);
@@ -26,7 +27,7 @@ async function request(url: string, init: { method: "GET" | "POST"; headers?: Re
     if (!r.ok) throw new Error(`${what} answered ${r.status}.`);
     if (Number(r.headers.get("content-length") ?? 0) > MAX_BYTES) throw new Error(`${what} sent more than 25 MB.`);
     const reader = r.body?.getReader();
-    if (!reader) return { text: "", type: r.headers.get("content-type") ?? "" };
+    if (!reader) return { text: "", type: r.headers.get("content-type") ?? "", link: r.headers.get("link") };
     const chunks: Uint8Array[] = [];
     let size = 0;
     for (;;) {
@@ -36,7 +37,7 @@ async function request(url: string, init: { method: "GET" | "POST"; headers?: Re
       if (size > MAX_BYTES) { await reader.cancel(); throw new Error(`${what} sent more than 25 MB.`); }
       chunks.push(value);
     }
-    return { text: new TextDecoder().decode(Buffer.concat(chunks)), type: r.headers.get("content-type") ?? "" };
+    return { text: new TextDecoder().decode(Buffer.concat(chunks)), type: r.headers.get("content-type") ?? "", link: r.headers.get("link") };
   }
   throw new Error(`${what} redirected too many times.`);
 }
@@ -96,4 +97,54 @@ export async function fetchRosterFeed(url: string, token: string | null): Promis
   if (/^\s*<(!doctype|html)/i.test(text)) throw new Error("The roster link returned a web page, not a CSV or JSON file. It may need a sign-in.");
   try { return rosterFromText(text, type); }
   catch { throw new Error("The roster file couldn't be read. Use CSV with a header row, or JSON as described on the Connections page."); }
+}
+
+// ------------------------------------------------------------ the university's own JSON API
+
+/** Exchange OAuth client credentials for an access token (client_secret_post). */
+export async function oauthToken(cfg: RestConfig, clientSecret: string): Promise<string> {
+  if (!cfg.token_url || !cfg.client_id) throw new Error("OAuth needs the token address and the client ID.");
+  const body = new URLSearchParams({ grant_type: "client_credentials", client_id: cfg.client_id, client_secret: clientSecret, ...(cfg.scope ? { scope: cfg.scope } : {}) }).toString();
+  const { text } = await request(cfg.token_url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" }, body }, "The token address");
+  let token: unknown;
+  try { token = (JSON.parse(text) as { access_token?: unknown }).access_token; } catch { /* handled below */ }
+  if (typeof token !== "string" || !token) throw new Error("The token address didn't return an access token. Check the client ID, secret and scope.");
+  return token;
+}
+
+/** The headers that sign UniAttend in to the API. */
+export async function restHeaders(cfg: RestConfig, secret: string | null): Promise<Record<string, string>> {
+  const h: Record<string, string> = { Accept: "application/json" };
+  if (cfg.auth === "none") return h;
+  if (!secret) throw new Error(cfg.auth === "oauth2" ? "No client secret is saved. Edit the connection and enter it." : "No key or token is saved. Edit the connection and enter it.");
+  if (cfg.auth === "bearer") h.Authorization = `Bearer ${secret}`;
+  else if (cfg.auth === "header") h[cfg.header_name] = secret;
+  else h.Authorization = `Bearer ${await oauthToken(cfg, secret)}`;
+  return h;
+}
+
+/**
+ * Read the API page by page from page `start`, handing each page's records to
+ * `onPage`, while `keepGoing()` allows. `finished` is true when the last page was
+ * read; otherwise `next` is the page to carry on from.
+ */
+export async function readRest(base: string, cfg: RestConfig, secret: string | null, run: {
+  start?: number; keepGoing?: () => boolean; onPage: (records: unknown[], index: number) => Promise<void> | void;
+}): Promise<{ next: number; finished: boolean; pages: number }> {
+  const headers = await restHeaders(cfg, secret);
+  let index = run.start ?? 0, pages = 0;
+  let prev: { count: number; body: unknown; link: string | null } | undefined;
+  for (;;) {
+    const url = pageUrl(base, cfg, index, prev);
+    if (!url) return { next: index, finished: index < cfg.max_pages, pages };
+    if (pages > 0 && run.keepGoing && !run.keepGoing()) return { next: index, finished: false, pages };
+    const { text, link } = await request(url, { method: "GET", headers }, "Your system's API");
+    let body: unknown;
+    try { body = JSON.parse(text); } catch { throw new Error("Your system's API didn't answer with JSON. Check the address."); }
+    const records = recordsOf(body, cfg);
+    await run.onPage(records, index);
+    prev = { count: records.length, body, link };
+    pages++; index++;
+    if (records.length === 0) return { next: index, finished: true, pages };
+  }
 }

@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { Badge, Card, CardTitle, Notice, PageHeader, Table, Td } from "@/components/ui";
+import { ActionForm } from "@/components/form";
+import { Badge, Card, CardTitle, Input, Notice, PageHeader, Table, Td } from "@/components/ui";
+import { uploadRoster } from "@/app/admin/integrations/connections/actions";
 import { INTEGRATION_ROLES, requireAnyRole } from "@/lib/auth";
 import { datasetDef, RUN_STATUS } from "@/lib/integrations/datasets";
 import { deleteMapping } from "./actions";
@@ -39,6 +41,22 @@ export default async function ImportCentre() {
       )}
 
       <Card className="mb-6"><CardTitle>New import</CardTitle><ImportWizard /></Card>
+
+      <Card className="mb-6">
+        <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
+          <div>
+            <CardTitle>Quick roster upload</CardTitle>
+            <p className="mb-3 text-sm text-muted">Students <b>and</b> lecturers with their modules in one file, applied straight away without a preview. One row per person per module; uploading again only adds what&apos;s new. For anything else, or to check changes first, use <b>New import</b> above.</p>
+            <ActionForm action={uploadRoster} submit="Upload roster" pending="Loading…">
+              <Input name="file" type="file" accept=".csv,.json,text/csv,application/json" required aria-label="Roster file" />
+            </ActionForm>
+          </div>
+          <pre className="self-start overflow-x-auto rounded-xl bg-bg p-3 text-xs leading-relaxed">{`role,number,full_name,email,module_code
+student,22012345,Thabo Nkosi,22012345@example.ac.za,CSC1541
+student,22012345,Thabo Nkosi,22012345@example.ac.za,MAT1541
+lecturer,E1042,Dr N Mudau,n.mudau@example.ac.za,CSC1541`}</pre>
+        </div>
+      </Card>
 
       <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
         <Card>
