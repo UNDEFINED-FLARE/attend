@@ -11,6 +11,7 @@ import { LateArrivals, type LateRow } from "./late-arrivals";
 import { LiveQr, RealtimeRefresh } from "./live";
 import { Register, type CustomStatus, type RegisterRow } from "./register";
 import { SessionControls } from "./controls";
+import { BluetoothSignal } from "./bluetooth";
 
 type Rec = { id: string; student_id: string; status: string; custom_status_id?: string | null; checked_out_at?: string | null; minutes_late: number | null; overridden_by: string | null; score: number | null; checked_in_at: string | null;
              explanation: string[]; method: string; override_note: string | null };
@@ -30,11 +31,16 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
   if (!s) notFound();
   const recSelect = (custom: boolean) => supabase.from("attendance_records")
     .select(`id, student_id, status, minutes_late, overridden_by, score, checked_in_at, explanation, method, override_note${custom ? ", custom_status_id, checked_out_at" : ""}`).eq("session_id", id);
-  const [{ data: enrolled }, recRes, { data: statusRows }] = await Promise.all([
+  const [{ data: enrolled }, recRes, { data: statusRows }, { data: btInst }, { data: btSession }] = await Promise.all([
     supabase.from("module_enrolments").select("students(id, student_number, full_name)").eq("module_id", s.module_id).eq("status", "active"),
     recSelect(true),
     supabase.from("attendance_statuses").select("id, name, color, category").eq("active", true).order("sort_order").order("name"),
+    // Bluetooth needs database update 0037; before it these fail and the panel stays hidden.
+    supabase.from("institution_settings").select("bluetooth_enabled").eq("institution_id", institutionId).maybeSingle(),
+    supabase.from("class_sessions").select("use_bluetooth").eq("id", id).maybeSingle(),
   ]);
+  const bluetoothOn = !!(btInst as { bluetooth_enabled?: boolean } | null)?.bluetooth_enabled;
+  const sessionBluetooth = !!(btSession as { use_bluetooth?: boolean } | null)?.use_bluetooth;
   // custom_status_id needs database update 0014; older databases still load.
   const recs = (recRes.error ? (await recSelect(false)).data : recRes.data) as unknown as Rec[] | null;
   const byStudent = new Map((recs ?? []).map((r) => [r.student_id, r]));
@@ -80,6 +86,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
             <SessionControls session={id} status={s.status} requireGps={s.require_gps} printed={!!s.allow_printed_qr} closesAt={s.closes_at} lateAfter={s.late_after}
               printedFeature={features.printedQr} scanFeature={features.cardScanning} />
           )}
+          {bluetoothOn && (open || s.status === "scheduled") && <BluetoothSignal session={id} on={sessionBluetooth} open={open} />}
           {venue && (venue.polygon || venue.lat != null) && <VenueMap venue={venue} height={220} />}
           <div className="grid grid-cols-2 gap-3">
             <Stat label="Present" value={count("present")} />

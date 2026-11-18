@@ -38,6 +38,7 @@ export const MENUS: Record<MenuRole, Def[]> = {
     { href: "/admin/early-warning", label: "Early warning", icon: "alert", feature: "earlyWarning" },
     { href: "/admin/design", label: "Design", icon: "dashboard", mobile: false, locked: true },
     { href: "/admin/settings", label: "Policy", icon: "settings", mobile: false },
+    { href: "/admin/bluetooth", label: "Bluetooth", icon: "bluetooth", mobile: false },
     { href: "/admin/onboarding", label: "Go-live checklist", icon: "check", mobile: false },
     { href: "/admin/exit", label: "Your data", icon: "download", mobile: false },
     { href: "/admin/audit", label: "Audit log", icon: "shield", mobile: false },

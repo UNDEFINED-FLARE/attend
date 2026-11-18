@@ -7,6 +7,7 @@ import { Icon } from "@/components/icons";
 import { ArrivalTimeline, LateChip } from "@/components/late";
 import { VenueMap } from "@/components/map/venue-map";
 import { distanceM, insidePolygon, type LatLng } from "@/lib/campuses";
+import { bluetoothAvailable, scanForClass } from "@/lib/bluetooth";
 import { collectGps, deviceHash, parseScan, type GpsSample } from "@/lib/evidence";
 import { enqueue, isNetworkError } from "@/lib/offline-queue";
 import { checkIn, type Verdict } from "../actions";
@@ -21,7 +22,7 @@ const HEADLINE: Record<string, [string, string]> = {
   rejected: ["Not recorded", "bg-bad"],
 };
 
-export function CheckIn({ userId, initialSession, initialToken, liveClass = true }: { userId: string; initialSession: string | null; initialToken: string | null; liveClass?: boolean }) {
+export function CheckIn({ userId, initialSession, initialToken, liveClass = true, bluetooth = false }: { userId: string; initialSession: string | null; initialToken: string | null; liveClass?: boolean; bluetooth?: boolean }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [code, setCode] = useState("");
   const [result, setResult] = useState<Verdict | null>(null);
@@ -36,14 +37,18 @@ export function CheckIn({ userId, initialSession, initialToken, liveClass = true
     setPhase("locating");
     // The moment of the scan: kept if this has to wait for signal.
     const captured_at = new Date().toISOString();
-    // Location and device hash in parallel; the token is only ~20–40 s fresh.
-    const [samples, device] = await Promise.all([collectGps(), deviceHash()]);
+    // Location, device hash and (in the Android app, where the institution uses it) the
+    // lecturer's Bluetooth signal in parallel; the token is only ~20–40 s fresh.
+    const listen = bluetooth && bluetoothAvailable();
+    const [samples, device, heard] = await Promise.all([collectGps(), deviceHash(), listen ? scanForClass() : Promise.resolve(null)]);
     setFix(samples ? meanFix(samples) : null);
     setPhase("sending");
-    const evidence = { ...scan, gps: samples ? { samples } : null, device };
+    const gps = samples ? { samples } : null;
+    const evidence = { ...scan, gps, device, ble: heard?.length ? { observations: heard } : null };
     // No signal: keep the evidence on the phone; it is sent for review when back online.
+    // Not the Bluetooth readings: the signal changes every 20 seconds, so they are worthless later.
     const save = () => {
-      enqueue({ userId, kind: "checkin", payload: { ...evidence, captured_at } });
+      enqueue({ userId, kind: "checkin", payload: { ...scan, gps, device, captured_at } });
       const at = new Date(captured_at).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" });
       setResult({ outcome: "queued", status: null, score: null, reasons: [
         `No signal, so your check-in was saved on this phone at ${at}${samples ? ", with your location" : ""}.`,
@@ -62,7 +67,11 @@ export function CheckIn({ userId, initialSession, initialToken, liveClass = true
     if ("error" in r) { setError(r.error); setPhase("idle"); return; }
     setResult(r);
     setPhase("done");
-  }, [userId]);
+  }, [userId, bluetooth]);
+
+  // Only in the Android app can the phone listen (read after mount, so the server render matches).
+  const [ble, setBle] = useState(false);
+  useEffect(() => { setBle(bluetooth && bluetoothAvailable()); }, [bluetooth]);
 
   // Opened from the QR's own link (phone camera app): check in straight away.
   // (Offline, the page is the saved copy without them, so read them from the address too.)
@@ -128,6 +137,7 @@ export function CheckIn({ userId, initialSession, initialToken, liveClass = true
         <h1 className="mt-10 text-2xl font-bold tracking-tight">Welcome to check-in</h1>
         <p className="mx-auto mt-3 max-w-xs text-sm leading-relaxed text-muted">
           Allow your <b className="text-ink">camera</b> so you can scan the code on the projector, and your <b className="text-ink">location</b> so we can confirm you&apos;re in the venue. Your location is checked once and not stored.
+          {ble && <> Your phone also listens for a few seconds for your lecturer&apos;s <b className="text-ink">Bluetooth</b> signal, which helps indoors where location is weak.</>}
         </p>
         <div className="mt-6 flex justify-center gap-1.5" aria-hidden><i className="size-1.5 rounded-full bg-line" /><i className="h-1.5 w-5 rounded-full bg-accent" /><i className="size-1.5 rounded-full bg-line" /></div>
         <button type="button" onClick={startFromIntro} className="mt-auto h-14 w-full rounded-2xl bg-accent text-base font-semibold text-white shadow-[0_10px_24px_color-mix(in_srgb,var(--accent)_35%,transparent)] transition active:scale-[0.98] lg:mt-10">
@@ -137,7 +147,7 @@ export function CheckIn({ userId, initialSession, initialToken, liveClass = true
     );
   }
 
-  const status = phase === "scanning" ? "Scanning code…" : phase === "locating" ? "Checking your location…" : phase === "sending" ? "Recording your attendance…" : "Ready when you are";
+  const status = phase === "scanning" ? "Scanning code…" : phase === "locating" ? (ble ? "Checking your location and the room signal…" : "Checking your location…") : phase === "sending" ? "Recording your attendance…" : "Ready when you are";
 
   return (
     <div className="relative mx-auto max-w-md">
@@ -236,6 +246,11 @@ export function CheckIn({ userId, initialSession, initialToken, liveClass = true
                 className="mt-6 h-14 w-full rounded-2xl bg-bg text-base font-semibold">Cancel</button>
             )}
             <p className="mt-4 text-center text-xs text-muted">The live QR gives the strongest proof; a typed code may be sent for review.</p>
+            {ble && (
+              <p className="mt-2 flex items-center justify-center gap-1.5 text-center text-xs text-muted">
+                <Icon name="bluetooth" size={14} />Bluetooth helps confirm the room. If it&apos;s off or refused, nothing counts against you.
+              </p>
+            )}
           </section>
         )}
       </div>

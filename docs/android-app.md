@@ -57,10 +57,13 @@ emulator, use `node scripts/mobile.mjs build --url http://10.0.2.2:3001` (10.0.2
 
 Play Console needs a privacy policy URL (`/privacy` on your site) and the data-safety form. The app collects
 location at check-in (used once, only the distance is stored), the camera for QR scanning (not stored), and a device hash.
+Where an institution turns Bluetooth on, it also uses "Nearby devices" to hear the class signal at check-in (only a summary is
+stored) and, on a lecturer's phone, to broadcast it.
 
 ## Notes
 
-- **Bluetooth presence** isn't possible from the web app. In this native shell it can be added later with a BLE plugin,
-  for example lecturer phone as beacon and student phone scanning for it. That would need new evidence in `check_in()`.
+- **Bluetooth presence** (update 0037) runs only in this app, through its own plugin `UniAttendBlePlugin`: the lecturer's
+  phone broadcasts a rotating class signal and students' phones listen for it at check-in. See [bluetooth.md](bluetooth.md).
+  A new app build is needed for it; older builds simply don't send Bluetooth evidence.
 - **Email confirmation links** open in the phone's browser. After confirming, sign in in the app.
 - The app keeps sign-in and the device id on the phone only: Android backup and device transfer are switched off.

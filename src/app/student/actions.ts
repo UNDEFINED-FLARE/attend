@@ -27,6 +27,10 @@ const Input = z.object({
   token: z.string().max(64).nullable(),
   gps: z.object({ samples: z.array(Sample).max(20) }).nullable(),
   device: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+  // What the phone heard of the lecturer's Bluetooth signal (Android app only, update 0037).
+  // Anything malformed is dropped: Bluetooth can add evidence but never block a check-in.
+  ble: z.object({ observations: z.array(z.object({ id: z.string().regex(/^[0-9a-f]{16}$/), rssi: z.number().int().min(-127).max(0) })).max(30) })
+    .nullable().optional().catch(null),
 });
 
 /** Sends raw evidence. The database decides the status; nothing here can set it. */
@@ -38,6 +42,8 @@ export async function checkIn(raw: z.input<typeof Input>): Promise<Verdict | { e
   const { data, error } = await supabase.rpc("check_in", {
     p_session: p.data.session, p_code: p.data.code, p_token: p.data.token,
     p_gps: p.data.gps, p_device_hash: p.data.device,
+    // Only sent when something was heard: a database without update 0037 has no p_ble.
+    ...(p.data.ble?.observations.length ? { p_ble: p.data.ble } : {}),
   });
   if (error) return { error: error.message };
   revalidatePath("/student");

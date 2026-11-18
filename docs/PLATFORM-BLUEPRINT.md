@@ -826,6 +826,51 @@ After each step: type-check, lint, tests, build.
 > other token. Everything else — scheduling, the worker, runs, errors and the
 > safety rules for removing enrolments — is shared with Moodle and roster links.
 
+### `20261118000036_identity_providers.sql` (128 lines)
+
+> UniAttend 0036 — signing in with the university's own account: where it is set up,
+> and what each institution offers on the sign-in page.
+>
+> * institution_identity_providers: an institution's identity provider (OpenID
+> Connect now; SAML is listed but stays unavailable until it is enabled on the
+> Supabase plan and tested). The sign-in itself is run by Supabase Auth as a
+> custom provider ('custom:<name>'): Supabase checks state, nonce, PKCE and the
+> ID token's signature, issuer and audience, and creates the session. So no
+> client secret is kept here; it lives only in Supabase Auth.
+> A provider moves through five separate states — designed, configured,
+> connectivity_tested, login_tested, approved — plus suspended. Only an
+> approved and enabled provider is ever offered on the sign-in page.
+> Nobody writes this table directly; the platform's functions (0037 on) do.
+> * institutions.allow_email_sign_in: the transition. While true, people of that
+> institution may still use an email and password, and link_my_accounts() links
+> them by email as before. When false, email linking stops for that institution:
+> its people sign in with the university account only.
+> * sign_in_directory(): what the public sign-in page may show — active
+> institutions only, their name, logo and campuses, and which way in each offers.
+
+### `20261118000037_bluetooth_evidence.sql` (198 lines)
+
+> UniAttend 0037 — Bluetooth as extra evidence that a student is in the room.
+>
+> Indoors GPS is often too weak to confirm the venue, so honest students end up in
+> the review queue. With this, the lecturer's phone (UniAttend Android app) can
+> broadcast a Bluetooth Low Energy signal, and a student's phone (also the app)
+> listens for it during check-in.
+>
+> * The signal is not fixed: it is an 8-byte value signed with the session's own
+> secret for the current 20-second step, exactly like the live QR, so a value
+> heard yesterday, in another room or at another university never matches.
+> * The phone only sends what it heard (the value and its signal strength, RSSI).
+> check_in() decides. Nothing about the phone's own Bluetooth identity is sent,
+> and only a summary (how many readings, how many matched, the strongest RSSI) is
+> kept as evidence: never the readings themselves.
+> * Bluetooth strengthens the location layer (40): the location points become the
+> larger of the GPS points and the Bluetooth points. It never replaces the QR
+> proof, never lowers a score, and weak or missing Bluetooth only ever means the
+> check-in goes to the review queue (0029), never an absence.
+> * Off by default: the institution turns it on (bluetooth_enabled), then the
+> lecturer turns it on for a session (use_bluetooth).
+
 ## B. Tables (schema `uniattend`) and their columns
 
 - **academic_periods**
@@ -1012,6 +1057,7 @@ After each step: type-check, lint, tests, build.
   - `allow_printed_qr` boolean not null default false _(added later)_
   - `group_name` text check (group_name is null or length(group_name) <= 40) _(added later)_
   - `event_id` uuid _(added later)_
+  - `use_bluetooth` boolean not null default false _(added later)_
 - **data_requests**
   - `id` uuid primary key default gen_random_uuid()
   - `user_id` uuid not null references auth.users(id) on delete cascade
@@ -1072,6 +1118,36 @@ After each step: type-check, lint, tests, build.
   - `credentials_revoked_at` timestamptz
   - `closed_at` timestamptz, closed_by uuid references auth.users(id) on delete set null, closing_note text
   - `created_at` timestamptz not null default now()
+- **institution_identity_providers**
+  - `id` uuid primary key default gen_random_uuid()
+  - `institution_id` uuid not null references uniattend.institutions(id) on delete cascade
+  - `provider_type` text not null check (provider_type in ('oidc', 'saml'))
+  - `provider_name` text not null check (length(trim(provider_name)) between 2 and 80)
+  - `supabase_provider` text unique check (supabase_provider is null or supabase_provider ~ '^custom:[a-z0-9][a-z0-9-]{1,40}$')
+  - `issuer_url` text check (issuer_url is null or issuer_url ~ '^https://[^\s/?#]+')
+  - `client_id` text check (client_id is null or length(client_id) <= 300)
+  - `scopes` text not null default 'openid profile email' check (scopes ~ '^[A-Za-z0-9_:./ -]+$' and length(scopes) <= 300)
+  - `saml_metadata_url` text check (saml_metadata_url is null or saml_metadata_url ~ '^https://')
+  - `saml_entity_id` text check (saml_entity_id is null or length(saml_entity_id) <= 500)
+  - `identifier_claim` text not null default 'preferred_username' check (identifier_claim ~ '^[A-Za-z0-9_:./-]{1,100}$')
+  - `email_claim` text not null default 'email' check (email_claim ~ '^[A-Za-z0-9_:./-]{1,100}$')
+  - `name_claim` text not null default 'name' check (name_claim ~ '^[A-Za-z0-9_:./-]{1,100}$')
+  - `configuration_status` text not null default 'designed'
+  - _check (configuration_status in ('designed','configured','connectivity_tested','login_tested','approved','suspended'))_
+  - `enabled` boolean not null default false
+  - `last_connectivity_test_at` timestamptz
+  - `last_connectivity_result` text check (last_connectivity_result is null or length(last_connectivity_result) <= 1000)
+  - `last_login_test_at` timestamptz
+  - `last_success_at` timestamptz
+  - `last_error` text check (last_error is null or length(last_error) <= 1000)
+  - `approved_at` timestamptz
+  - `approved_by` uuid references auth.users(id) on delete set null
+  - `created_at` timestamptz not null default now()
+  - `updated_at` timestamptz not null default now()
+  - _unique (institution_id, id)_
+  - _constraint idp_oidc_complete check (provider_type <> 'oidc' or configuration_status = 'designed'_
+  - `or` (supabase_provider is not null and issuer_url is not null and client_id is not null))
+  - _constraint idp_enabled_only_approved check (not enabled or configuration_status = 'approved')_
 - **institution_onboarding**
   - `institution_id` uuid primary key references uniattend.institutions(id) on delete cascade
   - `verified_at` timestamptz, verified_by uuid references auth.users(id) on delete set null, verification_note text
@@ -1102,6 +1178,7 @@ After each step: type-check, lint, tests, build.
   - `auto_retention` boolean not null default false _(added later)_
   - `retention_last_run` timestamptz _(added later)_
   - `attendance_kinds` text[] not null default array['lecture' _(added later)_
+  - `bluetooth_enabled` boolean not null default false _(added later)_
 - **institution_subscriptions**
   - `id` uuid primary key default gen_random_uuid()
   - `institution_id` uuid not null references uniattend.institutions(id) on delete cascade
@@ -1132,6 +1209,7 @@ After each step: type-check, lint, tests, build.
   - `deleted_at` timestamptz
   - `theme` jsonb not null default '{}'::jsonb _(added later)_
   - `directory_id` uuid references uniattend.institution_directory(id) on delete set null _(added later)_
+  - `allow_email_sign_in` boolean not null default true _(added later)_
 - **integration_checkpoints**
   - `integration_id` uuid not null references uniattend.integrations(id) on delete cascade
   - `institution_id` uuid not null references uniattend.institutions(id) on delete cascade
@@ -1532,6 +1610,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `institution_domains`.`institution_domains_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id))`
 - `institution_domains`.`institution_domains_write` — all to authenticated: `using (uniattend.is_super_admin()) with check (uniattend.is_super_admin())`
 - `institution_exit_requests`.`institution_exit_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id))`
+- `institution_identity_providers`.`idp_read` — select to authenticated: `using (uniattend.is_inst_admin(institution_id) or uniattend.is_super_admin())`
 - `institution_onboarding`.`institution_onboarding_select` — select to authenticated: `using (uniattend.is_inst_admin(institution_id))`
 - `institution_settings`.`institution_settings_select` — select to authenticated: `using (uniattend.is_super_admin() or uniattend.is_member(institution_id))`
 - `institution_settings`.`institution_settings_update` — update to authenticated: `using (uniattend.is_inst_admin(institution_id) or uniattend.is_super_admin()) with check (uniattend.is_inst_admin(institution_id) or uniattend.is_super_admin())`
@@ -1611,7 +1690,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `can_write_branding(p_name text)` → boolean — callable by: authenticated
 - `change_event(p_event uuid, p_action text, p_venue uuid default null, p_lecturer uuid default null, p_starts timestamptz default null, p_ends timestamptz default null, p_note text default null)` → jsonb — callable by: authenticated
 - `change_subscription(p_inst uuid, p_plan_code text, p_status text, p_period_end timestamptz)` → void — internal
-- `check_in(p_session uuid, p_code text, p_token text, p_gps jsonb, p_device_hash text)` → jsonb — internal
+- `check_in(p_session uuid, p_code text, p_token text, p_gps jsonb, p_device_hash text)` → jsonb — callable by: authenticated
 - `check_in_offline(p_session uuid, p_code text, p_token text, p_gps jsonb, p_device_hash text, p_captured_at timestamptz)` → jsonb — callable by: authenticated
 - `check_out(p_session uuid)` → jsonb — callable by: authenticated
 - `close_institution(p_inst uuid, p_note text)` → void — internal
@@ -1724,13 +1803,18 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `seed_attendance_statuses()` → trigger — internal
 - `sees_all_attendance(p_inst uuid)` → boolean — internal
 - `send_class_message(p_module uuid, p_category text, p_title text, p_body text)` → int — callable by: authenticated
+- `session_ble_id(p_session uuid, p_step bigint)` → text — internal
+- `session_ble_token(p_session uuid)` → jsonb — callable by: authenticated
 - `session_control(p_session uuid, p_action text, p_closes_in_min int default null, p_late_in_min int default null)` → jsonb — callable by: authenticated
 - `session_qr_token(p_session uuid)` → jsonb — internal
 - `set_attendance_kinds(p_inst uuid, p_kinds text[])` → void — callable by: authenticated
 - `set_auto_retention(p_inst uuid, p_on boolean)` → void — callable by: authenticated
+- `set_bluetooth_policy(p_inst uuid, p_enabled boolean, p_min_rssi int)` → void — callable by: authenticated
 - `set_institution_status(p_inst uuid, p_status text)` → void — internal
 - `set_push_secret(p_secret text, p_reminder_minutes int default 15)` → void — callable by: authenticated
 - `set_role_status(p_role_id uuid, p_status text)` → void — internal
+- `set_session_bluetooth(p_session uuid, p_on boolean)` → boolean — callable by: authenticated
+- `sign_in_directory(p_slug text default null)` → jsonb — callable by: anon, authenticated
 - `staff_sees_student(p_student uuid)` → boolean — internal
 - `submit_dispute(p_record uuid, p_reason text)` → uuid — internal
 - `subscription_notice(p_inst uuid)` → jsonb — callable by: authenticated
@@ -1753,17 +1837,22 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 
 ### `src/app/`
 
-- `src/app/(auth)/actions.ts` (82 lines) — The bot-protection token from the form (see src/components/captcha.tsx); Supabase Auth checks it when CAPTCHA is on.
+- `src/app/(auth)/actions.ts` (116 lines) — The bot-protection token from the form (see src/components/captcha.tsx); Supabase Auth checks it when CAPTCHA is on.
 - `src/app/(auth)/forgot-password/page.tsx` (20 lines)
 - `src/app/(auth)/layout.tsx` (45 lines) — Sign-in, registration and password pages wear the institution's look when
+- `src/app/(auth)/login/admin/page.tsx` (24 lines) — Administrators keep an email sign-in: if their university's sign-in is down, they
+- `src/app/(auth)/login/institution-picker.tsx` (36 lines) — Search and choose an institution; choosing opens its way in (/login?i=<slug>).
 - `src/app/(auth)/login/login-form.tsx` (65 lines) — The sign-in form, built so browsers and phones can save and fill the password:
-- `src/app/(auth)/login/page.tsx` (21 lines)
+- `src/app/(auth)/login/page.tsx` (85 lines) — Students and lecturers start here: choose the institution, then use the way in
+- `src/app/(auth)/login/platform/page.tsx` (20 lines) — UniAttend's own staff. There is no way to register as a platform administrator:
 - `src/app/(auth)/reset-password/page.tsx` (18 lines)
-- `src/app/(auth)/signup/page.tsx` (36 lines)
+- `src/app/(auth)/signup/page.tsx` (62 lines) — Email accounts exist only for the transition: for an institution that hasn't
 - `src/app/actions.ts` (35 lines) — Keep the institution's branding on the sign-in page for whoever signs in next on this device.
 - `src/app/admin/actions.ts` (359 lines) — "" must be tested first: z.coerce.number() would turn it into 0.
 - `src/app/admin/announce-form.tsx` (56 lines) — Send an announcement to everyone, a faculty, a department, a module, one student or one lecturer.
 - `src/app/admin/audit/page.tsx` (27 lines)
+- `src/app/admin/bluetooth/actions.ts` (20 lines) — The institution's Bluetooth switch and the faintest signal that counts (database update 0037).
+- `src/app/admin/bluetooth/page.tsx` (84 lines)
 - `src/app/admin/connections/page.tsx` (6 lines) — Connections now live in the Integration Centre, one page per connection.
 - `src/app/admin/data-actions.ts` (243 lines) — Frees a unique number/code on an archived row so the same one can be added again later.
 - `src/app/admin/data/data-table.tsx` (131 lines) — The Data page table: tick rows for bulk actions, or edit one row inline.
@@ -1771,7 +1860,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/admin/data/export/route.ts` (23 lines) — CSV of any Data tab, with the same search and archived filter as the page.
 - `src/app/admin/data/page.tsx` (66 lines) — Every record the institution keeps, in one place: search, edit, bulk actions, export, restore.
 - `src/app/admin/design/actions.ts` (88 lines) — Publish: everyone at the institution sees it, and it is kept in the version history.
-- `src/app/admin/design/designer.tsx` (471 lines) — Starting points only; every colour stays editable.
+- `src/app/admin/design/designer.tsx` (493 lines) — Starting points only; every colour stays editable.
 - `src/app/admin/design/menus-features.tsx` (82 lines) — Features: switch optional parts of UniAttend on or off for the whole institution.
 - `src/app/admin/design/page.tsx` (33 lines)
 - `src/app/admin/early-warning/page.tsx` (82 lines)
@@ -1828,22 +1917,24 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/developers/page.tsx` (130 lines) — Public, so an institution's ICT team can read it before signing anything.
 - `src/app/early-warning-actions.ts` (63 lines) — Early warning (migration 0015). Permissions are enforced in the database:
 - `src/app/error.tsx` (23 lines) — Shown when a page fails on the server, e.g. Supabase is unreachable.
-- `src/app/globals.css` (85 lines) — UniAttend: navy and white, with a bright accent blue for highlights and charts.
+- `src/app/globals.css` (96 lines) — Fit every screen. A grid with no column count (the phone layout of "grid lg:grid-cols-2")
 - `src/app/layout.tsx` (27 lines) — System font stack (see globals.css): no font download at build time or on a
 - `src/app/lecturer/actions.ts` (180 lines)
+- `src/app/lecturer/bluetooth-actions.ts` (28 lines) — Turn the Bluetooth room signal on or off for one session (database update 0037).
 - `src/app/lecturer/class-actions.ts` (51 lines) — "Open attendance" on a class: the database checks it is this lecturer's class and the right time.
 - `src/app/lecturer/disputes/page.tsx` (70 lines) — RLS and the review functions limit everything to modules this lecturer teaches.
 - `src/app/lecturer/early-warning/page.tsx` (38 lines)
 - `src/app/lecturer/layout.tsx` (12 lines)
 - `src/app/lecturer/modules/[id]/export/route.ts` (29 lines) — The report comes from module_report(), which refuses anyone who does not
 - `src/app/lecturer/modules/[id]/page.tsx` (98 lines)
-- `src/app/lecturer/page.tsx` (142 lines)
+- `src/app/lecturer/page.tsx` (145 lines)
 - `src/app/lecturer/reports/page.tsx` (10 lines)
 - `src/app/lecturer/review-actions.ts` (36 lines) — Decide check-ins under review. The database checks the reviewer may decide each one.
+- `src/app/lecturer/sessions/[id]/bluetooth.tsx` (94 lines) — The Bluetooth room signal for one session. Turning it on lets students' phones
 - `src/app/lecturer/sessions/[id]/controls.tsx` (69 lines) — Pause or resume, regenerate, change the window, allow a printed QR, and the card scanner.
 - `src/app/lecturer/sessions/[id]/late-arrivals.tsx` (102 lines)
 - `src/app/lecturer/sessions/[id]/live.tsx` (78 lines) — Re-fetches a freshly signed token at each 20-second step boundary. The QR
-- `src/app/lecturer/sessions/[id]/page.tsx` (105 lines) — allow_printed_qr needs database update 0016; older databases still load.
+- `src/app/lecturer/sessions/[id]/page.tsx` (112 lines) — allow_printed_qr needs database update 0016; older databases still load.
 - `src/app/lecturer/sessions/[id]/print/page.tsx` (58 lines) — A printable / downloadable fixed QR for one session (only when the location check is on).
 - `src/app/lecturer/sessions/[id]/print/print-button.tsx` (4 lines)
 - `src/app/lecturer/sessions/[id]/register.tsx` (240 lines) — The lecturer's register: search, tap a status per student, bulk actions,
@@ -1855,9 +1946,9 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/notifications/page.tsx` (141 lines)
 - `src/app/onboarding/actions.ts` (31 lines)
 - `src/app/onboarding/page.tsx` (41 lines)
-- `src/app/page.tsx` (213 lines) — The public front page. Modelled on how attendance products present themselves (Edusign,
+- `src/app/page.tsx` (233 lines) — The public front page. Modelled on how attendance products present themselves (Edusign,
 - `src/app/paia/page.tsx` (100 lines) — Manual required of every private body by section 51 of the Promotion of Access to
-- `src/app/privacy/page.tsx` (147 lines) — Written to cover what POPIA section 18 says people must be told. Each
+- `src/app/privacy/page.tsx` (154 lines) — Written to cover what POPIA section 18 says people must be told. Each
 - `src/app/push-actions.ts` (96 lines) — Store this device's push subscription for the signed-in person (moves it from any previous account).
 - `src/app/reports/export/route.ts` (47 lines) — The institutional report as Excel (every table, one sheet each) or CSV (one table,
 - `src/app/reports/module/[id]/page.tsx` (74 lines) — One module's class list with each student's attendance, on the institution's
@@ -1871,12 +1962,12 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/staff/page.tsx` (47 lines)
 - `src/app/staff/reports/page.tsx` (10 lines)
 - `src/app/staff/review/page.tsx` (29 lines) — An auditor who holds no other staff role here reads the queue but cannot decide.
-- `src/app/student/actions.ts` (101 lines) — "queued": saved on the phone without signal, to be sent later (client only).
-- `src/app/student/check-in/check-in.tsx` (275 lines)
-- `src/app/student/check-in/page.tsx` (12 lines)
+- `src/app/student/actions.ts` (107 lines) — "queued": saved on the phone without signal, to be sent later (client only).
+- `src/app/student/check-in/check-in.tsx` (290 lines)
+- `src/app/student/check-in/page.tsx` (17 lines) — bluetooth_enabled needs database update 0037; before it, the query fails and Bluetooth stays off.
 - `src/app/student/class/[id]/live-class.tsx` (143 lines) — Always South African time, so the server and the phone show the same clock.
 - `src/app/student/class/[id]/page.tsx` (45 lines) — The student's live view of one class, from check-in until the class ends or the lecturer closes it.
-- `src/app/student/dashboard-view.tsx` (222 lines) — The student dashboard's display, separate from its data loading (page.tsx).
+- `src/app/student/dashboard-view.tsx` (224 lines) — The student dashboard's display, separate from its data loading (page.tsx).
 - `src/app/student/history/page.tsx` (145 lines)
 - `src/app/student/layout.tsx` (18 lines)
 - `src/app/student/leave-button.tsx` (22 lines) — "I'm leaving": records the student's check-out time.
@@ -1913,7 +2004,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/components/early-warning.tsx` (81 lines) — Every alert the signed-in user may see in this institution (admins: all, lecturers: their modules).
 - `src/components/feature-off.tsx` (10 lines) — Shown on a page whose feature the institution has switched off on the Design page.
 - `src/components/form.tsx` (32 lines) — A form bound to a server action that reports errors and success inline.
-- `src/components/icons.tsx` (51 lines) — A small stroke icon set (24px grid, lucide-style), inline so there is no icon
+- `src/components/icons.tsx` (52 lines) — A small stroke icon set (24px grid, lucide-style), inline so there is no icon
 - `src/components/late.tsx` (44 lines) — Late-arrival pieces shared by the student check-in result and the lecturer register.
 - `src/components/layout-mode.tsx` (162 lines) — Scroll or Buttons (see lib/layout-mode.ts): the choice, the switch, and a page made of parts
 - `src/components/map/campus-map.tsx` (253 lines) — Campus map for students: every venue, what is on in it today (their own
@@ -1921,7 +2012,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/components/map/use-leaflet.ts` (65 lines) — Creates a Leaflet map in `ref` once the library has loaded (it touches
 - `src/components/map/venue-editor.tsx` (275 lines)
 - `src/components/map/venue-map.tsx` (52 lines) — Read-only map of one venue, optionally with the viewer's own position.
-- `src/components/minimal.tsx` (160 lines) — The minimal dashboard kit: grayscale first, structure from size, weight and space,
+- `src/components/minimal.tsx` (182 lines) — The minimal dashboard kit: grayscale first, structure from size, weight and space,
 - `src/components/native-reminders.tsx` (57 lines) — In the UniAttend Android app (Capacitor), class reminders are scheduled on the
 - `src/components/nav.tsx` (55 lines) — The longest matching prefix wins, so /lecturer/modules/x highlights
 - `src/components/offline-sync.tsx` (104 lines) — Shows when the device is offline, how much is waiting to be sent, and sends it
@@ -1934,7 +2025,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/components/report-view.tsx` (143 lines) — Date range, faculty, department and module. A plain GET form, so a report has a shareable address.
 - `src/components/review-queue.tsx` (171 lines) — Why a check-in is waiting for a person, in plain words.
 - `src/components/row-actions.tsx` (42 lines) — Small delete button with a confirmation step and an inline result.
-- `src/components/shell.tsx` (149 lines) — eslint-disable-next-line @next/next/no-img-element -- institution logo from an admin-set https URL
+- `src/components/shell.tsx` (162 lines) — eslint-disable-next-line @next/next/no-img-element -- institution logo from an admin-set https URL
 - `src/components/timetable-actions.tsx` (17 lines) — "Add to my calendar" (.ics download) and "Print / save as PDF".
 - `src/components/ui.tsx` (129 lines)
 - `src/components/week-grid.tsx` (54 lines) — Today as ISO weekday (1 = Monday) in South African time.
@@ -1947,6 +2038,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/lib/assignment-match.ts` (210 lines) — Reads "which lecturer teaches which module" out of rows of cells from any document
 - `src/lib/audit-export.ts` (23 lines) — Write a data download to the audit log (who, what, how many rows) before handing
 - `src/lib/auth.ts` (95 lines) — The faculty or department a scoped role covers (0030).
+- `src/lib/bluetooth.ts` (107 lines) — Bluetooth evidence at check-in (database update 0037).
 - `src/lib/brand-cookie.ts` (3 lines) — Which institution's look the sign-in pages wear on this device (slug or id; not a secret).
 - `src/lib/branding.ts` (28 lines) — The institution branding for the sign-in, registration and password pages,
 - `src/lib/building-match.ts` (44 lines) — Matches timetable building names ("E-BLOCK", "NATURAL SCIENCE") to named
@@ -1972,7 +2064,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/lib/integrations/sources.ts` (150 lines) — Talking to an institution's own systems. Every request: https only, public
 - `src/lib/layout-mode.ts` (20 lines) — How a long page is moved through, chosen by the person on their own device:
 - `src/lib/legal.ts` (40 lines) — The company details every legal page uses: the privacy notice, terms, PAIA manual
-- `src/lib/nav-config.ts` (70 lines) — Every menu in the app, with the defaults an institution starts from. The Design
+- `src/lib/nav-config.ts` (71 lines) — Every menu in the app, with the defaults an institution starts from. The Design
 - `src/lib/offline-queue.ts` (59 lines) — Work done without signal, kept on the phone until it can be sent.
 - `src/lib/palette.ts` (5 lines) — Module colours in the minimal graphite look: dark-to-mid greys that stay readable
 - `src/lib/push.ts` (88 lines) — Delivers queued notifications to phones and browsers with Web Push.
@@ -1982,13 +2074,15 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/lib/safe-redirect.ts` (18 lines) — Where to send someone after sign-in or an email link. Only paths on this
 - `src/lib/schema-version.ts` (5 lines) — The newest database migration this build of the app expects. /api/health reports
 - `src/lib/shell-data.ts` (35 lines) — The institution's theme; the older brand colour setting still applies until a theme is designed.
+- `src/lib/sign-in-server.ts` (16 lines) — The public sign-in directory, or one institution in it. `ok` is false when the
+- `src/lib/sign-in.ts` (55 lines) — The public sign-in directory (sign_in_directory(), migration 0036): which
 - `src/lib/stats.ts` (43 lines) — Small helpers for dashboards. All inputs are real rows; nothing is invented.
 - `src/lib/student-data.ts` (27 lines) — Timetable slots for the modules the signed-in student is enrolled in (RLS-scoped).
 - `src/lib/supabase/client.ts` (14 lines) — Browser client for Realtime subscriptions. Uses the public anon key only.
 - `src/lib/supabase/cookies.ts` (19 lines) — How long the sign-in is remembered. "Keep me signed in" (the default) keeps the
 - `src/lib/supabase/resilient.ts` (26 lines) — auth.getUser() with one retry on network failure. A network failure is
 - `src/lib/supabase/server.ts` (27 lines) — Supabase client bound to the signed-in user's session. RLS always applies.
-- `src/lib/theme.ts` (149 lines) — An institution's look: colours, shape, header, sidebar, footer, an
+- `src/lib/theme.ts` (157 lines) — An institution's look: colours, shape, header, sidebar, footer, an
 - `src/lib/timetable-export.ts` (61 lines) — Today as a SAST calendar date (UTC midnight of that date).
 - `src/lib/timetable-pdf.ts` (261 lines) — Parser for timetable PDFs exported by university "Timetable
 - `src/lib/timetable-sources.ts` (182 lines) — Where an institution's timetable is collected from. Set per institution by
@@ -2017,11 +2111,12 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 
 ### `tests/db/`
 
+- `tests/db/bluetooth.test.ts` (244 lines) — Bluetooth evidence at check-in (migration 0037). The lecturer's phone broadcasts a
 - `tests/db/early-warning.test.ts` (210 lines) — Early warning (migration 0015): alerts open by themselves when attendance
 - `tests/db/harness.ts` (88 lines) — Runs the real migrations against an in-process Postgres (PGlite) with a
 - `tests/db/install-script.test.ts` (30 lines) — The bundled SQL-editor script must install cleanly next to another app's
 - `tests/db/location.test.ts` (90 lines) — Campus boundaries and class navigation (migration 0013). Live location sharing
-- `tests/db/platform.test.ts` (1870 lines) — UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
+- `tests/db/platform.test.ts` (1951 lines) — UNIVEN, roughly. Offsets of 0.005° latitude are ~550 m.
 - `tests/db/safeupdate.test.ts` (49 lines) — Supabase loads pg_safeupdate for API requests: an UPDATE or DELETE without a
 - `tests/db/security.test.ts` (78 lines) — Regression tests for the 2026-11-10 security review:
 
@@ -2030,6 +2125,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `tests/unit/api-errors.test.ts` (37 lines)
 - `tests/unit/assignment-match.test.ts` (70 lines)
 - `tests/unit/auth-cookies.test.ts` (14 lines)
+- `tests/unit/bluetooth.test.ts` (79 lines)
 - `tests/unit/building-match.test.ts` (35 lines) — Real building names from OpenStreetMap on a South African campus (2026-11-09).
 - `tests/unit/csv.test.ts` (32 lines)
 - `tests/unit/datasets.test.ts` (78 lines) — What nothing uses is reported, not silently dropped.
@@ -2045,6 +2141,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `tests/unit/roster.test.ts` (84 lines)
 - `tests/unit/safe-redirect.test.ts` (30 lines) — 2. Open redirect: "next" must always stay on this site.
 - `tests/unit/schema-version.test.ts` (13 lines)
+- `tests/unit/sign-in.test.ts` (46 lines)
 - `tests/unit/theme.test.ts` (31 lines)
 - `tests/unit/timetable-pdf.test.ts` (98 lines)
 - `tests/unit/url-safety.test.ts` (20 lines)

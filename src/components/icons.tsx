@@ -37,6 +37,7 @@ const PATHS = {
   play: "M6 4l14 8-14 8z",
   download: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
   plus: "M12 5v14M5 12h14",
+  bluetooth: "M7 7l10 10-5 5V2l5 5L7 17",
 } as const;
 
 export type IconName = keyof typeof PATHS;
