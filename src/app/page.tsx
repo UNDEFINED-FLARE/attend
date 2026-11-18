@@ -43,7 +43,7 @@ export default async function Home() {
           and administrators get registers they can defend.
         </p>
         <div className="mt-8 flex flex-wrap gap-3">
-          <LinkButton href="/signup" className="h-12 px-6 text-base">Create an account</LinkButton>
+          <LinkButton href="/login" className="h-12 px-6 text-base">Sign in with your institution</LinkButton>
           <LinkButton href="/onboarding" variant="secondary" className="h-12 px-6 text-base">Register your university</LinkButton>
         </div>
       </div>
@@ -118,8 +118,8 @@ export default async function Home() {
             UniAttend
           </Link>
           <nav className="flex items-center gap-1 sm:gap-2">
-            <Link href="/login" className="rounded-lg px-3 py-2 text-sm font-medium hover:bg-bg">Sign in</Link>
-            <LinkButton href="/signup" className="h-10">Create account</LinkButton>
+            <Link href="/login/admin" className="hidden rounded-lg px-3 py-2 text-sm font-medium hover:bg-bg sm:inline-block">Administrators</Link>
+            <LinkButton href="/login" className="h-10">Sign in with your institution</LinkButton>
           </nav>
         </div>
       </header>
@@ -136,15 +136,35 @@ export default async function Home() {
         </main>
       </LayoutModeProvider>
 
-      <footer className="border-t border-line">
-        <div className="mx-auto max-w-6xl px-4 py-8 text-sm text-muted">
-          <nav aria-label="Legal" className="flex flex-wrap gap-x-5 gap-y-2">
-            <Link href="/privacy" className="underline underline-offset-2 hover:text-ink">Privacy notice</Link>
-            <Link href="/terms" className="underline underline-offset-2 hover:text-ink">Terms of service</Link>
-            <Link href="/paia" className="underline underline-offset-2 hover:text-ink">PAIA manual</Link>
-            <Link href="/login" className="underline underline-offset-2 hover:text-ink">Sign in</Link>
+      <footer className="border-t border-line bg-surface">
+        <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 text-sm sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
+          <div className="min-w-0">
+            <Link href="/" className="flex items-center gap-2 text-base font-semibold">
+              <span className="grid size-8 place-items-center rounded-lg bg-brand text-brand-ink"><Icon name="check" size={18} strokeWidth={2.6} /></span>
+              UniAttend
+            </Link>
+            <p className="mt-3 max-w-xs text-muted">Verified lecture attendance for South African universities, signed in with the university&apos;s own accounts.</p>
+          </div>
+          <nav aria-label="Sign in" className="space-y-2">
+            <p className="font-semibold">Sign in</p>
+            <Link href="/login" className="block text-muted hover:text-ink">Students and lecturers</Link>
+            <Link href="/login/admin" className="block text-muted hover:text-ink">Institution administrators</Link>
+            <Link href="/login/platform" className="block text-muted hover:text-ink">Platform administration</Link>
           </nav>
-          <CompanyMark className="mt-4" />
+          <nav aria-label="For universities" className="space-y-2">
+            <p className="font-semibold">For universities</p>
+            <Link href="/onboarding" className="block text-muted hover:text-ink">Register your university</Link>
+            <Link href="/developers" className="block text-muted hover:text-ink">Institution API</Link>
+          </nav>
+          <nav aria-label="Legal" className="space-y-2">
+            <p className="font-semibold">Legal</p>
+            <Link href="/privacy" className="block text-muted hover:text-ink">Privacy notice</Link>
+            <Link href="/terms" className="block text-muted hover:text-ink">Terms of service</Link>
+            <Link href="/paia" className="block text-muted hover:text-ink">PAIA manual</Link>
+          </nav>
+        </div>
+        <div className="border-t border-line">
+          <div className="mx-auto max-w-6xl px-4 py-5 text-xs text-muted"><CompanyMark /></div>
         </div>
       </footer>
     </div>

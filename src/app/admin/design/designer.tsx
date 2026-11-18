@@ -159,7 +159,8 @@ export function Designer({ published, draft, versions, historyReady, slug, insti
         </Section>
 
         <Section title="Footer">
-          <Check label="Show a footer" checked={t.footer.show} onChange={(v) => set("footer", { show: v })} />
+          <p className="text-[11px] text-muted">Every page ends with a footer: your name, the privacy notice and terms. Add your own text and links here.</p>
+          <Check label="Add my own text and links" checked={t.footer.show} onChange={(v) => set("footer", { show: v })} />
           <Row label="Text"><Input value={t.footer.text} maxLength={200} placeholder={`© ${new Date().getFullYear()} ${institutionName}`} onChange={(e) => set("footer", { text: e.target.value })} /></Row>
           <div className="space-y-2">
             {t.footer.links.map((l, i) => (
@@ -183,6 +184,17 @@ export function Designer({ published, draft, versions, historyReady, slug, insti
 
         <Section title="Menus">
           <MenuEditor value={t.menus} features={t.features} onChange={(menus) => setT((p) => ({ ...p, menus }))} />
+        </Section>
+
+        <Section title="Dashboards" open>
+          <Row label="School banner" hint="Your logo and name at the top of the student and lecturer home screens.">
+            <Seg value={t.dashboard.banner} options={[["quiet", "Quiet"], ["brand", "Main colour"], ["none", "Off"]]} onChange={(v) => set("dashboard", { banner: v })} />
+          </Row>
+          <Row label="Line under the name" hint="A motto, the term, or a short note. Empty: the header subtitle.">
+            <Input value={t.dashboard.message} maxLength={120} placeholder="Semester 2 · 2026" onChange={(e) => set("dashboard", { message: e.target.value })} />
+          </Row>
+          <Check label="Show it to lecturers too" checked={t.dashboard.lecturers} onChange={(v) => set("dashboard", { lecturers: v })} />
+          {!t.header.logoUrl && <p className="text-[11px] text-muted">No logo yet: upload one under Header and it appears here, in the menu and on the sign-in page.</p>}
         </Section>
 
         <Section title="Student home" open>
@@ -371,6 +383,16 @@ function Preview({ t, institutionName, scheme, setScheme }: { t: Theme; institut
           <div className="flex items-center justify-between px-3 py-2" style={{ background: headBg, color: headInk }}><Logo ink={headInk} /><Icon name="bell" size={14} /></div>
           {t.announcement.show && t.announcement.text && <div className="px-3 py-1 text-center text-[9px] font-medium" style={{ background: `${tone}1a`, color: tone }}>{t.announcement.text}</div>}
           <div className="space-y-3 p-3">
+            {t.dashboard.banner !== "none" && (
+              <div className="flex items-center gap-2 rounded-2xl p-2" style={t.dashboard.banner === "brand" ? { background: c.primary, color: inkOn(c.primary) } : { background: c.surface, border: `1px solid ${c.muted}33` }}>
+                {t.header.logoUrl
+                  // eslint-disable-next-line @next/next/no-img-element -- preview of the admin's logo
+                  ? <img src={t.header.logoUrl} alt="" className="size-7 rounded-lg bg-white object-contain p-0.5" referrerPolicy="no-referrer" />
+                  : <span className="grid size-7 place-items-center rounded-lg text-[9px] font-bold" style={{ background: `${c.muted}22` }}>{institutionName.slice(0, 2).toUpperCase()}</span>}
+                <span className="min-w-0 leading-tight"><span className="block truncate text-[10px] font-semibold">{t.header.title || institutionName}</span>
+                  {(t.dashboard.message || t.header.subtitle) && <span className="block truncate text-[8px] opacity-70">{t.dashboard.message || t.header.subtitle}</span>}</span>
+              </div>
+            )}
             <div><p className="text-[10px]" style={{ color: c.muted }}>{hello} 👋</p><p className="text-base font-semibold">Thabo</p></div>
             {t.student.cards.filter((c) => c.show).map((c) => <div key={c.id}>{card(c.id, c.title)}</div>)}
           </div>

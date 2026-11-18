@@ -1,5 +1,16 @@
 @import "tailwindcss";
 
+/* Fit every screen. A grid with no column count (the phone layout of "grid lg:grid-cols-2")
+   would otherwise size its one column to its widest content, so a long name meant to end in
+   "…" pushes the page wider than the phone. One shrinkable column instead; any grid-cols-*
+   utility still wins, because utilities come after this layer. */
+@layer base {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  /* Long words, links and codes wrap instead of overflowing. */
+  body { overflow-wrap: break-word; }
+  pre, pre code, table { overflow-wrap: normal; }
+}
+
 /* UniAttend: navy and white, with a bright accent blue for highlights and charts.
    Institution branding overrides --brand at runtime. */
 :root {
