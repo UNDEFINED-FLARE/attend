@@ -43,6 +43,13 @@ export default function Privacy() {
               <b> distance</b> from the venue and the accuracy, <b>not your coordinates</b>, and never track you afterwards.</li>
             <li><i>Device check</i>: a one-way hash of a random identifier your browser creates, to notice one phone being used to
               check in several students. It can&apos;t identify your phone or you.</li>
+            <li><i>Bluetooth</i>, only if your institution and lecturer turn it on and you use the UniAttend Android app: for
+              about 4 seconds at check-in your phone listens for the class signal broadcast by your lecturer&apos;s phone, which
+              changes every 20 seconds. Your phone sends only the signal values it heard and how strong they were. We keep a
+              summary with your check-in (how many readings matched and the strongest signal), <b>not the readings</b>, and
+              nothing about your phone&apos;s own Bluetooth, other nearby devices or where you are. Your phone does not listen at
+              any other time. If you refuse the &ldquo;Nearby devices&rdquo; permission or Bluetooth is off, you check in as
+              usual; it never counts against you.</li>
           </ul></li>
         <li><b>Disputes and corrections</b>: what you or your lecturer change, and why, so every change can be traced.</li>
         <li><b>Early-warning alerts</b>, if your institution uses them: when your attendance in a module falls below its
