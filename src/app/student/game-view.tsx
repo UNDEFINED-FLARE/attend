@@ -28,15 +28,83 @@ const SLOT: Record<SlotState, { cls: string; label: string; icon?: IconName }> =
   excused: { cls: "g-slot-dim", label: "Excused", icon: "check" },
 };
 
-const RESULT: Record<string, { tint: string; ink: string; label: string; icon: IconName }> = {
-  present: { tint: "g-tint-ok", ink: "text-[var(--g-ok)]", label: "Present", icon: "check" },
-  late: { tint: "g-tint-late", ink: "text-[var(--g-late)]", label: "Late", icon: "clock" },
-  late_pending: { tint: "g-tint-late", ink: "text-[var(--g-late)]", label: "Awaiting lecturer", icon: "clock" },
-  absent: { tint: "g-tint-bad", ink: "text-[var(--g-bad)]", label: "Absent", icon: "x" },
-  excused: { tint: "g-tint-slate", ink: "text-[var(--g-slate)]", label: "Excused", icon: "check" },
-  pending_verification: { tint: "g-tint-review", ink: "text-[var(--g-review)]", label: "In review", icon: "alert" },
-  disputed: { tint: "g-tint-review", ink: "text-[var(--g-review)]", label: "Disputed", icon: "flag" },
+type Result = { tint: string; form: string; label: string; icon: IconName };
+const RESULT: Record<string, Result> = {
+  present: { tint: "g-tint-ok", form: "g-f-ok", label: "Present", icon: "check" },
+  late: { tint: "g-tint-late", form: "g-f-late", label: "Late", icon: "clock" },
+  late_pending: { tint: "g-tint-late", form: "g-f-late", label: "Awaiting lecturer", icon: "clock" },
+  absent: { tint: "g-tint-bad", form: "g-f-bad", label: "Absent", icon: "x" },
+  excused: { tint: "g-tint-slate", form: "g-f-slate", label: "Excused", icon: "check" },
+  pending_verification: { tint: "g-tint-review", form: "g-f-review", label: "In review", icon: "alert" },
+  disputed: { tint: "g-tint-review", form: "g-f-review", label: "Disputed", icon: "flag" },
 };
+const resultOf = (status: string): Result => RESULT[status] ?? { tint: "g-tint-slate", form: "g-f-slate", label: status, icon: "help" };
+
+const SAST = "Africa/Johannesburg";
+
+/**
+ * Recent results, like a game's battle log: the last ten classes as a row of coloured squares,
+ * then the last five as cards grouped by day, each with its result in a coloured pill.
+ */
+function RecentResults({ recs, today }: { recs: DashboardData["recs"]; today: string }) {
+  if (recs.length === 0) {
+    return (
+      <section>
+        <Heading>Recent results</Heading>
+        <p className="g-panel p-4 text-sm text-[var(--g-muted)]">No attendance recorded yet. Your results show here after your first check-in.</p>
+      </section>
+    );
+  }
+  const form = recs.slice(0, 10);
+  const counts = new Map<string, number>();
+  for (const r of form) counts.set(resultOf(r.status).label, (counts.get(resultOf(r.status).label) ?? 0) + 1);
+  const formLabel = `Last ${form.length} classes, newest first: ${[...counts].map(([l, n]) => `${n} ${l.toLowerCase()}`).join(", ")}`;
+
+  const yesterday = sastDay(new Date(Date.now() - 864e5).toISOString());
+  const days = new Map<string, DashboardData["recs"]>();
+  for (const r of recs.slice(0, 5)) days.set(sastDay(r.created_at), [...(days.get(sastDay(r.created_at)) ?? []), r]);
+  const dayName = (ymd: string, iso: string) => ymd === today ? "Today" : ymd === yesterday ? "Yesterday"
+    : new Date(iso).toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long", timeZone: SAST });
+
+  return (
+    <section>
+      <Heading href="/student/history" link="All">Recent results</Heading>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <span className="g-form" role="img" aria-label={formLabel}>
+          {form.map((r) => <i key={r.id} className={resultOf(r.status).form} />)}
+        </span>
+        <span className="shrink-0 text-xs text-[var(--g-muted)]">Last {form.length} classes</span>
+      </div>
+      <div className="space-y-4">
+        {[...days].map(([ymd, list]) => (
+          <div key={ymd}>
+            <p className="mb-2 text-xs font-semibold text-[var(--g-muted)]">{dayName(ymd, list[0].created_at)}</p>
+            <ul className="space-y-2">
+              {list.map((r) => {
+                const k = resultOf(r.status);
+                return (
+                  <li key={r.id}>
+                    <Link href="/student/history" className="g-result">
+                      <span className={`g-res ${k.tint}`}><Icon name={k.icon} size={18} strokeWidth={2.5} /></span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm"><b className="font-bold">{r.modules?.code ?? ""}</b> <span className="text-[var(--g-muted)]">{r.class_sessions?.title ?? "Class"}</span></span>
+                        <span className="g-num block truncate text-xs text-[var(--g-muted)]">{r.checked_in_at && r.status !== "absent" ? `Checked in at ${timeOf(r.checked_in_at)}` : `Class at ${timeOf(r.class_sessions?.opens_at ?? r.created_at)}`}</span>
+                      </span>
+                      <span className="flex shrink-0 flex-col items-end gap-1">
+                        <span className={`g-pill ${k.tint}`}>{k.label}</span>
+                        {r.minutes_late ? <span className="g-num text-[11px] text-[var(--g-muted)]">{r.minutes_late} min late</span> : null}
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 const TIER: Record<CardTier, { cls: string; word: string }> = {
   top: { cls: "g-card-gold", word: "90% or more" },
@@ -239,33 +307,7 @@ export function GameView({ d }: { d: DashboardData }) {
         </section>
       )}
 
-      {/* Recent results, like a game's match history. */}
-      {shown.has("recent") && (
-        <section>
-          <Heading href="/student/history" link="All">Recent results</Heading>
-          {recs.length === 0 ? <p className="g-panel p-4 text-sm text-[var(--g-muted)]">No attendance recorded yet.</p> : (
-            <ul className="g-panel overflow-hidden">
-              {recs.slice(0, 5).map((r) => {
-                const k = RESULT[r.status] ?? { tint: "g-tint-slate", ink: "text-[var(--g-slate)]", label: r.status, icon: "help" as IconName };
-                const date = new Date(r.created_at).toLocaleDateString("en-ZA", { weekday: "short", day: "numeric", month: "short", timeZone: "Africa/Johannesburg" });
-                return (
-                  <li key={r.id} className="flex items-center gap-3 border-b border-[var(--line)] px-3.5 py-3 last:border-0">
-                    <span className={`g-res ${k.tint}`}><Icon name={k.icon} size={18} strokeWidth={2.5} /></span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-bold">{r.modules?.code ?? ""} {r.class_sessions?.title ?? "Class"}</span>
-                      <span className="g-num block truncate text-xs text-[var(--g-muted)]">{date}, {timeOf(r.checked_in_at)}</span>
-                    </span>
-                    <span className="flex flex-col items-end">
-                      <span className={`text-xs font-bold ${k.ink}`}>{k.label}</span>
-                      {r.minutes_late ? <span className="g-num text-[11px] text-[var(--g-muted)]">{r.minutes_late} min late</span> : null}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-      )}
+      {shown.has("recent") && <RecentResults recs={recs} today={today} />}
 
       <PushToggle compact logo={theme.header.logoUrl || null} institution={theme.header.title || undefined} />
 
