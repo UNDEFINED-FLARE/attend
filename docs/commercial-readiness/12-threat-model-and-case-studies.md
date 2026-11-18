@@ -37,6 +37,37 @@ notices — all on the deny-all tables above, which is the intended design. The 
 execute a SECURITY DEFINER function" warnings are by design: privileged work is done in such functions,
 each of which checks the caller's role and institution at the top (tested). One real finding, below.
 
+## A2. API keys — theft, forgery and injection
+
+"If someone takes or forges an API key, can they get the data?" Tested in `tests/db/api-keys.test.ts`.
+
+- **The public (anon) key** is in the browser by design. It is not a secret; RLS is the control, and a
+  signed-out client holding only it reads no tenant data (proven in `rls-coverage.test.ts`). Taking it
+  gains nothing.
+- **An institution API key** (`ua_` + 48 hex = 192 random bits) lets a university's own system push its
+  roster. A stolen or forged one has a small blast radius: it is **rejected unless it matches** (keys are
+  stored only as a SHA-256 hash, so a database leak reveals no usable key, and guessing 192 bits is
+  infeasible); it reaches **only its own institution** (the key decides the institution — nothing in the
+  request body can); it **cannot read another connection's data even with the run id** (no IDOR); it
+  **cannot read attendance**; it is **rate-limited** to 120 pushes an hour; and it can be **rotated**,
+  which kills the old key at once (incident response). The worst case is corrupting or reading back one
+  institution's own roster import, not a cross-tenant breach.
+- **SQL injection through a key or any parameter:** not possible. Every privileged function takes typed
+  parameters bound by the driver; the only dynamic SQL (`execute format(...)`) builds statements from
+  catalog identifiers (function and table names), never from user input. Verified across all migrations.
+- **The service-role key** (which would bypass everything) is never in the client or in Vercel (V3).
+
+## A3. Denial of service: volumetric, zip bombs and oversized payloads
+
+| Attack | UniAttend | Evidence |
+|---|---|---|
+| **Decompression ("zip") bomb** — a tiny .xlsx/.docx (both are ZIP) that inflates to gigabytes | **Handled.** The unzip reader caps entries (5,000) and total inflated size (40 MB), and inflates with Node's `maxOutputLength`, which aborts a bomb mid-decompression. Uploads are capped at 5 MB first. | `src/lib/zip.ts`; `tests/unit/zip-bomb.test.ts` |
+| **Oversized upload** exhausting memory | **Handled.** Server-action body limit 6 MB; CSV/roster/timetable uploads capped at 5 MB; logo 512 KB (checked by file signature). | `next.config.ts`, the import actions |
+| **Huge bulk payload** to an RPC | **Handled.** import ≤ 10,000 rows, roster ≤ 20,000 people/modules (and > 50 needs the paid plan), register ≤ 3,000 entries, check-in ≤ 20 GPS samples, exports ≤ 200,000 rows. | migrations; `src/app/admin/**` |
+| **Malicious PDF** (parser bomb) | **Handled.** 5 MB cap, at most 20 pages, fonts disabled. | `src/lib/timetable-pdf.ts` |
+| **Request floods** at one feature | **Partly handled in app.** Check-in 5/min per student, class messages 20/hour, roster 120/hour; CAPTCHA at sign-in once keys are set. | migrations; `03` S7 |
+| **Volumetric DDoS** (raw traffic flood) | **Owner/infra action.** This is not something app code can stop. Turn on Vercel's WAF / attack-challenge mode (or put Cloudflare in front), and keep Supabase on a plan whose connection pooler absorbs bursts. | **To do** (see E) |
+
 ## B. University breaches
 
 Across the 2025–2026 cases (UPenn, Technical University of Denmark, Instructure Canvas, Nebraska), the
@@ -74,16 +105,24 @@ harden. The equivalent controls:
 
 - Added `tests/db/rls-coverage.test.ts`: every table has RLS on; the secret tables are deny-all and
   return nothing to a signed-in or anonymous client; anon reads no tenant data.
+- Added `tests/db/api-keys.test.ts`: a forged key is refused; a stolen key reaches only its own
+  institution, cannot read another connection's run, and cannot read attendance; a leaked key can be
+  rotated to kill it.
+- Added `tests/unit/zip-bomb.test.ts`: the unzip reader refuses a decompression bomb and an archive
+  claiming too many files.
 - Confirmed, by test and by Supabase's Security Advisor, that the RLS epidemic behind the vibe-coded
-  breaches does not apply here.
+  breaches does not apply here, that a stolen/forged key has a small blast radius, and that uploads and
+  bulk payloads are bounded against resource-exhaustion attacks.
 
 ## E. Still open (owner, in priority order)
 
 1. **Enable leaked-password protection** (U1) — one toggle, highest value.
 2. **Set the Turnstile keys** (U3) and turn on error/job alerting (U4).
 3. **Enforce MFA for admins** (U2) — a build item.
-4. **Dedicated Supabase project with backups and a restore drill** (U6, and `03`/`06`).
-5. Independent penetration test before any paid contract (`03`).
+4. **Turn on Vercel's WAF / attack-challenge mode** (or Cloudflare in front) for volumetric DDoS — app
+   code cannot stop a raw traffic flood (A3).
+5. **Dedicated Supabase project with backups and a restore drill** (U6, and `03`/`06`).
+6. Independent penetration test before any paid contract (`03`).
 
 ## Sources
 
