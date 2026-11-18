@@ -9,6 +9,7 @@ import { VenueMap } from "@/components/map/venue-map";
 import { distanceM, insidePolygon, type LatLng } from "@/lib/campuses";
 import { bluetoothAvailable, scanForClass } from "@/lib/bluetooth";
 import { collectGps, deviceHash, parseScan, type GpsSample } from "@/lib/evidence";
+import { supportsWorkerScan } from "@/lib/qr-scanner";
 import { enqueue, isNetworkError } from "@/lib/offline-queue";
 import { checkIn, type Verdict } from "../actions";
 
@@ -87,24 +88,47 @@ export function CheckIn({ userId, initialSession, initialToken, liveClass = true
 
   useEffect(() => () => { void scanner.current?.stop().catch(() => {}); }, []);
 
-  async function startScan() {
-    setError(null);
-    setPhase("scanning");
-    const { Html5Qrcode } = await import("html5-qrcode");
-    const qr = new Html5Qrcode("qr-reader", { verbose: false });
-    scanner.current = { stop: () => qr.stop() };
+  // A scanned QR (or barcode) resolves to a check-in. Shared by both scanner paths.
+  const onScan = useCallback(async (text: string) => {
+    await scanner.current?.stop().catch(() => {});
+    scanner.current = null;
+    const parsed = parseScan(text);
+    if (!parsed.session && !parsed.code) { setError("That QR code is not a UniAttend code."); setPhase("idle"); return; }
+    void submit(parsed);
+  }, [submit]);
+
+  // The reliable scanner (html5-qrcode) — used on its own on older phones, and as the fallback
+  // if the off-thread scanner can't start. Check-in is never worse than this.
+  const startHtml5 = useCallback(async () => {
     try {
-      await qr.start({ facingMode: "environment" }, { fps: 10, qrbox: 240 }, async (text) => {
-        await qr.stop().catch(() => {});
-        scanner.current = null;
-        const parsed = parseScan(text);
-        if (!parsed.session && !parsed.code) { setError("That QR code is not a UniAttend code."); setPhase("idle"); return; }
-        void submit(parsed);
-      }, () => {});
+      const { Html5Qrcode } = await import("html5-qrcode");
+      const qr = new Html5Qrcode("qr-reader", { verbose: false });
+      scanner.current = { stop: () => qr.stop() };
+      await qr.start({ facingMode: "environment" }, { fps: 10, qrbox: 240 }, (t) => void onScan(t), () => {});
     } catch {
       setError("The camera could not start. Allow camera access, or type the code shown under the QR.");
       setPhase("idle");
     }
+  }, [onScan]);
+
+  async function startScan() {
+    setError(null);
+    setPhase("scanning");
+    const mount = document.getElementById("qr-reader");
+    // Prefer the off-thread scanner (smooth on weak phones); fall back to html5-qrcode on anything
+    // it can't do — an old WebView, a camera quirk, a worker that won't start.
+    if (mount && supportsWorkerScan()) {
+      try {
+        const { startWorkerScan } = await import("@/lib/qr-scanner");
+        scanner.current = await startWorkerScan(mount, (t) => void onScan(t));
+        return;
+      } catch {
+        try { await scanner.current?.stop?.(); } catch { /* ignore */ }
+        scanner.current = null;
+        mount.replaceChildren(); // clear a half-started video before the fallback mounts its own
+      }
+    }
+    await startHtml5();
   }
 
   const busy = phase === "locating" || phase === "sending";
