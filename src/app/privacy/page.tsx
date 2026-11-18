@@ -117,7 +117,8 @@ export default function Privacy() {
       <ul className="mt-2 list-disc space-y-2 pl-6">
         <li><b>See your information</b>: Security → <i>Download my data</i>, at any time, free.</li>
         <li><b>Correct or delete it, or object</b> to how it is used: Security → <i>Ask about my information</i>. Your institution
-          answers (it decides about its records), within 30 days.</li>
+          answers (it decides about its records), within 30 days. How to{" "}
+          <Link href="/delete-account" className="text-info underline">delete your account</Link>, including if you can&apos;t sign in.</li>
         <li><b>Dispute an attendance record</b>: from your attendance history.</li>
         <li><b>Leave an institution</b> you were added to by mistake: Security → Your institutions.</li>
         <li><b>Complain</b> to the Information Regulator if you are unhappy with the answer:{" "}
@@ -133,6 +134,7 @@ export default function Privacy() {
       <ul className="mt-2 list-disc space-y-1 pl-6 text-sm">
         <li><code>sb-…-auth-token</code>: keeps you signed in (up to 400 days, or until you close the browser if you untick &ldquo;Keep me signed in&rdquo;).</li>
         <li><code>ua_inst</code>, <code>ua_brand</code>, <code>ua_session_only</code>: which institution you are using, its look on the sign-in page, and your sign-in choice.</li>
+        <li><code>ua_look</code>, <code>ua_layout</code>: the app layout you chose on this device (game or simple look, scroll or buttons).</li>
         <li>On your device only: your app-lock setting, check-ins saved without signal until they are sent, and recently opened pages for offline use (cleared when the sign-in page opens).</li>
       </ul>
 

@@ -16,7 +16,8 @@ const config: CapacitorConfig = {
     url: url.origin,
     // Plain http only for a local test server; production is https.
     cleartext: url.protocol === "http:",
-    // Shown when the server can't be reached (no signal on campus).
+    // Shown when the server can't be reached (no signal on campus), or when the phone's
+    // System WebView is too old (see android.minWebViewVersion).
     errorPath: "offline.html",
     // Stay inside the app for UniAttend itself; anything else opens in the browser.
     allowNavigation: [url.host],
@@ -27,8 +28,12 @@ const config: CapacitorConfig = {
   },
   android: {
     allowMixedContent: false,
-    // Chrome's remote inspector only for debug builds.
-    webContentsDebuggingEnabled: process.env.NODE_ENV !== "production",
+    // Chrome's remote inspector: left unset on purpose, so Capacitor turns it on for debug
+    // builds only and it can never ship in a release, however the release was built.
+    // The web app's styles need Chrome/WebView 111 or newer (Tailwind CSS 4). On an older
+    // System WebView the app opens offline.html, which tells the person how to update it,
+    // instead of showing broken pages.
+    minWebViewVersion: 111,
   },
 };
 

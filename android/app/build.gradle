@@ -38,8 +38,12 @@ android {
     buildTypes {
         release {
             if (keystorePropsFile.exists()) { signingConfig signingConfigs.release }
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // R8 removes unused code and resources: a smaller download and less memory on old phones.
+            // Keep rules: proguard-rules.pro (plus the ones Capacitor and its plugins ship).
+            minifyEnabled true
+            shrinkResources true
+            debuggable false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
 }
