@@ -1,0 +1,140 @@
+/* Game layout for the student app (chosen per device, src/lib/look.ts): the arrangement of a
+   mobile game's main screen (one big main button, today's slots, a deck of module cards, a tab bar
+   whose open tab grows) drawn in the app's own minimal style. White panels with a hairline
+   border, one dark panel for what to do now, grayscale first. Colours come from the institution's
+   theme, so its brand and dark mode apply. Buttons and tiles press down on a thin lip, as in a
+   game. In the components layer so Tailwind utilities still win where a page sets them. */
+
+.g-home :focus-visible, .g-tabbar :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+
+/* The other student pages in the game look (Shell sets data-look="game"): the same bordered
+   surfaces and press-down buttons as the game home, without rewriting each page. Cards drawn
+   with the soft `shadow-card` get a hairline border and a thin lip; filled buttons and links get a
+   lip in a darker shade of their own colour; all of them press down when tapped. Unlayered, so it
+   replaces those pages' own shadows; nothing here applies outside the game look. */
+[data-look="game"] .shadow-card { --lip: var(--g-lip); border: 1px solid var(--line); box-shadow: 0 2px 0 var(--lip); }
+[data-look="game"] :is(a, button).bg-accent { --lip: color-mix(in srgb, var(--accent) 62%, #000); }
+[data-look="game"] :is(a, button).bg-brand, [data-look="game"] .ua-btn-primary { --lip: var(--g-brand-lip); }
+[data-look="game"] :is(a, button).bg-bad, [data-look="game"] .ua-btn-danger { --lip: color-mix(in srgb, var(--bad) 62%, #000); }
+[data-look="game"] .ua-btn-secondary { --lip: var(--g-lip); }
+[data-look="game"] :is(:is(a, button):is(.bg-accent, .bg-brand, .bg-bad), .ua-btn-primary, .ua-btn-secondary, .ua-btn-danger) {
+  box-shadow: 0 3px 0 var(--lip); }
+[data-look="game"] :is(:is(a, button):is(.bg-accent, .bg-brand, .bg-bad), .ua-btn-primary, .ua-btn-secondary, .ua-btn-danger, :is(a, button, summary).shadow-card) {
+  transition: transform 0.1s ease, box-shadow 0.1s ease; }
+[data-look="game"] :is(:is(a, button):is(.bg-accent, .bg-brand, .bg-bad), .ua-btn-primary, .ua-btn-secondary, .ua-btn-danger, :is(a, button, summary).shadow-card):active:not(:disabled) {
+  transform: translateY(2px); box-shadow: 0 1px 0 var(--lip); }
+@media (prefers-reduced-motion: reduce) {
+  [data-look="game"] :is(a, button, summary) { transition: none !important; }
+}
+
+@layer components {
+[data-look="game"], .g-home, .g-tabbar {
+  --g-text: var(--ink); --g-muted: var(--muted);
+  --g-ok: var(--ok); --g-late: var(--warn); --g-bad: var(--bad); --g-review: var(--info); --g-slate: var(--muted);
+  --g-lip: color-mix(in srgb, var(--line) 70%, var(--ink));
+  --g-brand-lip: color-mix(in srgb, var(--brand) 62%, #000);
+}
+.g-home { color: var(--ink); }
+.g-num { font-variant-numeric: tabular-nums; }
+
+/* Buttons: flat, pressing down on a thin lip. */
+.g-btn { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  border-radius: 18px; font-weight: 700; text-decoration: none; transition: transform 0.1s ease, box-shadow 0.1s ease; }
+.g-primary { color: var(--brand-ink); background: var(--brand); box-shadow: 0 3px 0 var(--g-brand-lip); }
+.g-primary:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--g-brand-lip); }
+.g-secondary, .g-quiet { color: var(--ink); background: var(--surface); border: 1px solid var(--line); box-shadow: 0 3px 0 var(--g-lip); }
+.g-secondary:active, .g-quiet:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--g-lip); }
+.g-btn-sm { border-radius: 12px; font-size: 13px; font-weight: 600; box-shadow: 0 2px 0 var(--g-lip); }
+
+/* Top bar */
+.g-avatar { display: grid; place-items: center; width: 48px; height: 48px; flex: none; border-radius: 16px; font-size: 15px; font-weight: 700;
+  color: var(--brand-ink); background: var(--brand); box-shadow: 0 3px 0 var(--g-brand-lip); }
+.g-icon-btn { position: relative; display: grid; place-items: center; width: 44px; height: 44px; flex: none; border-radius: 14px;
+  color: var(--ink); background: var(--surface); border: 1px solid var(--line); box-shadow: 0 2px 0 var(--g-lip); }
+.g-xp { position: relative; height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.g-xp-fill { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--ink); }
+
+/* Counters and small tinted squares */
+.g-chip { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px; border-radius: 18px; background: var(--surface); border: 1px solid var(--line); }
+.g-chip-icon { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 10px; }
+.g-tint-plain { color: var(--ink); background: var(--bg); }
+.g-tint-slate { color: var(--muted); background: var(--bg); }
+.g-tint-ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, var(--surface)); }
+.g-tint-late { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--surface)); }
+.g-tint-bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, var(--surface)); }
+.g-tint-review { color: var(--info); background: color-mix(in srgb, var(--info) 12%, var(--surface)); }
+
+/* The one dark panel: what to do now */
+.g-hero { position: relative; overflow: hidden; border-radius: 24px; padding: 20px; color: var(--brand-ink); background: var(--brand); }
+.g-status { display: inline-flex; align-items: center; gap: 8px; padding: 5px 11px 5px 9px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  background: color-mix(in srgb, currentColor 14%, transparent); }
+.g-status::before { content: ""; width: 7px; height: 7px; border-radius: 999px; background: currentColor; }
+.g-status-live::before { animation: g-blink 1.6s ease-in-out infinite; }
+@keyframes g-blink { 50% { opacity: 0.3; } }
+.g-tag { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 10px; font-size: 12px; font-weight: 600;
+  background: color-mix(in srgb, currentColor 14%, transparent); }
+.g-rings { position: absolute; top: 50%; right: -34px; width: 190px; height: 190px; transform: translateY(-50%); pointer-events: none; }
+.g-rings svg { width: 100%; height: 100%; overflow: visible; }
+.g-pin { position: absolute; top: 50%; left: 50%; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 999px;
+  transform: translate(-50%, -50%); color: var(--ink); background: var(--surface); }
+.g-pulse { transform-box: fill-box; transform-origin: center; animation: g-pulse 2.4s ease-out infinite; }
+@keyframes g-pulse { 0% { transform: scale(0.3); opacity: 0.6; } 100% { transform: scale(1); opacity: 0; } }
+
+/* Today's slots */
+.g-slot { position: relative; display: flex; flex-direction: column; justify-content: space-between; gap: 6px; min-height: 96px; padding: 11px 9px 9px;
+  overflow: hidden; border-radius: 16px; color: var(--ink); text-decoration: none; background: var(--surface); border: 1px solid var(--line);
+  box-shadow: 0 2px 0 var(--g-lip); transition: transform 0.1s ease; }
+.g-slot::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--slot, transparent); }
+.g-slot:active { transform: translateY(2px); }
+.g-slot-tag { display: inline-flex; align-items: center; gap: 4px; min-width: 0; font-size: 11.5px; font-weight: 600; color: var(--slot, var(--muted)); white-space: nowrap; }
+.g-slot-next { --slot: var(--ink); }
+.g-slot-green { --slot: var(--ok); }
+.g-slot-orange { --slot: var(--warn); }
+.g-slot-red { --slot: var(--bad); }
+.g-slot-purple { --slot: var(--info); }
+.g-slot-dim { opacity: 0.55; }
+.g-slot-now { color: var(--brand-ink); background: var(--brand); border-color: transparent; box-shadow: 0 3px 0 var(--g-brand-lip); }
+.g-slot-now::before { display: none; }
+.g-slot-now .g-slot-tag { color: var(--brand-ink); }
+.g-slot-empty { align-items: center; justify-content: center; color: var(--muted); background: transparent; border-style: dashed; box-shadow: none; }
+
+/* Module deck: a band on top of each card shows how the module is going */
+.g-card { position: relative; display: flex; flex-direction: column; justify-content: space-between; aspect-ratio: 3 / 4; max-width: 100%; padding: 12px 9px 9px;
+  overflow: hidden; border-radius: 16px; color: var(--ink); text-decoration: none; background: var(--surface); border: 1px solid var(--line);
+  box-shadow: 0 2px 0 var(--g-lip); transition: transform 0.1s ease; }
+.g-card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--tier); }
+.g-card:active { transform: translateY(2px); }
+.g-card-meter { height: 4px; border-radius: 999px; background: var(--bg); overflow: hidden; }
+.g-card-meter > span { display: block; height: 100%; border-radius: inherit; background: var(--meter, var(--ink)); }
+.g-card-alert { position: absolute; top: 9px; right: 7px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; color: #fff; background: var(--bad); }
+.g-card-gold { --tier: var(--ok); }
+.g-card-blue { --tier: var(--ink); }
+.g-card-red { --tier: var(--bad); --meter: var(--bad); }
+.g-card-grey { --tier: var(--line); }
+.g-key { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border-radius: 3px; background: var(--tier); box-shadow: inset 0 0 0 1px var(--line); }
+
+/* Panels, week strip, results */
+.g-panel { border-radius: 20px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); }
+.g-day { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+.g-day-today { color: var(--surface); background: var(--ink); }
+.g-res { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 12px; }
+
+/* Bottom tab bar: floating white bar; the open tab grows into a dark tile and lifts */
+.g-tabbar-bar { background: var(--surface); border: 1px solid var(--line); border-radius: 26px; box-shadow: 0 10px 40px rgb(15 27 45 / 0.14); }
+.g-tab { display: flex; flex-direction: column; align-items: center; gap: 3px; padding-top: 2px; color: var(--muted); text-decoration: none; transition: transform 0.18s ease; }
+.g-tab-tile { display: grid; place-items: center; width: 44px; height: 34px; border-radius: 12px; transition: width 0.18s ease, height 0.18s ease; }
+.g-tab-label { font-size: 10.5px; font-weight: 600; white-space: nowrap; }
+.g-tab-on { color: var(--ink); transform: translateY(-6px); }
+.g-tab-on .g-tab-tile { width: 58px; height: 44px; border-radius: 15px; color: var(--brand-ink); background: var(--brand); box-shadow: 0 3px 0 var(--g-brand-lip); }
+.g-tab-on .g-tab-label { font-weight: 700; }
+.g-tab-mid .g-tab-tile { width: 50px; height: 42px; border-radius: 15px; color: var(--brand-ink); background: var(--accent);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--accent) 62%, #000); }
+.g-tab-mid.g-tab-on .g-tab-tile { width: 58px; height: 46px; background: var(--brand); box-shadow: 0 3px 0 var(--g-brand-lip); }
+
+@media (prefers-reduced-motion: reduce) {
+  .g-pulse { animation: none; opacity: 0; }
+  .g-status-live::before { animation: none; }
+  .g-btn, .g-slot, .g-card, .g-tab, .g-tab-tile { transition: none; }
+}
+}

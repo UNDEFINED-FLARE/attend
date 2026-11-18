@@ -12,12 +12,13 @@ const VARIANTS: Record<Variant, string> = {
 };
 const BTN = "inline-flex items-center justify-center gap-2 rounded-lg px-4 h-10 text-sm font-medium transition disabled:opacity-50 disabled:pointer-events-none";
 
+// `ua-btn-*` names have no style of their own; the student app's game look hooks onto them (app/game-look.css).
 export function Button({ variant = "primary", className, ...p }: ComponentProps<"button"> & { variant?: Variant }) {
-  return <button className={cx(BTN, VARIANTS[variant], className)} {...p} />;
+  return <button className={cx(BTN, VARIANTS[variant], `ua-btn-${variant}`, className)} {...p} />;
 }
 
 export function LinkButton({ variant = "primary", className, ...p }: ComponentProps<typeof Link> & { variant?: Variant }) {
-  return <Link className={cx(BTN, VARIANTS[variant], className)} {...p} />;
+  return <Link className={cx(BTN, VARIANTS[variant], `ua-btn-${variant}`, className)} {...p} />;
 }
 
 export function Card({ className, ...p }: ComponentProps<"section">) {

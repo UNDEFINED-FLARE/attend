@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./game-look.css";
 
 /* UniAttend: navy and white, with a bright accent blue for highlights and charts.
    Institution branding overrides --brand at runtime. */
