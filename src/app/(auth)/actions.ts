@@ -1,9 +1,12 @@
 "use server";
+import type { Provider } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { env } from "@/lib/env";
 import { safeNextPath } from "@/lib/safe-redirect";
+import { SLUG } from "@/lib/sign-in";
+import { loadDirectory } from "@/lib/sign-in-server";
 import { SESSION_ONLY_COOKIE } from "@/lib/supabase/cookies";
 import { supabaseServer } from "@/lib/supabase/server";
 
@@ -43,12 +46,18 @@ export async function signIn(_: SignInState, form: FormData): Promise<SignInStat
 }
 
 export async function signUp(_: FormState, form: FormData): Promise<FormState> {
+  // Email accounts only for an institution that still allows them (the transition,
+  // migration 0036). The database enforces the same rule when linking, so an account
+  // made some other way still gets no access at an institution that has moved on.
+  const slug = String(form.get("i") ?? "");
+  const { list } = await loadDirectory(SLUG.test(slug) ? slug : "-");
+  if (list[0]?.method !== "email") return { error: "Accounts with an email and password can't be created for this institution. Sign in with your university account instead." };
   const parsed = z.object({
     full_name: z.string().trim().min(2, "Enter your full name.").max(200),
     email,
     password,
     consent: z.literal("on", { errorMap: () => ({ message: "Please accept the privacy notice to continue." }) }),
-  }).safeParse(Object.fromEntries(form));
+  }).safeParse({ full_name: form.get("full_name"), email: form.get("email"), password: form.get("password"), consent: form.get("consent") });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
   const supabase = await supabaseServer();
   const { error } = await supabase.auth.signUp({
@@ -79,4 +88,29 @@ export async function updatePassword(_: FormState, form: FormData): Promise<Form
   const { error } = await supabase.auth.updateUser({ password: parsed.data });
   if (error) return { error: error.message };
   redirect("/dashboard");
+}
+
+/**
+ * University sign-in: the institution's approved provider is looked up on the
+ * server (never taken from the form), and Supabase Auth runs the OpenID Connect
+ * flow — state, nonce, PKCE and the ID token's signature, issuer and audience —
+ * then returns to /auth/callback with a one-time code.
+ */
+export async function startUniversitySignIn(form: FormData): Promise<void> {
+  const slug = String(form.get("i") ?? "");
+  const next = safeNext(form.get("next"));
+  if (!SLUG.test(slug)) redirect("/login");
+  const { list } = await loadDirectory(slug);
+  const inst = list[0];
+  if (!inst || inst.method !== "sso" || !inst.provider) redirect(`/login?i=${slug}&error=unavailable`);
+  const supabase = await supabaseServer();
+  const callback = new URL("/auth/callback", env.siteUrl);
+  callback.searchParams.set("next", next);
+  callback.searchParams.set("i", slug);
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: inst.provider as Provider,
+    options: { redirectTo: callback.toString(), scopes: inst.scopes, skipBrowserRedirect: true },
+  });
+  if (error || !data?.url) redirect(`/login?i=${slug}&error=start`);
+  redirect(data.url);
 }

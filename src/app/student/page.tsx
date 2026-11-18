@@ -25,7 +25,7 @@ function weekOf(iso: string) {
 }
 
 export default async function StudentHome() {
-  const { supabase, institutionId, user } = await requireRole("student");
+  const { supabase, institutionId, user, current } = await requireRole("student");
   const nowIso = new Date().toISOString();
   const since = new Date(Date.now() - 8 * 7 * 864e5).toISOString();
   const recSelect = (late: boolean) => supabase.from("attendance_records")
@@ -82,7 +82,7 @@ export default async function StudentHome() {
     return { wd: k + 1, date: d.getUTCDate(), letter: "MTWTFSS"[k], kinds };
   });
   const jar = await cookies();
-  const d: DashboardData = { theme, hello, first, studentNumber: me?.student_number ?? null, rows, recs, live, inClass, series, todaySlots, nextSlot, now, day,
+  const d: DashboardData = { theme, institution: current.institution_name ?? "", hello, first, studentNumber: me?.student_number ?? null, rows, recs, live, inClass, series, todaySlots, nextSlot, now, day,
     overall, att, tot, pending, atRisk, week, layout: parseLayoutMode(jar.get(LAYOUT_COOKIE)?.value) };
   // Game look (the default; account menu > Simple look switches back): the same data, laid out like a game's main screen.
   return parseLook(jar.get(LOOK_COOKIE)?.value) === "game" ? <GameView d={d} /> : <DashboardView d={d} />;

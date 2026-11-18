@@ -47,6 +47,13 @@ export const ThemeSchema = z.object({
   }),
   sidebar: z.object({ style: z.enum(["light", "dark", "brand"]) }),
   footer: z.object({ show: z.boolean(), text: text(200), links: z.array(link).max(6) }),
+  /** The school's banner at the top of the student and lecturer dashboards. */
+  dashboard: z.object({
+    banner: z.enum(["none", "quiet", "brand"]),
+    /** A line under the name, e.g. a motto or "Semester 2 · 2026". Empty: the header subtitle. */
+    message: text(120),
+    lecturers: z.boolean(),
+  }),
   announcement: z.object({ show: z.boolean(), text: text(240), tone: z.enum(["info", "ok", "warn", "bad"]) }),
   features: z.object(Object.fromEntries(Object.keys(FEATURES).map((k) => [k, z.boolean()])) as Record<keyof typeof FEATURES, z.ZodBoolean>),
   menus: z.object({ student: z.array(menuItem).max(20), lecturer: z.array(menuItem).max(20), admin: z.array(menuItem).max(20) }),
@@ -73,6 +80,7 @@ export const DEFAULT_THEME: Theme = {
   header: { style: "light", gradientTo: "#45484d", title: "", subtitle: "", logoUrl: "", showDate: true },
   sidebar: { style: "light" },
   footer: { show: false, text: "", links: [] },
+  dashboard: { banner: "quiet", message: "", lecturers: true },
   announcement: { show: false, text: "", tone: "info" },
   features: Object.fromEntries(Object.keys(FEATURES).map((k) => [k, true])) as Theme["features"],
   // Empty means "the app's default menus"; the Design page fills them in when edited.

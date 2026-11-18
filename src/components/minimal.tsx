@@ -56,10 +56,10 @@ export function CalmPanel({ eyebrow, title, lines, action }: { eyebrow: string; 
 /** A square shortcut: an icon on a soft square, a short label. */
 export function Tile({ href, icon, label, dark = false }: { href: string; icon: IconName; label: string; dark?: boolean }) {
   return (
-    <Link href={href} className={cx("flex flex-col items-center gap-2 rounded-[20px] border p-3 text-center transition active:scale-[0.97]",
+    <Link href={href} className={cx("flex min-w-0 flex-col items-center gap-2 rounded-[20px] border px-1 py-3 text-center transition active:scale-[0.97] sm:p-3",
       dark ? "border-transparent bg-brand text-brand-ink" : "border-line bg-surface hover:bg-bg")}>
       <span className={cx("grid size-11 place-items-center rounded-[14px]", dark ? "bg-white/10" : "bg-bg")}><Icon name={icon} size={20} /></span>
-      <span className="text-xs font-semibold">{label}</span>
+      <span className="max-w-full truncate text-[11px] font-semibold sm:text-xs">{label}</span>
     </Link>
   );
 }
@@ -155,6 +155,28 @@ export function WeekBars({ points }: { points: { label: string; att: number; tot
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * The school's banner on the student and lecturer dashboards: its logo and name,
+ * chosen on the Design page (quiet panel, the school's main colour, or off).
+ */
+export function SchoolBanner({ logo, name, line, style }: { logo?: string | null; name: string; line?: string; style: "none" | "quiet" | "brand" }) {
+  if (style === "none" || !name) return null;
+  const brand = style === "brand";
+  const initials = name.split(/\s+/).filter((w) => /^[A-Z]/.test(w)).map((w) => w[0]).join("").slice(0, 3) || name.slice(0, 2).toUpperCase();
+  return (
+    <div className={cx("mb-5 flex min-w-0 items-center gap-3 rounded-[20px] p-3 sm:p-4", brand ? "bg-brand text-brand-ink" : "border border-line bg-surface")}>
+      {logo
+        // eslint-disable-next-line @next/next/no-img-element -- the institution's logo (admin-set https URL)
+        ? <img src={logo} alt={`${name} logo`} className="size-11 shrink-0 rounded-[14px] bg-white object-contain p-1 sm:size-12" referrerPolicy="no-referrer" />
+        : <span className={cx("grid size-11 shrink-0 place-items-center rounded-[14px] text-sm font-bold sm:size-12", brand ? "bg-white/15" : "bg-bg")}>{initials}</span>}
+      <span className="min-w-0 leading-tight">
+        <span className="block truncate text-[15px] font-semibold sm:text-base">{name}</span>
+        {line && line !== name && <span className={cx("block truncate text-xs sm:text-sm", brand ? "opacity-75" : "text-muted")}>{line}</span>}
+      </span>
     </div>
   );
 }

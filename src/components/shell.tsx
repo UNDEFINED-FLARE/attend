@@ -131,18 +131,31 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
           {app ? <AppProvider me={{ name: who || "Student", initials, unread, institution: instName, look }}>{children}</AppProvider> : children}
         </main>
 
-        {theme.footer.show && (theme.footer.text || theme.footer.links.length > 0) && (
-          <footer className={`border-t border-line bg-surface px-4 pt-5 ${app ? "pb-36" : "pb-24"} text-sm text-muted lg:px-8 lg:pb-5`}>
-            <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3">
-              <span>{theme.footer.text}</span>
-              <nav aria-label="Footer" className="flex flex-wrap gap-x-4 gap-y-1">
-                {theme.footer.links.map((l) => (
-                  <a key={l.url + l.label} href={l.url} className="hover:text-accent" {...(l.url.startsWith("https://") ? { target: "_blank", rel: "noreferrer" } : {})}>{l.label}</a>
-                ))}
-              </nav>
+        {/* Every page ends the same way: who runs it, the institution's own links (Design page), the legal pages.
+            On phones it sits above the tab bar, so the bar never covers it. */}
+        <footer className={`border-t border-line bg-surface px-4 pt-5 text-sm text-muted print:hidden lg:px-8 lg:pb-6 ${app ? "pb-36" : "pb-28"}`}>
+          <div className="mx-auto flex max-w-7xl flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              {theme.header.logoUrl
+                // eslint-disable-next-line @next/next/no-img-element -- institution logo from an admin-set https URL
+                ? <img src={theme.header.logoUrl} alt="" className="size-8 shrink-0 rounded-lg bg-white object-contain p-0.5" referrerPolicy="no-referrer" />
+                : null}
+              <span className="min-w-0 leading-snug">
+                <span className="block truncate font-medium text-ink">{theme.header.title || instName}</span>
+                <span className="block text-xs">{theme.footer.show && theme.footer.text ? theme.footer.text : `© ${new Date().getFullYear()} ${instName}`}</span>
+              </span>
             </div>
-          </footer>
-        )}
+            <nav aria-label="Footer" className="flex flex-wrap gap-x-4 gap-y-2 sm:justify-end">
+              {theme.footer.show && theme.footer.links.map((l) => (
+                <a key={l.url + l.label} href={l.url} className="hover:text-ink hover:underline" {...(l.url.startsWith("https://") ? { target: "_blank", rel: "noreferrer" } : {})}>{l.label}</a>
+              ))}
+              <Link href="/privacy" className="hover:text-ink hover:underline">Privacy</Link>
+              <Link href="/terms" className="hover:text-ink hover:underline">Terms</Link>
+              <Link href="/settings" className="hover:text-ink hover:underline">Settings</Link>
+            </nav>
+          </div>
+          <p className="mx-auto mt-4 max-w-7xl text-xs">Attendance by UniAttend</p>
+        </footer>
       </div>
 
       {app ? (look === "game" ? <GameTabBar items={nav} center={app.center} /> : <AppTabBar items={nav} center={app.center} />) : <TabBar items={nav} />}
