@@ -71,7 +71,7 @@ export default async function History({ searchParams }: { searchParams: Promise<
 
       <div className="space-y-6">
         {[...days.entries()].map(([d, list]) => (
-          <section key={d}>
+          <section key={d} className="ua-offscreen">
             <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-muted">
               {new Date(`${d}T12:00:00Z`).toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long" })}
             </p>

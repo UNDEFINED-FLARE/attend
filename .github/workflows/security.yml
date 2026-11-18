@@ -1,0 +1,42 @@
+name: Security
+
+# Scans the app's dependencies for known vulnerabilities (like a dependency-scanning
+# service). Runs on every push and pull request, and weekly so a newly disclosed
+# vulnerability in an unchanged dependency still surfaces.
+#   - The job FAILS only on a CRITICAL advisory in a production dependency, so a real
+#     emergency is loud while known, lower advisories don't block every build.
+#   - A full report (all severities, prod + dev) is written to the run summary each time.
+# Known and tracked at the time of writing (see docs/commercial-readiness/12-…): zod v3
+# (fixed in v4, a breaking upgrade) and postcss inside Next 15 (fixed by Next 16).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # No install scripts: auditing doesn't need them, and it avoids running package code.
+      - run: npm ci --ignore-scripts
+      - name: Full dependency report (all severities)
+        if: always()
+        run: |
+          echo "## Dependency audit" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          npm audit 2>&1 | tail -40 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: Fail on a CRITICAL production vulnerability
+        run: npm audit --omit=dev --audit-level=critical

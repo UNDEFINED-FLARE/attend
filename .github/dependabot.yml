@@ -1,0 +1,32 @@
+# Dependabot: opens pull requests when a dependency has a newer version or a known
+# vulnerability, so a vulnerable package is flagged (and fixable) the moment it appears
+# — the standing protection a dependency scanner gives. Active once this is on the default
+# branch. Review and merge the PRs like any other change (feature branch → friend reviews).
+version: 2
+updates:
+  # The web app (Next.js / React / Supabase / zod …).
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+    groups:
+      # One PR for routine minor/patch bumps; majors (which may break) come separately.
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  # The GitHub Actions used by the workflows (checkout, setup-node …).
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels: ["dependencies", "ci"]
+
+  # The Android app's Gradle dependencies (Capacitor, AndroidX …).
+  - package-ecosystem: gradle
+    directory: "/android"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "android"]

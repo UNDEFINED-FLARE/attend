@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./game-look.css";
 
 /* Fit every screen. A grid with no column count (the phone layout of "grid lg:grid-cols-2")
    would otherwise size its one column to its widest content, so a long name meant to end in
@@ -94,3 +95,20 @@ body {
 .ua-pulse { width: 8px; height: 8px; border-radius: 999px; background: var(--ok); box-shadow: 0 0 0 0 rgb(22 163 74 / 0.6); animation: ua-pulse 1.6s infinite; }
 @keyframes ua-pulse { 70% { box-shadow: 0 0 0 8px rgb(22 163 74 / 0); } 100% { box-shadow: 0 0 0 0 rgb(22 163 74 / 0); } }
 @media (prefers-reduced-motion: reduce) { .ua-pulse { animation: none; } }
+
+/* Lite mode: set before the page draws on low-end phones (2 GB of memory or less, two cores or
+   fewer) or with Data Saver on (app/layout.tsx). No looping animations, transitions or blur, and
+   no large soft shadows on fixed bars, so old phones scroll smoothly and the battery lasts.
+   Buttons still press down (that is a transform, which costs nothing). */
+html[data-lite] *, html[data-lite] *::before, html[data-lite] *::after {
+  animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important; scroll-behavior: auto !important;
+  backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+}
+html[data-lite] .g-tabbar-bar, html[data-lite] nav[aria-label="Main"] > ul { box-shadow: 0 -1px 0 var(--line, #e3e4e7); }
+/* Loading spinners keep turning: they tell the person something is still happening. */
+html[data-lite] .animate-spin { animation-duration: 1s !important; animation-iteration-count: infinite !important; }
+
+/* Long lists (attendance history): the browser skips laying out and painting rows that are
+   off screen until they are scrolled near. A big saving on old phones with hundreds of rows. */
+.ua-offscreen { content-visibility: auto; contain-intrinsic-size: auto 320px; }

@@ -60,6 +60,57 @@ location at check-in (used once, only the distance is stored), the camera for QR
 Where an institution turns Bluetooth on, it also uses "Nearby devices" to hear the class signal at check-in (only a summary is
 stored) and, on a lecturer's phone, to broadcast it.
 
+### Before the first upload: Google Play checklist
+
+| Play Console item | Answer for UniAttend |
+|---|---|
+| App access | Sign-in required. Give the review team a test student account at a test institution, with an open class they can check in to (or say the QR comes from a lecturer screen). |
+| Privacy policy | `https://<your site>/privacy` |
+| Account deletion | In the app: Security & app lock → Your data → Ask about my information → Delete my information. Web link for people without the app: `https://<your site>/delete-account` |
+| Data safety: collected | **Location, precise** (at check-in only, for app functionality; the server keeps only the distance from the venue). **Personal info**: name, email, student or staff number (account management, app functionality). **App activity**: attendance records. **Device or other IDs**: the device check value (a hash of a random on-phone id). |
+| Data safety: not collected | Photos or video (the camera only reads the QR code), audio, contacts, fingerprint or face (checked on the phone; nothing is sent). |
+| Data safety: security | Encrypted in transit (HTTPS only, enforced by the app). Users can request deletion. No data sold or used for ads. |
+| Permissions | Camera and location are foreground only: no background location, so no extra declaration. |
+| Target audience | 18 and over (university and college students and staff), so the Families policy doesn't apply. |
+| Ads | None. |
+| Testing | A new personal developer account must run a closed test with at least 12 testers for 14 days before production. Check Play's pre-launch report for crashes. |
+
+**Check before you submit:** the privacy notice mentions an optional *ambient sound* check, but the app has no such
+feature and doesn't ask for the microphone. Remove that line, or keep the data-safety form consistent with it.
+
+**Test the release build on a real phone first** (Play Console → Internal testing): release builds are shrunk with R8
+(see below), which only shows a problem when the app runs. Open it, sign in, scan a QR code, allow location, turn on
+fingerprint unlock and a class reminder. If a plugin stops working, add a keep rule to `android/app/proguard-rules.pro`.
+Upload `android/app/build/outputs/mapping/release/mapping.txt` with each release so crash reports are readable.
+
+## Security
+
+The app opens the website, and Capacitor lets that website call the phone's native features. So the website's security
+is also the app's security.
+
+| Protection | Where |
+|---|---|
+| The app only navigates inside UniAttend's own address; every other link opens in the browser | `capacitor.config.ts` → `server.allowNavigation` |
+| Release builds use HTTPS only and trust only Android's built-in certificate authorities (not ones a user or malware installs) | `android/app/src/main/res/xml/network_security_config.xml`; debug builds allow http for a local test server (`src/debug/…`) |
+| Remote debugging (Chrome inspector) works in debug builds only, however the release was built | Capacitor default; deliberately not set in `capacitor.config.ts` |
+| No cloud backup or device transfer of sign-in data | `AndroidManifest.xml`, `data_extraction_rules.xml` |
+| The file provider shares only the app's own photo folder and cache | `file_paths.xml` |
+| Release code is shrunk and obfuscated | R8: `minifyEnabled` and `shrinkResources` in `android/app/build.gradle`, rules in `proguard-rules.pro` |
+| Only scripts with a per-request nonce can run on the website, so injected markup can't reach the native bridge | Content Security Policy in `src/middleware.ts` + `src/lib/csp.ts`. `CSP_MODE=report-only` (Vercel env) switches it to report-only in an emergency |
+| Camera and location for this site only; microphone, payment, USB and screen capture off | `Permissions-Policy` in `next.config.ts` |
+
+## Old and low-end phones
+
+- **Minimum:** Android 7 (API 24) with Android System WebView 111 or newer, which the web app's styles need. On an
+  older WebView the app shows an *Update needed* screen with a Play Store link instead of broken pages
+  (`android.minWebViewVersion` in `capacitor.config.ts`, `mobile/www/offline.html`).
+- **Lite mode:** on phones with 2 GB of memory or less, two cores or fewer, or Data Saver on, the website drops
+  animations, transitions and blur before it draws (`LITE_EARLY` in `src/app/layout.tsx`, `html[data-lite]` in
+  `globals.css`). Nothing is sent anywhere.
+- **Long lists** (attendance history) skip laying out rows that are off screen (`content-visibility`).
+- **No downloads for fonts**, a small app download (R8), and the service worker keeps the main pages for use without
+  signal.
+
 ## Notes
 
 - **Bluetooth presence** (update 0037) runs only in this app, through its own plugin `UniAttendBlePlugin`: the lecturer's
