@@ -84,6 +84,6 @@ export default async function StudentHome() {
   const jar = await cookies();
   const d: DashboardData = { theme, hello, first, studentNumber: me?.student_number ?? null, rows, recs, live, inClass, series, todaySlots, nextSlot, now, day,
     overall, att, tot, pending, atRisk, week, layout: parseLayoutMode(jar.get(LAYOUT_COOKIE)?.value) };
-  // Game look (chosen on this device from the account menu): the same data, laid out like a game's main screen.
+  // Game look (the default; account menu > Simple look switches back): the same data, laid out like a game's main screen.
   return parseLook(jar.get(LOOK_COOKIE)?.value) === "game" ? <GameView d={d} /> : <DashboardView d={d} />;
 }

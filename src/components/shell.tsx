@@ -30,7 +30,7 @@ function Logo({ name, theme, onDark }: { name: string; theme: Theme; onDark: boo
 
 const TONE = { info: "bg-info/10 text-info", ok: "bg-ok/10 text-ok", warn: "bg-warn/10 text-warn", bad: "bg-bad/10 text-bad" } as const;
 
-export function Shell({ nav, children, current, choices, area, user, unread = 0, theme = DEFAULT_THEME, app, look = "simple" }: {
+export function Shell({ nav, children, current, choices, area, user, unread = 0, theme = DEFAULT_THEME, app, look = "game" }: {
   nav: NavItem[];
   children: ReactNode;
   current: RoleRow;

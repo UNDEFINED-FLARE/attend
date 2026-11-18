@@ -6,11 +6,11 @@ const rec = (status: string, created_at: string, code = "CSC111", opens_at = cre
   ({ status, created_at, modules: { code }, class_sessions: { opens_at } });
 
 describe("parseLook", () => {
-  it("is the institution's design unless the device chose the game look", () => {
+  it("is the game look for everyone unless the device chose the simple one", () => {
+    expect(parseLook(undefined)).toBe("game");
     expect(parseLook("game")).toBe("game");
     expect(parseLook("simple")).toBe("simple");
-    expect(parseLook(undefined)).toBe("simple");
-    expect(parseLook("GAME")).toBe("simple");
+    expect(parseLook("anything-else")).toBe("game");
   });
 });
 
