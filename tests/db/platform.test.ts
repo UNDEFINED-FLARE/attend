@@ -1868,3 +1868,84 @@ describe("UniAttend staff see a university's records only while it lets them", (
     expect(await n(u.adminB, "select 1 from uniattend.support_access_grants")).toBe(0);
   });
 });
+
+describe("signing in by institution: the public directory, providers and the email transition", () => {
+  type Entry = { slug: string; name: string; method: string; provider?: string; provider_name?: string };
+  const directory = async (who: string | null, slug: string | null = null) =>
+    (await db.asOne<{ sign_in_directory: Entry[] }>(who, "select uniattend.sign_in_directory($1)", [slug])).sign_in_directory;
+
+  it("lists only active institutions, to anyone, with no detail about people or providers", async () => {
+    const applicant = await db.newUser("dean@uniC.ac.za");
+    await db.as(applicant, "select uniattend.request_institution('University C', 'uni-c')");
+    const d = await directory(null);
+    expect(d.map((e) => e.slug)).toEqual(expect.arrayContaining(["uni-a", "uni-b"]));
+    expect(d.map((e) => e.slug)).not.toContain("uni-c");
+    expect(d.every((e) => e.method === "email")).toBe(true);
+    const allowed = ["slug", "name", "short_name", "logo", "campuses", "method", "provider", "provider_name", "scopes"];
+    for (const e of d) expect(Object.keys(e).every((k) => allowed.includes(k)), Object.keys(e).join()).toBe(true);
+    expect(await directory(null, "uni-c")).toEqual([]);
+    // A suspended institution is not a sign-in destination either.
+    await db.as(u.super, "select uniattend.set_institution_status($1, 'suspended')", [id.instB]);
+    expect((await directory(null)).map((e) => e.slug)).not.toContain("uni-b");
+    await db.as(u.super, "select uniattend.set_institution_status($1, 'active')", [id.instB]);
+  });
+
+  it("offers a university sign-in only once its provider is approved and enabled", async () => {
+    const [p] = await db.admin<{ id: string }>(
+      `insert into uniattend.institution_identity_providers (institution_id, provider_type, provider_name, supabase_provider, issuer_url, client_id)
+       values ($1, 'oidc', 'UniA account', 'custom:uni-a', 'https://login.unia.ac.za', 'uniattend') returning id`, [id.instA]);
+    expect((await directory(null, "uni-a"))[0].method).toBe("email");
+    await db.admin("update uniattend.institution_identity_providers set configuration_status = 'login_tested' where id = $1", [p.id]);
+    expect((await directory(null, "uni-a"))[0].method).toBe("email");
+    // It can't be switched on before approval.
+    await expect(db.admin("update uniattend.institution_identity_providers set enabled = true where id = $1", [p.id])).rejects.toThrow(/idp_enabled_only_approved/);
+    await db.admin("update uniattend.institution_identity_providers set configuration_status = 'approved', enabled = true, approved_at = now() where id = $1", [p.id]);
+    const [a] = await directory(null, "uni-a");
+    expect(a).toMatchObject({ method: "sso", provider: "custom:uni-a", provider_name: "UniA account" });
+    // The client ID and issuer never reach the public page.
+    expect(JSON.stringify(a)).not.toMatch(/login\.unia|"uniattend"/);
+    await db.admin("update uniattend.institution_identity_providers set enabled = false, configuration_status = 'suspended' where id = $1", [p.id]);
+    expect((await directory(null, "uni-a"))[0].method).toBe("email");
+  });
+
+  it("an OIDC provider can't leave the design stage without its Supabase provider, issuer and client", async () => {
+    await expect(db.admin(
+      `insert into uniattend.institution_identity_providers (institution_id, provider_type, provider_name, configuration_status)
+       values ($1, 'oidc', 'Half done', 'configured')`, [id.instB])).rejects.toThrow(/idp_oidc_complete/);
+    await expect(db.admin(
+      `insert into uniattend.institution_identity_providers (institution_id, provider_type, provider_name, issuer_url)
+       values ($1, 'oidc', 'Plain http', 'http://login.unib.ac.za')`, [id.instB])).rejects.toThrow(/check/);
+  });
+
+  it("provider settings are visible only to the institution's administrators and the platform, and nobody writes them directly", async () => {
+    expect(await db.as(u.adminA, "select 1 from uniattend.institution_identity_providers")).toHaveLength(1);
+    expect(await db.as(u.adminB, "select 1 from uniattend.institution_identity_providers")).toHaveLength(0);
+    expect(await db.as(u.sA1, "select 1 from uniattend.institution_identity_providers")).toHaveLength(0);
+    expect(await db.as(u.lectA, "select 1 from uniattend.institution_identity_providers")).toHaveLength(0);
+    await expect(db.as(null, "select 1 from uniattend.institution_identity_providers")).rejects.toThrow(/permission denied/);
+    await expect(db.as(u.adminA, "update uniattend.institution_identity_providers set enabled = true where institution_id = $1", [id.instA]))
+      .rejects.toThrow(/permission denied/);
+    await expect(db.as(u.adminB,
+      `insert into uniattend.institution_identity_providers (institution_id, provider_type, provider_name) values ($1, 'oidc', 'Hijack')`, [id.instA]))
+      .rejects.toThrow(/permission denied/);
+  });
+
+  it("once an institution stops email sign-in, an email account no longer links to its records", async () => {
+    await db.as(u.adminA, "insert into uniattend.students (institution_id, student_number, full_name, email) values ($1, 'A201', 'New Student', 'new201@uniA.ac.za')", [id.instA]);
+    await db.as(u.adminA, "insert into uniattend.lecturers (institution_id, staff_number, full_name, email) values ($1, 'L201', 'New Lecturer', 'newl201@uniA.ac.za')", [id.instA]);
+    await db.admin("update uniattend.institutions set allow_email_sign_in = false where id = $1", [id.instA]);
+    expect((await directory(null, "uni-a"))[0].method).toBe("none");
+    for (const email of ["new201@uniA.ac.za", "newl201@uniA.ac.za"]) {
+      const x = await db.newUser(email);
+      await db.as(x, "select uniattend.link_my_accounts()");
+      expect(await db.as(x, "select * from uniattend.my_roles()")).toEqual([]);
+    }
+    // People already linked keep their access; the other institution is unaffected.
+    expect((await db.as<{ role: string }>(u.sA1, "select role from uniattend.my_roles()")).map((r) => r.role)).toContain("student");
+    await db.as(u.adminB, "insert into uniattend.students (institution_id, student_number, full_name, email) values ($1, 'B201', 'B New', 'new201@uniB.ac.za')", [id.instB]);
+    const y = await db.newUser("new201@uniB.ac.za");
+    await db.as(y, "select uniattend.link_my_accounts()");
+    expect((await db.as<{ role: string }>(y, "select role from uniattend.my_roles()")).map((r) => r.role)).toEqual(["student"]);
+    await db.admin("update uniattend.institutions set allow_email_sign_in = true where id = $1", [id.instA]);
+  });
+});

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { GameTopBar } from "@/components/app-chrome";
 import { Icon, type IconName } from "@/components/icons";
 import { LookButton } from "@/components/look-button";
+import { SchoolBanner } from "@/components/minimal";
 import { PushToggle } from "@/components/push-toggle";
 import { hhmm } from "@/components/week-grid";
 import { attendanceStreak, cardTier, slotState, type CardTier, type SlotState } from "@/lib/game";
@@ -174,6 +175,9 @@ export function GameView({ d }: { d: DashboardData }) {
 
   return (
     <div className="g-home relative mx-auto max-w-xl space-y-6">
+      {/* The school's banner, as on the simple dashboard (Design page: quiet, brand colour or off). */}
+      <SchoolBanner style={theme.dashboard.banner} logo={theme.header.logoUrl || null} name={theme.header.title || d.institution || ""}
+        line={theme.dashboard.message || theme.header.subtitle || (theme.header.title ? d.institution : undefined)} />
       <GameTopBar name={first || "Student"} percent={overall} />
 
       {shown.has("quick") && (

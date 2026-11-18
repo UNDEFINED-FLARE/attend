@@ -5,7 +5,7 @@ import { buildCsp, cspHeaderName, cspMode, newNonce } from "@/lib/csp";
 import { authCookieOptions, SESSION_ONLY_COOKIE } from "@/lib/supabase/cookies";
 import { getUserWithRetry } from "@/lib/supabase/resilient";
 
-const PUBLIC = ["/", "/developers", "/login", "/signup", "/forgot-password", "/auth/callback", "/privacy", "/terms", "/paia", "/delete-account"];
+const PUBLIC = ["/", "/developers", "/login", "/login/admin", "/login/platform", "/signup", "/forgot-password", "/auth/callback", "/privacy", "/terms", "/paia", "/delete-account"];
 // Machine endpoints that check their own secret.
 const PUBLIC_PREFIX = ["/api/push/", "/api/health", "/api/roster", "/api/v1/"];
 
@@ -69,7 +69,7 @@ export async function middleware(request: NextRequest) {
   return secure(response);
 }
 
-const AUTH_PAGES = ["/login", "/signup", "/forgot-password", "/reset-password"];
+const AUTH_PAGES = ["/login", "/login/admin", "/login/platform", "/signup", "/forgot-password", "/reset-password"];
 
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg|manifest.webmanifest|sw.js|icons/|.*\\.(?:png|jpg|svg)$).*)"],

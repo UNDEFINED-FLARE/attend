@@ -5,7 +5,8 @@
 // into a page can't run code. This matters most inside the Android app, where a page can reach
 // the phone's native features (notifications, fingerprint unlock) through Capacitor.
 //
-// The other directives limit where the page may connect, what may frame it and where forms go.
+// The other directives limit where the page may connect, what may frame it and where forms go
+// (this site, or https for sign-in by institution).
 // Hosts the browser talks to directly: the Supabase project (API and realtime), Overpass (building
 // outlines on maps), Nominatim (campus search in the admin map editor), Cloudflare Turnstile. Map
 // tiles and institution logos are images from many https hosts, so img-src allows https.
@@ -63,7 +64,9 @@ export function buildCsp({ nonce, supabaseUrl, dev = false, upgrade = !dev }: { 
     ["media-src", ["'self'", "blob:"]],
     ["object-src", ["'none'"]],
     ["base-uri", ["'self'"]],
-    ["form-action", ["'self'"]],
+    // Sign-in by institution posts a form whose answer redirects to Supabase and then to the
+    // institution's own identity provider (any host), so form targets may be any https address.
+    ["form-action", ["'self'", "https:"]],
     ["frame-ancestors", ["'none'"]],
   ];
   const policy = directives.map(([k, v]) => `${k} ${v.join(" ")}`);

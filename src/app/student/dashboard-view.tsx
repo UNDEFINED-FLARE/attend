@@ -3,7 +3,7 @@ import { AppTitle } from "@/components/app-chrome";
 import { Icon } from "@/components/icons";
 import { LateChip } from "@/components/late";
 import { LayoutModeProvider, LayoutToggle, Parts } from "@/components/layout-mode";
-import { CalmPanel, EmptyNote, Figure, FocusPanel, Glyph, Meter, Panel, Pill, Row, SectionTitle, Tile, WeekBars } from "@/components/minimal";
+import { CalmPanel, EmptyNote, Figure, FocusPanel, Glyph, Meter, Panel, Pill, Row, SchoolBanner, SectionTitle, Tile, WeekBars } from "@/components/minimal";
 import { PushToggle } from "@/components/push-toggle";
 import { pct } from "@/components/ui";
 import { hhmm, type Slot } from "@/components/week-grid";
@@ -27,7 +27,7 @@ export type DashSlot = Slot & { id: string };
 export type InClass = { session: string; code: string; title: string; since: string | null };
 export type DashboardData = {
   inClass?: InClass[];
-  theme: Theme; hello: string; first: string; studentNumber: string | null;
+  theme: Theme; institution?: string; hello: string; first: string; studentNumber: string | null;
   rows: DashRow[]; recs: DashRec[]; live: DashLive[]; series: TrendSeries[];
   todaySlots: DashSlot[]; nextSlot: DashSlot | undefined; now: string; day: number;
   overall: number | null; att: number; tot: number; pending: number; atRisk: DashRow[];
@@ -193,6 +193,8 @@ export function DashboardView({ d }: { d: DashboardData }) {
   return (
     <LayoutModeProvider initial={d.layout ?? "scroll"}>
     <div className="mx-auto max-w-5xl">
+      <SchoolBanner style={theme.dashboard.banner} logo={theme.header.logoUrl || null} name={theme.header.title || d.institution || ""}
+        line={theme.dashboard.message || theme.header.subtitle || (theme.header.title ? d.institution : undefined)} />
       <AppTitle eyebrow={hello} title={first || "Dashboard"} action={<LayoutToggle />}
         sub={d.studentNumber ? <span className="font-mono text-xs">{d.studentNumber}</span> : undefined} />
       <div className="space-y-6">

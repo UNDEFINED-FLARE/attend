@@ -2,7 +2,7 @@ import { loadTheme } from "@/lib/shell-data";
 import Link from "next/link";
 import { AppTitle } from "@/components/app-chrome";
 import { Icon } from "@/components/icons";
-import { EmptyNote, Figure, FocusPanel, Glyph, Meter, Panel, Pill, Row, SectionTitle, Tile } from "@/components/minimal";
+import { EmptyNote, Figure, FocusPanel, Glyph, Meter, Panel, Pill, Row, SectionTitle, Tile, SchoolBanner } from "@/components/minimal";
 import { pct } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { greeting, groupBy, rate, sastMidnight, timeOf } from "@/lib/stats";
@@ -13,7 +13,7 @@ export const metadata = { title: "Home" };
 
 
 export default async function LecturerHome() {
-  const { supabase, institutionId, user } = await requireRole("lecturer");
+  const { supabase, institutionId, user, current } = await requireRole("lecturer");
   const { data: me } = await supabase.from("lecturers").select("id, full_name")
     .eq("institution_id", institutionId).eq("user_id", user.id).maybeSingle();
   const { data: assigned } = await supabase.from("lecturer_assignments")
@@ -38,7 +38,8 @@ export default async function LecturerHome() {
     supabase.from("lecturers").select("id, full_name").eq("institution_id", institutionId).is("deleted_at", null).eq("status", "active").order("full_name").limit(500),
   ]);
   const now = Date.now();
-  const needFollowUp = (await loadTheme(supabase, institutionId)).features.earlyWarning && Array.isArray(alerts) ? alerts.length : 0;
+  const theme = await loadTheme(supabase, institutionId);
+  const needFollowUp = theme.features.earlyWarning && Array.isArray(alerts) ? alerts.length : 0;
   const open = (sessions ?? []).filter((s) => s.status === "open");
   const week = (sessions ?? []).filter((s) => s.opens_at >= sastMidnight(6)).length;
   const byModule = groupBy(recs ?? [], (r) => r.module_id as string);
@@ -48,6 +49,8 @@ export default async function LecturerHome() {
   const fullName = me?.full_name ?? "Welcome";
   return (
     <div className="mx-auto max-w-5xl space-y-6">
+      {theme.dashboard.lecturers && <SchoolBanner style={theme.dashboard.banner} logo={theme.header.logoUrl || null}
+        name={theme.header.title || current.institution_name || ""} line={theme.dashboard.message || theme.header.subtitle || (theme.header.title ? current.institution_name ?? "" : "")} />}
       <AppTitle eyebrow={greeting()} title={fullName.split(" ").slice(0, 2).join(" ")} sub={`${modules.length} module${modules.length === 1 ? "" : "s"} · ${(enrol ?? []).length} students`} />
 
       {open.map((s) => (

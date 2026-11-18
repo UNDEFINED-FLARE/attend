@@ -38,11 +38,12 @@ describe("buildCsp", () => {
     expect(s).not.toContain("'unsafe-eval'");
   });
 
-  it("can't be framed, has no plugins, and keeps base and form targets on this site", () => {
+  it("can't be framed, has no plugins, keeps the base on this site and sends forms only over https", () => {
     expect(directive(prod, "frame-ancestors")).toBe("frame-ancestors 'none'");
     expect(directive(prod, "object-src")).toBe("object-src 'none'");
     expect(directive(prod, "base-uri")).toBe("base-uri 'self'");
-    expect(directive(prod, "form-action")).toBe("form-action 'self'");
+    // https: so sign-in by institution can redirect to the institution's identity provider.
+    expect(directive(prod, "form-action")).toBe("form-action 'self' https:");
     expect(prod.endsWith("upgrade-insecure-requests")).toBe(true);
   });
 
