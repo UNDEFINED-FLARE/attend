@@ -5,9 +5,17 @@ re-signed every 20 seconds. Students scan it, and the database scores the check-
 the signed token, the student's location relative to the mapped venue, and a privacy-preserving device hash.
 Weak evidence sends a check-in to the lecturer for review. It is never turned into an absence automatically.
 
+Around that core: an Integration Centre that keeps students, lecturers, modules and enrolments in step with a
+university's own systems (Moodle, a scheduled CSV/JSON link, UniAttend reading the university's REST API with
+OAuth and paging, or the university pushing to the versioned Institution API), an Import Centre with preview
+before commit, dated timetable classes, one review queue for doubtful check-ins, staff roles scoped to a faculty
+or department, institutional reports (Excel, CSV, PDF on the institution's letterhead), onboarding to go-live,
+support access only by the institution's grant, and a clean exit with a full data export.
+
 - **Stack:** Next.js 15 (App Router, TypeScript, Tailwind v4) · Supabase (Postgres, Auth, Realtime, Edge Functions) · Vercel
 - **Tenancy:** everything lives in the `uniattend` Postgres schema; every institution-owned row has `institution_id`; Row Level Security on every table; composite foreign keys stop a row pointing at another tenant's parent.
-- **Status:** see [`docs/02-ROADMAP.md`](docs/02-ROADMAP.md). The audit of the earlier versions is in [`docs/01-AUDIT.md`](docs/01-AUDIT.md).
+- **Full description:** [`docs/PLATFORM-BLUEPRINT.md`](docs/PLATFORM-BLUEPRINT.md) (every table, function, route and rule, and how to rebuild it).
+- **Status:** the current audit, gap register and security review are in [`docs/commercial-readiness/`](docs/commercial-readiness/). Earlier audits: [`docs/01-AUDIT.md`](docs/01-AUDIT.md), [`docs/02-ROADMAP.md`](docs/02-ROADMAP.md).
 
 ## Run it locally
 
@@ -93,6 +101,9 @@ audited; disputes; the report arithmetic; plan limits; suspension.
 | Role gate per area | `src/lib/auth.ts` → `requireRole()` in each `layout.tsx` |
 | Student check-in UI | `src/app/student/check-in/` |
 | Lecturer live register | `src/app/lecturer/sessions/[id]/` |
+| Integrations: connectors, worker, catalogue | `src/lib/integrations/` (`sources.ts`, `rest.ts`, `runner.ts`, `providers.ts`), `src/app/admin/integrations/` |
+| Institution API v1 | `src/app/api/v1/`, documented at `/developers` |
+| Staff roles, reports, review queue | migrations `…0029`–`…0031`, `src/app/staff/`, `src/app/reports/` |
 | Payment webhook | `supabase/functions/paystack-webhook/` |
 
 ### Check-in scoring
@@ -112,3 +123,4 @@ Below it, the status is **pending verification** for the lecturer to decide.
 - [Institution administrators](docs/guide-admin.md)
 - [Lecturers](docs/guide-lecturer.md)
 - [Students](docs/guide-student.md)
+- [Administrator guide (PDF)](docs/guides/UniAttend-Administrator-Guide.pdf)

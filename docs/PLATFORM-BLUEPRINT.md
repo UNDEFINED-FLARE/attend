@@ -1,11 +1,11 @@
 # UniAttend platform blueprint
 
-Written 14 November 2026, at commit `b851c02` on `main`. This document describes the whole platform: what it is, how it is built, every table, function, policy and file, how to set it up from nothing, and what is unfinished.
+Written 14 November 2026; brought up to date on 18 November 2026, after commit `21a0585` on `main` (35 migrations). This document describes the whole platform: what it is, how it is built, every table, function, policy and file, how to set it up from nothing, and what is unfinished.
 
 **Read this first if you are an AI agent asked to recreate the platform.**
 
 1. **The Git repository is the platform.** If `https://github.com/UNDEFINED-FLARE/attend` (or any copy of it) still exists, clone it and follow section 6. Do not rewrite anything.
-2. **If only the database script survives**, `supabase/install-uniattend.sql` recreates the entire database (all 25 migrations in one transaction). The app code would then be rebuilt from this document.
+2. **If only the database script survives**, `supabase/install-uniattend.sql` recreates the entire database (all 35 migrations in one transaction). The app code would then be rebuilt from this document.
 3. **If only this document survives**, it is a specification, not a copy. You can rebuild a platform that behaves the same, using the rules in sections 4 and 7–9 and the inventory in the appendices. It will not be byte-for-byte identical: the SQL function bodies and the page markup are described here, not reproduced. Follow the rebuild order in section 15.
 
 Appendices A–E are generated from the code by `scripts/blueprint-appendix.py`. Rerun it after changing migrations or files so this document stays true.
@@ -19,8 +19,8 @@ A multi-university attendance platform (software as a service). One deployment s
 - A **lecturer** opens an attendance session for a module and shows a QR code that changes every 20 seconds.
 - A **student** scans it with their phone. The database scores the check-in from three kinds of evidence: the signed QR token, the phone's location relative to the venue, and a privacy-preserving device hash.
 - Strong evidence records the student as present (or late). **Weak evidence never becomes an absence automatically: it goes to the lecturer to review.**
-- **Institution administrators** manage their own structure, people, timetable, design, policies and data connections.
-- A **platform administrator** (super admin) approves institutions, manages plans and billing, and sees no student data by default.
+- **Institution administrators** manage their own structure, people, timetable, design, policies and data connections. Staff roles (faculty and department admins, attendance officers, integration admins, auditors) take a part of that work each.
+- A **platform administrator** (super admin) approves institutions, manages plans and billing, and sees no student data unless the institution grants time-limited support access.
 
 Operating company: **Webbex Solutions (Pty) Ltd**, registration 2026/690092/07, Thohoyandou, Limpopo, South Africa. First pilot institution: University of Venda (UNIVEN). Law that shapes the design: POPIA and PAIA (South Africa).
 
@@ -32,8 +32,12 @@ Operating company: **Webbex Solutions (Pty) Ltd**, registration 2026/690092/07, 
 | `institution_admin` | One institution | `/admin` | Everything inside their institution: structure, modules, people, timetable, design, policy, data, connections, audit log |
 | `lecturer` | Modules they are assigned to | `/lecturer` | Open, control and close sessions; register; late decisions; reviews and disputes; message a class; early warning for their modules |
 | `student` | Their own records | `/student` | Check in and out, timetable, map and directions, history, disputes |
+| `faculty_admin`, `department_admin` | One faculty or department | `/staff` | Attendance, reviews and reports for that scope's modules |
+| `attendance_officer` | One institution | `/staff` | All attendance: reviews, disputes, corrections, exports. No structure, people or settings |
+| `integration_admin` | One institution | `/admin/integrations` | Connections, imports and sync runs. No attendance records |
+| `auditor` | One institution | `/staff` | Read-only: attendance, decisions, the audit log, who holds which role |
 
-A person can hold different roles at different institutions (`user_roles`). The active institution is a cookie preference (`ua_inst`) that is ignored unless the database confirms the role. Roles are granted, never claimed: nothing in sign-up data can set a role.
+A person can hold different roles at different institutions (`user_roles`). The active institution is a cookie preference (`ua_inst`) that is ignored unless the database confirms the role. Roles are granted, never claimed: nothing in sign-up data can set a role. Staff roles (migration 0030) are granted on the People page; the database enforces them through `may_view_module()` and `may_correct_module()`. A platform administrator counts as an institution administrator (`is_inst_admin()`) only while that institution has an active support-access grant (migration 0034).
 
 ## 3. Technology
 
@@ -137,7 +141,7 @@ Checks before any commit: `npm run typecheck`, `npm run lint`, `npx vitest run t
 ### 8.1 Sign-up, sign-in and linking
 - Email and password (10+ characters) through Supabase Auth; the confirmation link returns to `/auth/callback`. Sign-in is a server action; cookies last 400 days, or the browser session when "Keep me signed in" is unticked (`ua_session_only`).
 - `link_my_accounts()` runs after sign-in: it attaches the user to student and lecturer register entries whose email matches (or whose student number matches the email's local part on a verified domain), **only in active institutions and only for confirmed emails**, creates the role, and notifies the person. `leave_institution()` lets them leave; an admin cannot add them back.
-- `middleware.ts` refreshes the session on every request and redirects signed-out visitors to `/login`, except public paths (`/`, `/login`, `/signup`, `/forgot-password`, `/auth/callback`, `/privacy`, `/terms`, `/paia`, `/api/push/`, `/api/health`, `/api/roster`). `?i=<slug>` on auth pages sets the `ua_brand` cookie so the sign-in page wears that institution's branding.
+- `middleware.ts` refreshes the session on every request and redirects signed-out visitors to `/login`, except public paths (`/`, `/developers`, `/login`, `/signup`, `/forgot-password`, `/auth/callback`, `/privacy`, `/terms`, `/paia`, `/api/push/`, `/api/health`, `/api/roster`, `/api/v1/`). `?i=<slug>` on auth pages sets the `ua_brand` cookie so the sign-in page wears that institution's branding.
 - Optional Cloudflare Turnstile token is passed to Supabase Auth (`src/components/captcha.tsx`).
 
 ### 8.2 Sessions and the QR code
@@ -194,9 +198,36 @@ Plans with limits enforced by triggers (`enforce_plan_limits`). New institutions
 `retention_preview`, `apply_retention`, optional nightly `run_retention`; `my_personal_data()` behind "Download my data"; `data_requests` with a 30-day clock for the person's institution admins and the platform admin. Legal pages: `/privacy`, `/terms`, `/paia`, with company details from `src/lib/legal.ts`. Internal policies in `docs/legal/`.
 
 ### 8.12 Integrations and the sync engine
-- **Connections** (`/admin/connections`, migration 0024): `moodle` (reads courses and enrolled users through Moodle web services: `core_webservice_get_site_info`, `core_course_get_courses`, `core_enrol_get_enrolled_users`), `feed` (a CSV or JSON roster at an https link), `api` (the institution's system posts to `/api/roster` with a key `ua_<48 hex>` stored as a hash), and file upload. The roster shape is `{ modules: [{code,title}], people: [{role, number, full_name, email, module_codes}] }`.
-- The worker (`src/lib/integrations/runner.ts`) runs from the every-minute dispatch route: `integration_claim(secret)` hands over one due connection with its encrypted token; large Moodle sites are read a few courses per call with a saved position; failures retry hourly and notify admins.
-- **Engine** (migration 0025): rows are staged per dataset (`faculties`, `departments`, `programmes`, `academic_periods`, `venues`, `modules`, `lecturers`, `students`, `enrolments`, `assignments`), validated, matched by the source's external id first and then the natural key, previewed by running the real commit and rolling it back, and committed atomically. Statuses change only from explicit values; a complete roster from a connection may drop that connection's own enrolments, held back if more than half (and more than 20) would go. Admin path: `import_start`, `import_add`, `import_preview`, `import_commit`, `import_cancel`. Worker path: `sync_begin`, `sync_stage`, `sync_commit`, `sync_fail`. Connection status is set only by `integration_test_result` after a real test.
+- **Integration Centre** (`/admin/integrations`): figures from the institution's own runs (connected systems, last success, failures, records synchronised, imports waiting, rejected rows); a warning for each connection that failed or is overdue; module coverage (how many modules have students and a lecturer); the provider catalogue (`src/lib/integrations/providers.ts`), which lists a method as available only when it works today and says plainly what is not built. Setup is a wizard (`/admin/integrations/connect`: system → method → configure and test → data and schedule).
+- **Connection kinds** (`integrations.kind`, migrations 0024 and 0035), each with its own page at `/admin/integrations/connections/[id]` (status, recent runs, settings, how it works, what a sync may change):
+  - `moodle`: reads courses and enrolled users through Moodle web services (`core_webservice_get_site_info`, `core_course_get_courses`, `core_enrol_get_enrolled_users`); Moodle's error codes become instructions.
+  - `feed`: a CSV or JSON roster at an https link, optional bearer token.
+  - `rest`: UniAttend reads the university's own JSON API. Settings in `options.rest` (`RestConfig` in `src/lib/integrations/rest.ts`): where the records are (a dot path), sign-in (none, bearer token, API key in a named header, or OAuth client credentials with token address, client ID and scope), paging (none, page number, offset and limit, or a next link from the body or the `Link` header, with a page limit), and a field mapping (number and module codes required; full name or first and last, email, role field with a default, module title). Module codes may be a list, objects with a code, or text split on `, ; |`. A test reads the first page and reports how many people and modules it found. Page and offset paging resume across runs from a saved page; a next-link source must fit in one run.
+  - `api`: the institution's system pushes the roster with a key `ua_<48 hex>` stored as a SHA-256 hash. Version 1 (migration 0033): `POST /api/v1/roster` with an `Idempotency-Key` (a retry returns the first answer; the same key with another body is refused; kept 7 days), `GET /api/v1/status`, `GET /api/v1/runs/[id]`, one error format, documented at `/developers`. `POST /api/roster` remains for compatibility.
+  - The roster shape everywhere is `{ modules: [{code,title}], people: [{role, number, full_name, email, module_codes}] }`. A one-file roster can also be uploaded from the Import Centre ("Quick roster upload").
+- **Credentials** are encrypted in the app (AES-256-GCM, `INTEGRATION_ENCRYPTION_KEY`) before they reach `integration_secrets`, which no app role can read. Every outbound request (`src/lib/integrations/sources.ts`) goes through `assertPublicHttps`, follows at most three redirects on the same host (a token is never carried to another site), times out after 30 seconds and stops at 25 MB. Tokens travel in a header or POST body, never in a URL.
+- **Worker** (`src/lib/integrations/runner.ts`) runs from the every-minute dispatch route: `integration_claim(secret)` hands over one due `moodle`, `feed` or `rest` connection with its decrypted token and options; it applies the roster in chunks (`integration_apply`) within a time budget and saves its position, so large Moodle sites and paged APIs continue on the next call (`integration_done` with `later`). Failures retry hourly and notify the admins. Connection status changes only through `integration_test_result` after a real test.
+- **Engine** (migration 0025): rows are staged per dataset (`faculties`, `departments`, `programmes`, `academic_periods`, `venues`, `modules`, `lecturers`, `students`, `enrolments`, `assignments`, `timetable_events`), validated, matched by the source's external id first and then the natural key, previewed by running the real commit and rolling it back, and committed atomically. Statuses change only from explicit values; a complete roster from a connection may drop that connection's own enrolments, held back if more than half (and more than 20) would go. Admin path (Import Centre, column matchings can be saved): `import_start`, `import_add`, `import_preview`, `import_commit`, `import_cancel`. Worker path: `sync_begin`, `sync_stage`, `sync_commit`, `sync_fail`.
+- **Dated classes** (migration 0027): `timetable_events` from a timetable system such as CELCAT, imported with their own event ids so re-importing updates rather than duplicates; a cancelled status cancels the class.
+
+### 8.13 Attendance exceptions and review (migration 0029)
+- Weak evidence never becomes an absence on its own. At close, a student who tried and was refused gets "pending review" with what happened; only students who never tried are absent.
+- `review_queue()` lists everything waiting for a person (weak or missing location, a shared device, a typed code, an offline check-in, a refused attempt, a late arrival) with its evidence; `decide_review()` decides one or many (present, late, absent, excused; a reason is required for absent or excused), tells the student and audits it. `missing_registers()` lists timetabled classes that ended without a session. Screens: `/admin/review`, `/staff/review`.
+
+### 8.14 Reports (migration 0031)
+- `institution_report()` aggregates in the database for a date range and a faculty, department or module filter: totals, by faculty, department and module, a weekly trend, students at risk, missing registers and open disputes. Only closed classes count; rate = (present + late) / (present + late + absent); unresolved records are reported separately, never as absences.
+- Downloads: Excel (`src/lib/xlsx.ts`, title block and frozen header), CSV, and a printed PDF on the institution's letterhead (`src/components/print-document.tsx`, `report-print.tsx`). Every download is audited (`log_export`, kinds `module_report`, `institution_report`, `admin_data`, `rejected_rows`, `personal_data`, `institution_export`).
+
+### 8.15 Onboarding and exit (migration 0032)
+- Twelve steps from registration to go-live (`/admin/onboarding`). Steps the data can prove (structure, people, timetable, pilot) are computed from the institution's records; the rest are signed off by a named person and audited. Go-live is refused until every earlier step is done.
+- Exit (`/admin/exit`): `request_exit()`, `revoke_integration_credentials()` (deletes every token and key and pauses every connection at once), a full export of all tables as CSV in a ZIP (`/admin/data/export-all`), and `close_institution()`, which archives without deleting.
+
+### 8.16 Support access (migration 0034)
+- UniAttend's own staff see a university's records only during a grant: `grant_support_access()` (1 to 168 hours, with a reason) and `revoke_support_access()`, both audited; actions taken under a grant are logged with the staff member as the actor. Running the service (approvals, plans, billing, onboarding, closing an institution that asked to leave, data-subject requests) needs no grant.
+
+### 8.17 Dashboards and layout
+- Students and lecturers get a minimal grayscale home (`src/components/minimal.tsx`, `src/app/student/dashboard-view.tsx`, `src/app/lecturer/page.tsx`); default palette `#1f1f1f` on `#f6f6f7` with white surfaces. Student home cards, in order: live class, quick actions, today, modules, summary, recent.
+- "Scroll or Buttons" (`src/lib/layout-mode.ts`, `src/components/layout-mode.tsx`): each person chooses, per device (cookie `ua_layout`), whether a long page scrolls or shows one part at a time behind a row of buttons with Previous and Next. Used on the student home and the website.
 
 ## 9. User interface
 
@@ -207,19 +238,22 @@ Plans with limits enforced by triggers (`enforce_plan_limits`). New institutions
 
 ## 10. Routes at a glance
 
-- Public: `/`, `/login`, `/signup`, `/forgot-password`, `/reset-password`, `/privacy`, `/terms`, `/paia`.
+- Public: `/`, `/login`, `/signup`, `/forgot-password`, `/reset-password`, `/privacy`, `/terms`, `/paia`, `/developers` (institution API documentation).
 - Any signed-in user: `/dashboard` (redirects by role), `/onboarding`, `/notifications`, `/settings` (app lock, institutions, my data).
 - Student: `/student`, `/student/check-in`, `/student/class/[id]`, `/student/timetable` (+ `calendar.ics`), `/student/map`, `/student/navigate`, `/student/history`.
-- Lecturer: `/lecturer`, `/lecturer/modules/[id]` (+ `export`), `/lecturer/sessions/[id]` (+ `print`, `scan`), `/lecturer/timetable` (+ `calendar.ics`), `/lecturer/disputes`, `/lecturer/early-warning`.
-- Admin: `/admin`, `/admin/data` (+ `export`), `/admin/structure`, `/admin/modules`, `/admin/timetable`, `/admin/people`, `/admin/connections`, `/admin/early-warning`, `/admin/design`, `/admin/settings`, `/admin/requests`, `/admin/audit`.
+- Lecturer: `/lecturer`, `/lecturer/modules/[id]` (+ `export`), `/lecturer/sessions/[id]` (+ `print`, `scan`), `/lecturer/timetable` (+ `calendar.ics`), `/lecturer/disputes`, `/lecturer/early-warning`, `/lecturer/reports`.
+- Staff roles: `/staff`, `/staff/review`, `/staff/reports`, `/staff/audit`.
+- Reports (any role allowed to see them): `/reports/module/[id]`, `/reports/print`, `/reports/export`.
+- Admin: `/admin`, `/admin/data` (+ `export`, `export-all`), `/admin/structure`, `/admin/modules`, `/admin/timetable`, `/admin/people`, `/admin/review`, `/admin/reports`, `/admin/early-warning`, `/admin/design`, `/admin/settings`, `/admin/requests`, `/admin/audit`, `/admin/onboarding`, `/admin/exit`.
+- Integrations (admins and integration admins): `/admin/integrations`, `/admin/integrations/connect`, `/admin/integrations/connections/[id]`, `/admin/integrations/import` (+ `[run]`, `[run]/errors`), `/admin/integrations/activity` (+ `[run]`). `/admin/connections` only redirects to `/admin/integrations`.
 - Platform: `/super`, `/super/institutions/[id]`, `/super/directory` (+ `[id]`), `/super/plans`, `/super/requests`.
-- API: `/api/push/dispatch` (secret), `/api/roster` (API key), `/api/route` (walking directions), `/api/health`, `/auth/callback`.
+- API: `/api/push/dispatch` (secret), `/api/v1/roster`, `/api/v1/status`, `/api/v1/runs/[id]` (API key), `/api/roster` (legacy, API key), `/api/route` (walking directions), `/api/health`, `/auth/callback`, `/settings/my-data`.
 
 ## 11. Tests
 
 - `tests/db/*.test.ts` build a database from the real migrations (`tests/db/harness.ts` provides `db.as(user, sql, params)` running as `authenticated`, or `anon` when the user is null; `db.admin`; `db.asService`; `db.newUser`). Fixtures: two institutions, A and B, each with an admin, a lecturer, three students and module `CSC101`. Suites cover roles, tenant isolation, the attendance engine, late arrivals, disputes, plans, timetables, push, the register, check-in controls, announcements, design, offline check-ins, membership consent, billing, retention and data requests, roster sync and the sync engine.
-- `tests/unit/*.test.ts` cover pure logic: CSV, timetable parsing, geometry, theme, roster mapping, encryption.
-- 210 tests at the time of writing (122 database, 88 unit).
+- `tests/unit/*.test.ts` cover pure logic: CSV, timetable parsing, geometry, theme, roster mapping, encryption, datasets and providers, the REST connector and Moodle error handling (against a simulated server: `fetch` replaced, the DNS check skipped), Excel output, layout mode, schema version.
+- 299 tests at the time of writing (160 database, 139 unit).
 
 ## 12. Conventions
 
@@ -231,15 +265,15 @@ Plans with limits enforced by triggers (`enforce_plan_limits`). New institutions
 
 ## 13. State at the time of writing
 
-**Live database (checked 15 November 2026):** all 34 migrations, 0001–0034, are applied; from 0028 on, `uniattend.schema_versions` lists them. They were run by hand, so Supabase's migration history does not list them; see `docs/commercial-readiness/01-technical-audit.md` §2 for how this was checked against the live schema.
+**Live database (checked 18 November 2026):** all 35 migrations, 0001–0035, are applied; from 0028 on, `uniattend.schema_versions` lists them. They were run by hand, so Supabase's migration history does not list them; see `docs/commercial-readiness/01-technical-audit.md` §2 for how this was checked against the live schema.
 
-**Live data:** 3 institutions (UNIVEN, UL, TUT), all on Starter trials ending 8–9 December 2026; 142 students, 25 lecturers, 724 modules, 4,366 dated classes, 0 integrations configured.
+**Live data (18 November 2026):** 3 institutions (UNIVEN, UL, TUT), all on Starter trials ending 8–9 December 2026; 141 students, 25 lecturers, 724 modules, 5,253 dated classes, 14 class sessions, 258 attendance records, 2 connections configured.
 
 **Current audit, gap register and security review:** `docs/commercial-readiness/`.
 
 **Not done or not verified:**
-- Integration brief: the Import Centre, the Integration Centre and dated timetable classes are built. Still missing: a configurable REST connector with OAuth, and the platform integrations view. No connector has been tested against a real Moodle, ITS, CELCAT, Banner, PeopleSoft or Blackboard.
-- Staff roles (migration 0030): faculty admin and department admin (scoped to one faculty or department), attendance officer, integration admin, auditor (read-only). Granted on the People page; staff use `/staff`, integration admins use `/admin/integrations`. A person who is also a lecturer lands on `/staff` first and opens `/lecturer` directly (no role switcher yet).
+- Integrations: the Import Centre, the Integration Centre, dated timetable classes, API v1 and the configurable REST connector (OAuth, paging, field mapping) are built. Still missing: the platform-wide integrations view, and vendor-specific connectors for ITS, CELCAT, Banner, PeopleSoft and Blackboard. No connector has been run against a real Moodle, student system or university API.
+- Staff roles: a person who is also a lecturer lands on `/staff` first and opens `/lecturer` directly (no role switcher yet).
 - Hosting is on Supabase's free plan, shared with other apps; no backups; custom SMTP not configured; CAPTCHA and error alerts not switched on.
 - Load tests in `loadtest/` have never been run. Fingerprint unlock and offline check-ins are untested on real phones. Android has only a debug build; no Firebase push for the closed app.
 - Legal: head of company and Information Officer not chosen; attorney review outstanding (`docs/legal/README.md`).
@@ -248,7 +282,7 @@ Plans with limits enforced by triggers (`enforce_plan_limits`). New institutions
 
 ## 14. Other documents in the repository
 
-`README.md` (setup), `docs/01-AUDIT.md`, `docs/02-ROADMAP.md`, `docs/03-PLATFORM-AUDIT-AND-ROADMAP.md`, `docs/04-MULTI-UNIVERSITY-AUDIT.md`, `docs/capacity/10k-readiness-report.md`, `docs/android-app.md`, `docs/notifications.md`, `docs/guide-admin.md`, `docs/guide-lecturer.md`, `docs/guide-student.md`, `docs/legal/*`.
+`README.md` (setup), `docs/01-AUDIT.md`, `docs/02-ROADMAP.md`, `docs/03-PLATFORM-AUDIT-AND-ROADMAP.md`, `docs/04-MULTI-UNIVERSITY-AUDIT.md`, `docs/capacity/10k-readiness-report.md`, `docs/android-app.md`, `docs/notifications.md`, `docs/guide-admin.md`, `docs/guide-lecturer.md`, `docs/guide-student.md`, `docs/legal/*`, `docs/commercial-readiness/01–11` (audit, gap register, security review, integration architecture, governance, readiness, load and mobile test plans, pilot, commercial, runbook), `docs/guides/administrator-guide.html` and its PDF.
 
 ## 15. Rebuild order (only if the repository is lost)
 
@@ -264,8 +298,9 @@ Plans with limits enforced by triggers (`enforce_plan_limits`). New institutions
 10. Notifications and push; announcements and class messages.
 11. Design page, branding, app lock, offline queue.
 12. Early warning, billing notices, data governance and legal pages.
-13. Connections, the sync engine and (remaining) the Integration Centre.
-14. Android shell with Capacitor.
+13. The sync engine, the Import Centre, the Integration Centre with its connection kinds (Moodle, link, REST, API v1), dated classes.
+14. Review queue, staff roles, reports, onboarding and exit, support access.
+15. Android shell with Capacitor.
 
 After each step: type-check, lint, tests, build.
 
@@ -779,7 +814,7 @@ After each step: type-check, lint, tests, build.
 > log (institution entries), role assignments and profiles (except
 > administrators' own contact details), and integration errors.
 
-### `20261117000035_rest_connector.sql` (35 lines)
+### `20261117000035_rest_connector.sql` (36 lines)
 
 > UniAttend 0035 — a connection that reads the university's own JSON API.
 >
@@ -1820,7 +1855,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/notifications/page.tsx` (141 lines)
 - `src/app/onboarding/actions.ts` (31 lines)
 - `src/app/onboarding/page.tsx` (41 lines)
-- `src/app/page.tsx` (57 lines)
+- `src/app/page.tsx` (213 lines) — The public front page. Modelled on how attendance products present themselves (Edusign,
 - `src/app/paia/page.tsx` (100 lines) — Manual required of every private body by section 51 of the Promotion of Access to
 - `src/app/privacy/page.tsx` (147 lines) — Written to cover what POPIA section 18 says people must be told. Each
 - `src/app/push-actions.ts` (96 lines) — Store this device's push subscription for the signed-in person (moves it from any previous account).
@@ -1841,14 +1876,14 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/app/student/check-in/page.tsx` (12 lines)
 - `src/app/student/class/[id]/live-class.tsx` (143 lines) — Always South African time, so the server and the phone show the same clock.
 - `src/app/student/class/[id]/page.tsx` (45 lines) — The student's live view of one class, from check-in until the class ends or the lecturer closes it.
-- `src/app/student/dashboard-view.tsx` (203 lines) — The student dashboard's display, separate from its data loading (page.tsx).
+- `src/app/student/dashboard-view.tsx` (222 lines) — The student dashboard's display, separate from its data loading (page.tsx).
 - `src/app/student/history/page.tsx` (145 lines)
 - `src/app/student/layout.tsx` (18 lines)
 - `src/app/student/leave-button.tsx` (22 lines) — "I'm leaving": records the student's check-out time.
 - `src/app/student/map/page.tsx` (71 lines) — Lecturer names need database update 0008; without it, load classes without them.
 - `src/app/student/navigate/navigator.tsx` (208 lines) — Metres left along the route from segment `seg` (starting at point p) to the end.
 - `src/app/student/navigate/page.tsx` (32 lines)
-- `src/app/student/page.tsx` (82 lines) — Monday (SAST) of the week containing this date, as YYYY-MM-DD.
+- `src/app/student/page.tsx` (84 lines) — Monday (SAST) of the week containing this date, as YYYY-MM-DD.
 - `src/app/student/timetable/calendar.ics/route.ts` (12 lines) — The student's timetable as a calendar file (Google, Outlook, Apple Calendar).
 - `src/app/student/timetable/page.tsx` (69 lines)
 - `src/app/student/trend-card.tsx` (80 lines) — Weekly attendance as a line, per module or overall; tap a point for its numbers.
@@ -1880,6 +1915,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/components/form.tsx` (32 lines) — A form bound to a server action that reports errors and success inline.
 - `src/components/icons.tsx` (51 lines) — A small stroke icon set (24px grid, lucide-style), inline so there is no icon
 - `src/components/late.tsx` (44 lines) — Late-arrival pieces shared by the student check-in result and the lecturer register.
+- `src/components/layout-mode.tsx` (162 lines) — Scroll or Buttons (see lib/layout-mode.ts): the choice, the switch, and a page made of parts
 - `src/components/map/campus-map.tsx` (253 lines) — Campus map for students: every venue, what is on in it today (their own
 - `src/components/map/campuses-editor.tsx` (162 lines) — Edit a list of campuses on a map. The chosen campus is placed by clicking
 - `src/components/map/use-leaflet.ts` (65 lines) — Creates a Leaflet map in `ref` once the library has loaded (it touches
@@ -1934,6 +1970,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `src/lib/integrations/runner.ts` (106 lines) — The sync worker. The database decides what is due and hands over one connection
 - `src/lib/integrations/secrets.ts` (60 lines) — Credentials for an institution's systems (Moodle tokens, roster-link tokens, OAuth
 - `src/lib/integrations/sources.ts` (150 lines) — Talking to an institution's own systems. Every request: https only, public
+- `src/lib/layout-mode.ts` (20 lines) — How a long page is moved through, chosen by the person on their own device:
 - `src/lib/legal.ts` (40 lines) — The company details every legal page uses: the privacy notice, terms, PAIA manual
 - `src/lib/nav-config.ts` (70 lines) — Every menu in the app, with the defaults an institution starts from. The Design
 - `src/lib/offline-queue.ts` (59 lines) — Work done without signal, kept on the phone until it can be sent.
@@ -2001,6 +2038,7 @@ Dropped by later migrations (do not recreate): live_locations, location_consents
 - `tests/unit/geo.test.ts` (41 lines)
 - `tests/unit/ics.test.ts` (33 lines) — 2026-11-11 is a Wednesday (ISO 3)
 - `tests/unit/integration-secrets.test.ts` (58 lines) — A new random IV each time: the same secret never looks the same twice.
+- `tests/unit/layout-mode.test.ts` (76 lines) — The component file uses JSX compiled for a global React (as the app's other client components).
 - `tests/unit/nav-config.test.ts` (35 lines)
 - `tests/unit/providers.test.ts` (48 lines) — Vendors without a built connector get files, a link or the push API, plus a plain "not yet".
 - `tests/unit/rest-connector.test.ts` (235 lines) — The network side runs against a simulated server: fetch is replaced, and the
