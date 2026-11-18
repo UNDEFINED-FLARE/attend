@@ -8250,7 +8250,7 @@ drop function uniattend._rewrite(text, text, text, int);
 
 insert into uniattend.schema_versions (version, name) values ('20261117000035', 'rest_connector')
 on conflict (version) do nothing;
- 
+
 
 -- ===================================================== 20261118000036_identity_providers.sql
 -- UniAttend 0036 — signing in with the university's own account: where it is set up,
@@ -8581,6 +8581,26 @@ end $$;
 drop function uniattend._rewrite(text, text, text, int);
 
 insert into uniattend.schema_versions (version, name) values ('20261118000037', 'bluetooth_evidence')
+on conflict (version) do nothing;
+
+
+-- ===================================================== 20261118000038_readiness_indexes.sql
+-- UniAttend 0038 — performance indexes from docs/capacity/10k-readiness-report.md (P0 item 2).
+-- (Originally drafted as 0035 on the readiness-indexes branch; renumbered to land after the
+-- rest-connector, identity-providers and Bluetooth migrations already on main.)
+--
+-- Each matches a query the app runs often. CREATE INDEX IF NOT EXISTS, so re-running is a
+-- no-op and nothing breaks if it hasn't run yet (queries just aren't sped up until it does).
+-- On a very large production table you can build these with CREATE INDEX CONCURRENTLY outside
+-- a transaction instead; the IF NOT EXISTS keeps this file safe to run either way.
+
+create index if not exists verification_events_session on uniattend.attendance_verification_events(session_id);
+create index if not exists class_sessions_lecturer on uniattend.class_sessions(lecturer_id) where lecturer_id is not null;
+create index if not exists class_sessions_venue on uniattend.class_sessions(venue_id) where venue_id is not null;
+-- The student home and /student/history ask for the student's own records and disputes.
+create index if not exists attendance_disputes_student on uniattend.attendance_disputes(student_id, created_at desc);
+
+insert into uniattend.schema_versions (version, name) values ('20261118000038', 'readiness_indexes')
 on conflict (version) do nothing;
 
 commit;
