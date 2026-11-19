@@ -118,6 +118,7 @@ export default async function Home() {
             UniAttend
           </Link>
           <nav className="flex items-center gap-1 sm:gap-2">
+            <Link href="/app" className="rounded-lg px-3 py-2 text-sm font-medium hover:bg-bg">Get the app</Link>
             <Link href="/login/admin" className="hidden rounded-lg px-3 py-2 text-sm font-medium hover:bg-bg sm:inline-block">Administrators</Link>
             <LinkButton href="/login" className="h-10">Sign in with your institution</LinkButton>
           </nav>
@@ -150,6 +151,7 @@ export default async function Home() {
             <Link href="/login" className="block text-muted hover:text-ink">Students and lecturers</Link>
             <Link href="/login/admin" className="block text-muted hover:text-ink">Institution administrators</Link>
             <Link href="/login/platform" className="block text-muted hover:text-ink">Platform administration</Link>
+            <Link href="/app" className="block text-muted hover:text-ink">Get the app</Link>
           </nav>
           <nav aria-label="For universities" className="space-y-2">
             <p className="font-semibold">For universities</p>

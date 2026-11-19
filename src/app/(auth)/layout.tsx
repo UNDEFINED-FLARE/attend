@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ForgetOffline } from "@/components/forget-offline";
 import { Icon } from "@/components/icons";
 import { loadBranding } from "@/lib/branding";
 import { themeStyle } from "@/lib/theme";
@@ -15,6 +16,7 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
     : <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-white/15"><Icon name="check" size={22} strokeWidth={2.6} /></span>;
   return (
     <div style={themeStyle(theme)} className="grid min-h-dvh font-sans lg:grid-cols-2">
+      <ForgetOffline />
       <aside className="hidden flex-col justify-between bg-brand p-10 text-brand-ink lg:flex">
         <Link href="/" className="flex items-center gap-3">
           {mark}

@@ -2,7 +2,9 @@
 //   node scripts/mobile.mjs sync                 copy config into the Android project
 //   node scripts/mobile.mjs build                debug APK  -> android/app/build/outputs/apk/debug/
 //   node scripts/mobile.mjs build --release      signed AAB for Google Play (needs android/keystore.properties)
+//   node scripts/mobile.mjs build --release --apk  signed APK for the website download (same keystore)
 //   add --url http://10.0.2.2:3001 to point a test build at a dev server (10.0.2.2 = this PC from the emulator)
+//   To put an APK on the website's "Get the app" page, use scripts/publish-apk.mjs (npm run android:publish).
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 
@@ -10,6 +12,7 @@ const args = process.argv.slice(2);
 const cmd = args[0] ?? "build";
 const urlArg = args.indexOf("--url") >= 0 ? args[args.indexOf("--url") + 1] : undefined;
 const release = args.includes("--release");
+const apk = args.includes("--apk");
 const env = { ...process.env, ...(urlArg ? { UNIATTEND_URL: urlArg } : {}), ...(release ? { NODE_ENV: "production" } : {}) };
 
 const url = urlArg ?? JSON.parse(readFileSync("mobile/app.json", "utf8")).url;
@@ -34,7 +37,7 @@ if (release && !existsSync("android/keystore.properties")) {
 }
 // An explicit path: Windows may not run programs from the current folder by name.
 const gradlew = process.platform === "win32" ? ".\\gradlew.bat" : "./gradlew";
-run(gradlew, [release ? "bundleRelease" : "assembleDebug"], { cwd: "android" });
+run(gradlew, [release ? (apk ? "assembleRelease" : "bundleRelease") : "assembleDebug"], { cwd: "android" });
 console.log(release
-  ? "Done: android/app/build/outputs/bundle/release/app-release.aab"
+  ? (apk ? "Done: android/app/build/outputs/apk/release/app-release.apk" : "Done: android/app/build/outputs/bundle/release/app-release.aab")
   : "Done: android/app/build/outputs/apk/debug/app-debug.apk");

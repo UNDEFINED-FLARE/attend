@@ -1,7 +1,9 @@
 // App lock: after signing in once with a password, the app can be reopened with
 // the device's own fingerprint, face or screen lock instead.
 //
-// * In the UniAttend Android app: the phone's BiometricPrompt (Capacitor plugin).
+// * In the UniAttend Android app: the phone's BiometricPrompt (Capacitor plugin), which
+//   accepts a fingerprint or face, or the phone's own screen lock (PIN, pattern or
+//   password) — so it also works on a phone with no biometrics enrolled.
 // * In a browser: the device's built-in authenticator (Windows Hello, Touch ID,
 //   Android fingerprint) through a passkey created only for this lock.
 //
@@ -51,17 +53,24 @@ export function shouldLock(userId: string): boolean {
 
 export type Support = { method: LockMethod; label: string } | { method: null; reason: string };
 
+/** What the phone will ask for, in words (BiometryType values from the plugin). */
+export function nativeLabel(type: number, hasBiometric: boolean): string {
+  if (!hasBiometric) return "screen lock (PIN, pattern or password)";
+  if (type === 3 || type === 1) return "fingerprint or screen lock";           // FINGERPRINT, TOUCH_ID
+  if (type === 4 || type === 2) return "face or screen lock";                  // FACE_AUTHENTICATION, FACE_ID
+  return "fingerprint, face or screen lock";
+}
+
 /** What this device can use. */
 export async function lockSupport(): Promise<Support> {
   if (inNativeApp()) {
     if (!cap()?.isPluginAvailable?.("NativeBiometric")) return { method: null, reason: "Update the UniAttend app to use fingerprint or face unlock." };
     try {
-      const { NativeBiometric, BiometryType } = await import("@capgo/capacitor-native-biometric");
-      const r = await NativeBiometric.isAvailable();
-      if (!r.isAvailable) return { method: null, reason: r.deviceIsSecure ? "Add a fingerprint or face in your phone's settings first." : "Set up a screen lock and a fingerprint or face on your phone first." };
-      const label = r.biometryType === BiometryType.FINGERPRINT || r.biometryType === BiometryType.TOUCH_ID ? "fingerprint"
-        : r.biometryType === BiometryType.FACE_AUTHENTICATION || r.biometryType === BiometryType.FACE_ID ? "face" : "fingerprint or face";
-      return { method: "native", label };
+      const { NativeBiometric, BiometryType, AuthenticationStrength } = await import("@capgo/capacitor-native-biometric");
+      // useFallback: a screen lock alone (PIN, pattern, password) is enough.
+      const r = await NativeBiometric.isAvailable({ useFallback: true });
+      if (!r.isAvailable) return { method: null, reason: "Set up a screen lock (PIN, pattern or password) on your phone first, in its Security settings." };
+      return { method: "native", label: nativeLabel(r.biometryType, r.authenticationStrength !== AuthenticationStrength.NONE && r.biometryType !== BiometryType.NONE && r.biometryType !== BiometryType.DEVICE_CREDENTIAL) };
     } catch {
       return { method: null, reason: "Fingerprint unlock isn't available on this phone." };
     }
@@ -109,16 +118,22 @@ export class LockError extends Error {
 export async function verifyOwner(c: Pick<LockConfig, "method" | "credId">, reason = "Unlock UniAttend"): Promise<void> {
   if (c.method === "native") {
     if (!inNativeApp() || !cap()?.isPluginAvailable?.("NativeBiometric")) throw new LockError("Fingerprint unlock isn't available here.", "unavailable");
-    const { NativeBiometric } = await import("@capgo/capacitor-native-biometric");
+    const { NativeBiometric, BiometryType } = await import("@capgo/capacitor-native-biometric");
     try {
-      await NativeBiometric.verifyIdentity({ reason, title: reason, subtitle: "Use your fingerprint or face", negativeButtonText: "Cancel", maxAttempts: 5 });
+      // Any enrolled biometric, or the phone's PIN, pattern or password. Android checks it
+      // all on the phone (BiometricPrompt); the app only learns "verified" or not. With the
+      // screen lock allowed Android shows no Cancel button: back or a swipe cancels.
+      await NativeBiometric.verifyIdentity({
+        reason, title: reason, subtitle: "Use your fingerprint, face or screen lock", maxAttempts: 5,
+        allowedBiometryTypes: [BiometryType.FINGERPRINT, BiometryType.FACE_AUTHENTICATION, BiometryType.IRIS_AUTHENTICATION, BiometryType.DEVICE_CREDENTIAL],
+      });
       return;
     } catch (e) {
       // The plugin's BiometricAuthError codes.
       const code = Number((e as { code?: string | number }).code ?? 0);
       if ([11, 15, 16, 17].includes(code)) throw new LockError("Not verified.", "cancelled");      // app/system/user cancel, fallback
-      if (code === 2 || code === 4) throw new LockError("Your phone has paused fingerprint and face checks after too many tries. Use your password, or try again later.", "unavailable");
-      if (code === 1 || code === 3 || code === 14) throw new LockError("Fingerprint or face isn't set up on this phone any more. Use your password.", "unavailable");
+      if (code === 2 || code === 4) throw new LockError("Your phone has paused unlock checks after too many tries. Use your password, or try again later.", "unavailable");
+      if (code === 1 || code === 3 || code === 14) throw new LockError("This phone has no screen lock, fingerprint or face set up any more. Use your password.", "unavailable");
       throw new LockError("Not verified.", "failed");
     }
   }

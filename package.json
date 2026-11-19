@@ -14,6 +14,7 @@
     "android:sync": "node scripts/mobile.mjs sync",
     "android:build": "node scripts/mobile.mjs build",
     "android:release": "node scripts/mobile.mjs build --release",
+    "android:publish": "node scripts/publish-apk.mjs",
     "android:assets": "node scripts/mobile-assets.mjs",
     "android:open": "cap open android"
   },

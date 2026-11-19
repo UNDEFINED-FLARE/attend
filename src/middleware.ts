@@ -4,7 +4,7 @@ import { BRAND_COOKIE, BRAND_COOKIE_OPTIONS } from "@/lib/brand-cookie";
 import { authCookieOptions, SESSION_ONLY_COOKIE } from "@/lib/supabase/cookies";
 import { getUserWithRetry } from "@/lib/supabase/resilient";
 
-const PUBLIC = ["/", "/developers", "/login", "/login/admin", "/login/platform", "/signup", "/forgot-password", "/auth/callback", "/privacy", "/terms", "/paia"];
+const PUBLIC = ["/", "/developers", "/login", "/login/admin", "/login/platform", "/signup", "/forgot-password", "/auth/callback", "/privacy", "/terms", "/paia", "/app", "/offline"];
 // Machine endpoints that check their own secret.
 const PUBLIC_PREFIX = ["/api/push/", "/api/health", "/api/roster", "/api/v1/"];
 
@@ -39,6 +39,17 @@ export async function middleware(request: NextRequest) {
     url.searchParams.set("next", path);
     return NextResponse.redirect(url);
   }
+  // Signed in and opening the front page (the Android app and the installed web app start
+  // there): straight to their own home, not the public page with its "Sign in" button,
+  // which looked like being signed out. /?home=1 still shows the public page.
+  if (user && path === "/" && !request.nextUrl.searchParams.has("home")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/dashboard";
+    url.search = "";
+    const to = NextResponse.redirect(url);
+    response.cookies.getAll().forEach((c) => to.cookies.set(c));   // keep the renewed session
+    return to;
+  }
   // /login?i=<institution> (and the other sign-in pages): wear that institution's
   // branding now and on later visits from this device.
   const brand = request.nextUrl.searchParams.get("i")?.toLowerCase();
@@ -55,5 +66,5 @@ export async function middleware(request: NextRequest) {
 const AUTH_PAGES = ["/login", "/login/admin", "/login/platform", "/signup", "/forgot-password", "/reset-password"];
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg|manifest.webmanifest|sw.js|icons/|.*\\.(?:png|jpg|svg)$).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg|manifest.webmanifest|sw.js|icons/|downloads/|.*\\.(?:png|jpg|svg)$).*)"],
 };

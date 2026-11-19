@@ -19,7 +19,16 @@ export default function config(phase: string): NextConfig {
     // pdf.js loads its worker and data files at runtime; bundling breaks that.
     serverExternalPackages: ["pdfjs-dist"],
     async headers() {
-      return [{ source: "/(.*)", headers: securityHeaders }];
+      return [
+        { source: "/(.*)", headers: securityHeaders },
+        // The Android app on /app: served as a download, never sniffed or shown inline.
+        { source: "/downloads/:file*.apk", headers: [
+          { key: "Content-Type", value: "application/vnd.android.package-archive" },
+          { key: "Content-Disposition", value: "attachment" },
+        ] },
+        // The manifest describing it: always the newest.
+        { source: "/downloads/android.json", headers: [{ key: "Cache-Control", value: "no-cache" }] },
+      ];
     },
     experimental: { serverActions: { bodySizeLimit: "6mb" } },
   };

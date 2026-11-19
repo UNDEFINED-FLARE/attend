@@ -56,8 +56,9 @@ export function AppLockSettings({ userId, name }: { userId: string; name: string
       <div className="flex items-start gap-3">
         <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-accent/10 text-accent"><Icon name="fingerprint" size={26} /></span>
         <div className="min-w-0">
-          <h2 className="font-semibold">Fingerprint or face unlock</h2>
-          <p className="text-sm text-muted">Stay signed in, and open UniAttend with your fingerprint, face or device PIN instead of your password.</p>
+          <h2 className="font-semibold">App lock</h2>
+          <p className="text-sm text-muted">Stay signed in, and open UniAttend with your fingerprint, face or your phone&apos;s PIN, pattern or passkey
+            instead of your password. It works without signal too.</p>
         </div>
       </div>
 

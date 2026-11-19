@@ -78,6 +78,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
         <p className="flex flex-wrap gap-x-4 gap-y-1">
           <Link href="/login/admin" className="hover:text-ink hover:underline">Institution administrator sign in</Link>
           <Link href="/login/platform" className="hover:text-ink hover:underline">Platform administration</Link>
+          <Link href="/app" className="hover:text-ink hover:underline">Get the app</Link>
         </p>
       </div>
     </div>
