@@ -1,21 +1,19 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# R8 rules for the UniAttend release build (minifyEnabled in app/build.gradle).
+# Capacitor and its plugins ship their own keep rules (consumer rules); these are the
+# extra safety net for what is only reached by reflection or from JavaScript.
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Capacitor reads @CapacitorPlugin / @PluginMethod at runtime, so annotations must survive.
+-keepattributes *Annotation*, Signature, InnerClasses, EnclosingMethod
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# The WebView <-> native bridge: methods JavaScript calls by name.
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Every Capacitor plugin class and its callable methods (local notifications, biometric unlock).
+-keep public class * extends com.getcapacitor.Plugin { *; }
+-keep class com.getcapacitor.** { *; }
+
+# Readable stack traces in Play Console crash reports (upload the mapping file with each release).
+-keepattributes SourceFile, LineNumberTable
+-renamesourcefileattribute SourceFile

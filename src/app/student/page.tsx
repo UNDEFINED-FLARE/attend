@@ -2,10 +2,12 @@ import { cookies } from "next/headers";
 import { hhmm, todayWeekday } from "@/components/week-grid";
 import { requireRole } from "@/lib/auth";
 import { LAYOUT_COOKIE, parseLayoutMode } from "@/lib/layout-mode";
+import { LOOK_COOKIE, parseLook } from "@/lib/look";
 import { loadTheme } from "@/lib/shell-data";
 import { greeting, sastDay } from "@/lib/stats";
 import { myTimetable, nowHHMM } from "@/lib/student-data";
-import { badgeOf, colorFor, DashboardView, type DashRec, type DashRow } from "./dashboard-view";
+import { badgeOf, colorFor, DashboardView, type DashboardData, type DashRec, type DashRow } from "./dashboard-view";
+import { GameView } from "./game-view";
 import type { TrendSeries } from "./trend-card";
 
 export const metadata = { title: "Home" };
@@ -79,6 +81,9 @@ export default async function StudentHome() {
     const kinds = new Set(slots.filter((s) => s.weekday === k + 1).map((s) => (/test|exam/i.test(s.kind) ? "test" : /prac|tut|lab/i.test(s.kind) ? "prac" : "lecture")));
     return { wd: k + 1, date: d.getUTCDate(), letter: "MTWTFSS"[k], kinds };
   });
-  return <DashboardView d={{ theme, institution: current.institution_name ?? "", hello, first, studentNumber: me?.student_number ?? null, rows, recs, live, inClass, series, todaySlots, nextSlot, now, day,
-    overall, att, tot, pending, atRisk, week, layout: parseLayoutMode((await cookies()).get(LAYOUT_COOKIE)?.value) }} />;
+  const jar = await cookies();
+  const d: DashboardData = { theme, institution: current.institution_name ?? "", hello, first, studentNumber: me?.student_number ?? null, rows, recs, live, inClass, series, todaySlots, nextSlot, now, day,
+    overall, att, tot, pending, atRisk, week, layout: parseLayoutMode(jar.get(LAYOUT_COOKIE)?.value) };
+  // Game look (the default; account menu > Simple look switches back): the same data, laid out like a game's main screen.
+  return parseLook(jar.get(LOOK_COOKIE)?.value) === "game" ? <GameView d={d} /> : <DashboardView d={d} />;
 }

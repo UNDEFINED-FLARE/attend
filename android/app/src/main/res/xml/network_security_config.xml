@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Release builds: HTTPS only, and only certificates from Android's own trusted authorities.
+     Certificates a user (or malware) installs on the phone are not trusted, so traffic to
+     UniAttend can't be read by a proxy on the device. Debug builds use the copy in
+     src/debug/res/xml, which also allows plain http to a local test server. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

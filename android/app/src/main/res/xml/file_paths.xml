@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Folders the app may hand to the camera app for a photo (Capacitor's file chooser saves to
+     the app's own Pictures folder) and its cache. Nothing else on the phone's storage can be
+     shared through the app. The provider is not exported. -->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <external-path name="my_images" path="." />
+    <external-files-path name="my_images" path="Pictures/" />
     <cache-path name="my_cache_images" path="." />
 </paths>

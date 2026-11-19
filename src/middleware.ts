@@ -1,10 +1,11 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { BRAND_COOKIE, BRAND_COOKIE_OPTIONS } from "@/lib/brand-cookie";
+import { buildCsp, cspHeaderName, cspMode, newNonce } from "@/lib/csp";
 import { authCookieOptions, SESSION_ONLY_COOKIE } from "@/lib/supabase/cookies";
 import { getUserWithRetry } from "@/lib/supabase/resilient";
 
-const PUBLIC = ["/", "/developers", "/login", "/login/admin", "/login/platform", "/signup", "/forgot-password", "/auth/callback", "/privacy", "/terms", "/paia", "/app", "/offline"];
+const PUBLIC = ["/", "/developers", "/login", "/login/admin", "/login/platform", "/signup", "/forgot-password", "/auth/callback", "/privacy", "/terms", "/paia", "/delete-account", "/app", "/offline"];
 // Machine endpoints that check their own secret.
 const PUBLIC_PREFIX = ["/api/push/", "/api/health", "/api/roster", "/api/v1/"];
 
@@ -12,6 +13,22 @@ const PUBLIC_PREFIX = ["/api/push/", "/api/health", "/api/roster", "/api/v1/"];
 // users to /login. This is navigation only; authorization is enforced by RLS
 // and by the role checks in each area's server layout.
 export async function middleware(request: NextRequest) {
+  // Content Security Policy with a fresh nonce (lib/csp.ts). The nonce rides on the request so
+  // Next.js tags its own scripts with it and app/layout.tsx can tag its inline script.
+  const mode = cspMode(process.env.CSP_MODE, process.env.NODE_ENV === "production");
+  let csp: string | null = null;
+  if (mode !== "off") {
+    const nonce = newNonce();
+    csp = buildCsp({ nonce, supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL, dev: process.env.NODE_ENV !== "production",
+      upgrade: request.nextUrl.protocol === "https:" });
+    request.headers.set("x-nonce", nonce);
+    request.headers.set("content-security-policy", csp);
+  }
+  const secure = (res: NextResponse) => {
+    if (csp) res.headers.set(cspHeaderName(mode), csp);
+    return res;
+  };
+
   let response = NextResponse.next({ request });
   // Refreshing the session here also renews the cookie, so regular users stay signed in.
   const sessionOnly = request.cookies.get(SESSION_ONLY_COOKIE)?.value === "1";
@@ -37,7 +54,7 @@ export async function middleware(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", path);
-    return NextResponse.redirect(url);
+    return secure(NextResponse.redirect(url));
   }
   // Signed in and opening the front page (the Android app and the installed web app start
   // there): straight to their own home, not the public page with its "Sign in" button,
@@ -48,7 +65,7 @@ export async function middleware(request: NextRequest) {
     url.search = "";
     const to = NextResponse.redirect(url);
     response.cookies.getAll().forEach((c) => to.cookies.set(c));   // keep the renewed session
-    return to;
+    return secure(to);
   }
   // /login?i=<institution> (and the other sign-in pages): wear that institution's
   // branding now and on later visits from this device.
@@ -58,9 +75,9 @@ export async function middleware(request: NextRequest) {
     const next = NextResponse.next({ request });
     response.cookies.getAll().forEach((c) => next.cookies.set(c));
     next.cookies.set(BRAND_COOKIE, brand, BRAND_COOKIE_OPTIONS);
-    return next;
+    return secure(next);
   }
-  return response;
+  return secure(response);
 }
 
 const AUTH_PAGES = ["/login", "/login/admin", "/login/platform", "/signup", "/forgot-password", "/reset-password"];

@@ -1,13 +1,14 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { signOut, switchInstitution } from "@/app/actions";
-import { AppProvider, AppTabBar } from "@/components/app-chrome";
+import { AppProvider, AppTabBar, GameTabBar } from "@/components/app-chrome";
 import { AppLock } from "@/components/app-lock";
 import { OfflineData } from "@/components/offline-data";
 import { OfflineSync } from "@/components/offline-sync";
 import { Icon } from "@/components/icons";
 import { SideNav, TabBar, type NavItem } from "@/components/nav";
 import type { RoleRow } from "@/lib/auth";
+import type { Look } from "@/lib/look";
 import { DEFAULT_THEME, themeStyle, type Theme } from "@/lib/theme";
 
 export type { NavItem };
@@ -30,7 +31,7 @@ function Logo({ name, theme, onDark }: { name: string; theme: Theme; onDark: boo
 
 const TONE = { info: "bg-info/10 text-info", ok: "bg-ok/10 text-ok", warn: "bg-warn/10 text-warn", bad: "bg-bad/10 text-bad" } as const;
 
-export function Shell({ nav, children, current, choices, area, user, unread = 0, theme = DEFAULT_THEME, app }: {
+export function Shell({ nav, children, current, choices, area, user, unread = 0, theme = DEFAULT_THEME, app, look = "game" }: {
   nav: NavItem[];
   children: ReactNode;
   current: RoleRow;
@@ -41,6 +42,8 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
   theme?: Theme;
   /** Phone-app layout (students): page titles carry the avatar, and a floating tab bar raises this item. */
   app?: { center: string };
+  /** Phone-app look chosen on this device (lib/look.ts); "game" swaps in the game tab bar. */
+  look?: Look;
 }) {
   const instName = current.institution_name ?? "Platform";
   const who = user.name || user.email || "";
@@ -61,7 +64,7 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
   return (
     <>
     {user.id && <div style={themeStyle(theme)} className="font-sans"><AppLock userId={user.id} name={who || "you"} institution={theme.header.title || instName} logo={theme.header.logoUrl || null} /><OfflineSync userId={user.id} /><OfflineData userId={user.id} role={current.role} /></div>}
-    <div data-lockable style={themeStyle(theme)} className="min-h-dvh font-sans">
+    <div data-lockable data-look={app ? look : undefined} style={themeStyle(theme)} className="min-h-dvh font-sans">
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 flex-col print:!hidden border-r border-line px-4 py-5 lg:flex"
         style={{ background: sideBg, color: sideInk, ["--muted" as string]: sideDark ? "color-mix(in srgb, currentColor 70%, transparent)" : undefined }}>
@@ -126,7 +129,7 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
         )}
 
         <main className={`mx-auto w-full max-w-7xl flex-1 px-4 lg:px-8 lg:pb-10 ${app ? "pt-[max(20px,env(safe-area-inset-top))] pb-36 lg:pt-6" : "pt-6 pb-28"}`}>
-          {app ? <AppProvider me={{ name: who || "Student", initials, unread, institution: instName }}>{children}</AppProvider> : children}
+          {app ? <AppProvider me={{ name: who || "Student", initials, unread, institution: instName, look }}>{children}</AppProvider> : children}
         </main>
 
         {/* Every page ends the same way: who runs it, the institution's own links (Design page), the legal pages.
@@ -156,7 +159,7 @@ export function Shell({ nav, children, current, choices, area, user, unread = 0,
         </footer>
       </div>
 
-      {app ? <AppTabBar items={nav} center={app.center} /> : <TabBar items={nav} />}
+      {app ? (look === "game" ? <GameTabBar items={nav} center={app.center} /> : <AppTabBar items={nav} center={app.center} />) : <TabBar items={nav} />}
     </div>
     </>
   );
