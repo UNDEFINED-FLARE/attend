@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { ForgetOffline } from "@/components/forget-offline";
-import { Icon } from "@/components/icons";
 import { loadBranding } from "@/lib/branding";
 import { themeStyle } from "@/lib/theme";
+import { BrandMark } from "@/components/brand-mark";
 
 // Sign-in, registration and password pages wear the institution's look when
 // we know it (/login?i=<slug>, or the last institution used on this device).
@@ -13,7 +13,7 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
   const mark = logo
     // eslint-disable-next-line @next/next/no-img-element -- the institution's logo (admin-set https URL)
     ? <img src={logo} alt="" className="size-11 shrink-0 rounded-2xl bg-white object-contain p-1" referrerPolicy="no-referrer" />
-    : <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-white/15"><Icon name="check" size={22} strokeWidth={2.6} /></span>;
+    : <BrandMark className="size-11" rounded="rounded-2xl" />;
   return (
     <div style={themeStyle(theme)} className="grid min-h-dvh font-sans lg:grid-cols-2">
       <ForgetOffline />

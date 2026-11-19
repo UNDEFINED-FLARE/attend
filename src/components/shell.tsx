@@ -10,6 +10,7 @@ import { SideNav, TabBar, type NavItem } from "@/components/nav";
 import type { RoleRow } from "@/lib/auth";
 import type { Look } from "@/lib/look";
 import { DEFAULT_THEME, themeStyle, type Theme } from "@/lib/theme";
+import { BrandMark } from "@/components/brand-mark";
 
 export type { NavItem };
 
@@ -20,7 +21,7 @@ function Logo({ name, theme, onDark }: { name: string; theme: Theme; onDark: boo
       {theme.header.logoUrl
         // eslint-disable-next-line @next/next/no-img-element -- institution logo from an admin-set https URL
         ? <img src={theme.header.logoUrl} alt="" className="size-9 shrink-0 rounded-xl bg-white object-contain p-0.5" referrerPolicy="no-referrer" />
-        : <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-brand text-brand-ink"><Icon name="check" size={20} strokeWidth={2.6} /></span>}
+        : <BrandMark className="size-9" rounded="rounded-xl" />}
       <span className="min-w-0 leading-tight">
         <span className="block truncate text-[15px] font-semibold">{title}</span>
         <span className={`block max-w-44 truncate text-xs ${onDark ? "opacity-75" : "text-muted"}`}>{theme.header.subtitle || name}</span>

@@ -5,6 +5,7 @@ import { Icon, type IconName } from "@/components/icons";
 import { LayoutModeProvider, Parts } from "@/components/layout-mode";
 import { LinkButton } from "@/components/ui";
 import { LAYOUT_COOKIE, parseLayoutMode } from "@/lib/layout-mode";
+import { BrandMark } from "@/components/brand-mark";
 
 // The public front page. Modelled on how attendance products present themselves (Edusign,
 // Top Hat, iClicker): show the real app rather than an illustration, explain the steps in
@@ -114,7 +115,7 @@ export default async function Home() {
       <header className="border-b border-line bg-surface">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
           <Link href="/" className="flex items-center gap-2 text-lg font-semibold">
-            <span className="grid size-8 place-items-center rounded-lg bg-brand text-brand-ink"><Icon name="check" size={18} strokeWidth={2.6} /></span>
+            <BrandMark className="size-8" rounded="rounded-lg" />
             UniAttend
           </Link>
           <nav className="flex items-center gap-1 sm:gap-2">
@@ -141,7 +142,7 @@ export default async function Home() {
         <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 text-sm sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
           <div className="min-w-0">
             <Link href="/" className="flex items-center gap-2 text-base font-semibold">
-              <span className="grid size-8 place-items-center rounded-lg bg-brand text-brand-ink"><Icon name="check" size={18} strokeWidth={2.6} /></span>
+              <BrandMark className="size-8" rounded="rounded-lg" />
               UniAttend
             </Link>
             <p className="mt-3 max-w-xs text-muted">Verified lecture attendance for South African universities, signed in with the university&apos;s own accounts.</p>

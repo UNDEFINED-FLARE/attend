@@ -5,6 +5,7 @@ import { CompanyMark } from "@/components/company-mark";
 import { Icon } from "@/components/icons";
 import { formatBytes, parseRelease } from "@/lib/app-release";
 import { DownloadQr } from "./download-qr";
+import { BrandMark } from "@/components/brand-mark";
 
 export const metadata = {
   title: "Get the app",
@@ -33,7 +34,7 @@ export default function GetTheApp() {
       <header className="border-b border-line bg-surface">
         <div className="mx-auto flex h-16 max-w-4xl items-center justify-between px-4">
           <Link href="/" className="flex items-center gap-2 text-lg font-semibold">
-            <span className="grid size-8 place-items-center rounded-lg bg-brand text-brand-ink"><Icon name="check" size={18} strokeWidth={2.6} /></span>
+            <BrandMark className="size-8" rounded="rounded-lg" />
             UniAttend
           </Link>
           <Link href="/login" className="rounded-lg px-3 py-2 text-sm font-medium hover:bg-bg">Sign in</Link>

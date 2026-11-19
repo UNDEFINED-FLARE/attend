@@ -6,6 +6,7 @@ import { Input, Notice, Select } from "@/components/ui";
 import { CARD_LABEL, DEFAULT_THEME, inkOn, paletteFor, themeStyle, type StudentCard, type Theme } from "@/lib/theme";
 import { discardThemeDraft, loadThemeVersion, publishTheme, saveThemeDraft, uploadLogo } from "./actions";
 import { FeatureSwitches, MenuEditor } from "./menus-features";
+import { BrandMark } from "@/components/brand-mark";
 
 type S = { error?: string; ok?: string; at?: string } | undefined;
 export type Version = { id: string; note: string | null; by: string | null; at: string };
@@ -294,7 +295,7 @@ function Preview({ t, institutionName, scheme, setScheme }: { t: Theme; institut
       {t.header.logoUrl
         // eslint-disable-next-line @next/next/no-img-element -- preview of the admin's logo link
         ? <img src={t.header.logoUrl} alt="" className="size-7 rounded-lg bg-white object-contain p-0.5" referrerPolicy="no-referrer" />
-        : <span className="grid size-7 place-items-center rounded-lg" style={{ background: c.primary, color: inkOn(c.primary) }}><Icon name="check" size={15} strokeWidth={2.6} /></span>}
+        : <BrandMark className="size-7" rounded="rounded-lg" />}
       <span className="min-w-0 leading-tight" style={{ color: ink }}>
         <span className="block truncate text-xs font-semibold">{t.header.title || "UniAttend"}</span>
         <span className="block truncate text-[10px] opacity-70">{t.header.subtitle || institutionName}</span>
@@ -407,7 +408,7 @@ function Preview({ t, institutionName, scheme, setScheme }: { t: Theme; institut
               {t.header.logoUrl
                 // eslint-disable-next-line @next/next/no-img-element -- preview of the admin's logo
                 ? <img src={t.header.logoUrl} alt="" className="size-7 rounded-lg bg-white object-contain p-0.5" referrerPolicy="no-referrer" />
-                : <span className="grid size-7 place-items-center rounded-lg bg-white/15"><Icon name="check" size={15} strokeWidth={2.6} /></span>}
+                : <BrandMark className="size-7" rounded="rounded-lg" />}
               <span className="truncate text-[11px] font-semibold">{t.header.title || institutionName}</span>
             </span>
             <span><span className="block text-sm font-semibold leading-snug">{t.login.headline}</span><span className="mt-1 line-clamp-3 block text-[9px] opacity-80">{t.login.message}</span></span>

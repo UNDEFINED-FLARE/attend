@@ -9,6 +9,7 @@ import {
   type OfflineClass, type OfflineSnapshot, type OfflineTab,
 } from "@/lib/offline-data";
 import { queued, QUEUE_EVENT } from "@/lib/offline-queue";
+import { BrandMark } from "@/components/brand-mark";
 
 const TZ = "Africa/Johannesburg";
 const dayLabel = (iso: string) => new Date(iso).toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long", timeZone: TZ });
@@ -59,7 +60,7 @@ function NoCopy({ online, from }: { online: boolean; from: string | null }) {
   return (
     <main className="grid min-h-dvh place-items-center bg-bg p-6 text-center font-sans">
       <div className="max-w-sm space-y-4">
-        <span className="mx-auto grid size-16 place-items-center rounded-2xl bg-brand text-brand-ink"><Icon name="check" size={30} strokeWidth={2.6} /></span>
+        <BrandMark className="mx-auto size-16" rounded="rounded-2xl" />
         <h1 className="text-2xl font-semibold">{online ? "Nothing saved yet" : "You're offline"}</h1>
         <p className="text-sm text-muted">There&apos;s no offline copy on this device. Open UniAttend once with signal and sign in: your timetable,
           classes, modules, venues and recent attendance are then saved here and open without signal.</p>
@@ -94,7 +95,7 @@ function Lock({ snap, onOpen }: { snap: OfflineSnapshot; onOpen: () => void }) {
     <main role="dialog" aria-modal="true" aria-labelledby="lock-title"
       className="flex min-h-dvh flex-col items-center justify-between bg-bg px-6 pb-[max(32px,env(safe-area-inset-bottom))] pt-[max(48px,env(safe-area-inset-top))] text-center font-sans text-ink">
       <div className="flex flex-col items-center gap-3">
-        <span className="grid size-16 place-items-center rounded-2xl bg-brand text-brand-ink shadow-card"><Icon name="check" size={30} strokeWidth={2.6} /></span>
+        <BrandMark className="size-16 shadow-card" rounded="rounded-2xl" />
         <p className="text-sm text-muted">{snap.institution.name}</p>
         <h1 id="lock-title" className="text-2xl font-semibold">UniAttend is locked</h1>
         <p className="text-sm text-muted">Signed in as {snap.name}</p>

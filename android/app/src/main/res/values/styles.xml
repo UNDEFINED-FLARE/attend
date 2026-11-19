@@ -18,5 +18,7 @@
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
+        <!-- Android 12+: the launcher icon (the UniAttend logo) on white. -->
+        <item name="windowSplashScreenBackground">#FFFFFF</item>
     </style>
 </resources>

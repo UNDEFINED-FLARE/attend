@@ -9,6 +9,7 @@ import { getSession, INST_COOKIE, ROLE_HOME } from "@/lib/auth";
 import { loadTheme } from "@/lib/shell-data";
 import { sastMidnight, timeOf } from "@/lib/stats";
 import { themeStyle } from "@/lib/theme";
+import { BrandMark } from "@/components/brand-mark";
 
 export const metadata = { title: "Notifications" };
 
@@ -72,7 +73,7 @@ export default async function Notifications({ searchParams }: { searchParams: Pr
             {logo
               // eslint-disable-next-line @next/next/no-img-element -- the institution's logo from an admin-set https URL
               ? <img src={logo} alt="" className="size-16 shrink-0 rounded-2xl bg-white object-contain p-1.5" referrerPolicy="no-referrer" />
-              : <span className="grid size-16 shrink-0 place-items-center rounded-2xl bg-white/15"><Icon name="check" size={32} strokeWidth={2.6} /></span>}
+              : <BrandMark className="size-16" rounded="rounded-2xl" />}
             <div className="min-w-0">
               <p className="truncate text-sm opacity-80">{instName}</p>
               <h1 className="text-[28px] font-bold leading-tight tracking-tight">Notifications</h1>

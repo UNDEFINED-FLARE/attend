@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { signOut } from "@/app/actions";
 import { Icon } from "@/components/icons";
 import { HIDDEN_KEY, LockError, markLocked, markUnlocked, readLock, shouldLock, verifyOwner } from "@/lib/app-lock";
+import { BrandMark } from "@/components/brand-mark";
 
 const MAX_TRIES = 5;
 
@@ -74,7 +75,7 @@ export function AppLock({ userId, name, institution, logo }: { userId: string; n
         {logo
           // eslint-disable-next-line @next/next/no-img-element -- the institution's logo
           ? <img src={logo} alt="" className="size-16 rounded-2xl bg-white object-contain p-1.5 shadow-card" referrerPolicy="no-referrer" />
-          : <span className="grid size-16 place-items-center rounded-2xl bg-brand text-brand-ink shadow-card"><Icon name="check" size={30} strokeWidth={2.6} /></span>}
+          : <BrandMark className="size-16 shadow-card" rounded="rounded-2xl" />}
         <p className="text-sm text-muted">{institution}</p>
         <h1 id="lock-title" className="text-2xl font-semibold">UniAttend is locked</h1>
         <p className="text-sm text-muted">Signed in as {name}</p>
